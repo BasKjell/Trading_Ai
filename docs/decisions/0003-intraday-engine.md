@@ -15,6 +15,12 @@ Der MVP-Backtest arbeitete auf Tagesbars mit fest verdrahteten Strategien. Die V
 - Ausführungsregeln: nächste Eröffnung nach dem Signal; Stops `min(Open, Stop)`; Stop in der
   Einstiegsbar gilt als ausgelöst; Liquiditätsgrenze aus der Vorbar; Teilausführungen bei Exits;
   Übernachtfinanzierung; kontrollierter Abbau nach dem Drawdown-Kill-Switch; Abschlussliquidation.
+- Nachtrag nach Review zu PR #17: Informationen werden nach Verfügbarkeit (`received_at`) verarbeitet,
+  nicht nach `bar.start`; ein Strategiekontext enthält nur Bars mit `received_at <= now`. Eine verspätet
+  eintreffende ältere Bar löst keine eigene Entscheidung aus. `Signal.earliest_execution` ist bindend.
+  Neue Einstiege werden auf der Ausführungsbar erneut geprüft (Bar nach Datenlücke, außerhalb der
+  Handelszeit, mehr als `1 + extra_delay_bars` Bars nach `earliest_execution`) und sonst verworfen.
+  Ausstiege werden dadurch nie blockiert.
 - Erstes Instrument ist der DAX (CFD-Kostenmodell), weil nur dafür 15-Minuten-Daten vorliegen.
   Die Position wird voll mit Cash gedeckt (keine Hebelnutzung trotz CFD).
 - Die bisherigen Tages-Engines bleiben für das Research-Lab bestehen.

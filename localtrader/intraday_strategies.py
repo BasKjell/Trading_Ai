@@ -18,7 +18,7 @@ B. ``MeanReversionStrategy`` – hypothesis: short-horizon deviations from a mov
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from statistics import fmean, pstdev
 from typing import Protocol
 
@@ -79,7 +79,8 @@ def _signal(name: str, ctx: StrategyContext, direction: Direction, reason: str, 
         symbol=bar.symbol,
         market=bar.market,
         signal_time=ctx.now,
-        earliest_execution=ctx.now + timedelta(microseconds=1),
+        # The next bar opens exactly at ``now``; its open is the earliest executable price.
+        earliest_execution=ctx.now,
         direction=direction,
         strength=1.0,
         reason=reason,

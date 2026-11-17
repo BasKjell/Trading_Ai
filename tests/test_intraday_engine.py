@@ -87,7 +87,7 @@ class Scripted:
                 "X",
                 Market.INDEX,
                 ctx.now,
-                ctx.now + timedelta(microseconds=1),
+                ctx.now,
                 Direction.LONG,
                 1.0,
                 "scripted entry",
@@ -99,7 +99,7 @@ class Scripted:
                 "X",
                 Market.INDEX,
                 ctx.now,
-                ctx.now + timedelta(microseconds=1),
+                ctx.now,
                 Direction.FLAT,
                 1.0,
                 "scripted exit",
@@ -134,6 +134,69 @@ class TimingTests(unittest.TestCase):
         data = bars([FLAT, (101, 101.5, 100.5, 101), (102, 102.5, 101.5, 102), FLAT])
         result = IntradayEngine(self.config, instrument(), [Scripted({0: 95.0})], extra_delay_bars=1).run({"X": data})
         self.assertEqual(result.fills[0].timestamp, data.bars[2].start)
+        self.assertAlmostEqual(result.fills[0].price, 102.0)
+
+
+@dataclass(frozen=True)
+class Recorder:
+    """Records (now, bar starts) of every context and checks that no bar is newer than ``now``."""
+
+    seen: list[tuple[datetime, list[datetime]]]
+    delay: timedelta = timedelta(0)
+    name: str = "recorder"
+
+    def parameters(self) -> dict[str, float]:
+        return {}
+
+    def evaluate(self, ctx: StrategyContext) -> Signal | None:
+        assert all(b.received_at <= ctx.now for b in ctx.bars)
+        assert all(h.received_at <= ctx.now for h in ctx.hourly)
+        self.seen.append((ctx.now, [b.start for b in ctx.bars]))
+        if self.delay and len(self.seen) == 1:
+            return Signal(
+                self.name,
+                "X",
+                Market.INDEX,
+                ctx.now,
+                ctx.now + self.delay,
+                Direction.LONG,
+                1.0,
+                "delayed entry",
+                stop_price=95.0,
+            )
+        return None
+
+
+class AvailabilityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = load_config()
+
+    def test_late_bar_is_invisible_until_it_arrives(self) -> None:
+        # Regression (PR #17 review): bar 0 is only available at 10:00, bar 1 already at 09:30.
+        data = bars([FLAT] * 4)
+        first = data.bars[0]
+        late = replace(first, received_at=first.start + timedelta(hours=1))
+        data = replace(data, bars=[late, *data.bars[1:]])
+        seen: list[tuple[datetime, list[datetime]]] = []
+        result = IntradayEngine(self.config, instrument(), [Recorder(seen)]).run({"X": data})
+        starts = [b.start for b in data.bars]
+        self.assertEqual(
+            seen,
+            [
+                (data.bars[1].received_at, [starts[1]]),
+                (data.bars[2].received_at, [starts[1], starts[2]]),
+                (data.bars[3].received_at, starts),
+            ],
+        )
+        self.assertTrue(any(d["event"] == "late_bar" for d in result.decisions))
+
+    def test_earliest_execution_is_binding(self) -> None:
+        data = bars([FLAT, FLAT, FLAT, (102.0, 102.5, 101.5, 102.0), FLAT])
+        seen: list[tuple[datetime, list[datetime]]] = []
+        strategy = Recorder(seen, delay=timedelta(minutes=20))
+        result = IntradayEngine(self.config, instrument(), [strategy]).run({"X": data})
+        # signal at 09:15, earliest 09:35 -> first eligible open is the 09:45 bar
+        self.assertEqual(result.fills[0].timestamp, data.bars[3].start)
         self.assertAlmostEqual(result.fills[0].price, 102.0)
 
 
@@ -204,6 +267,40 @@ class ExecutionTests(unittest.TestCase):
         result = IntradayEngine(self.config, instrument(), [Scripted({1: 99.0})]).run({"X": data})
         self.assertEqual(result.fills, [])
         self.assertTrue(any(d.get("reason") == "bar follows a data gap" for d in result.decisions))
+
+    def test_pending_entry_on_bar_after_gap_is_cancelled(self) -> None:
+        # Regression (PR #17 review): an entry signalled before a gap was executed on the after_gap bar.
+        full = bars([FLAT] * 4)
+        kept = [b for i, b in enumerate(full.bars) if i != 1]
+        data = replace(full, bars=kept, after_gap=frozenset({full.bars[2].start}))
+        result = IntradayEngine(self.config, instrument(), [Scripted({0: 95.0})]).run({"X": data})
+        self.assertEqual(result.fills, [])
+        cancelled = [d for d in result.decisions if d["event"] == "entry_cancelled"]
+        self.assertEqual(len(cancelled), 1)
+        self.assertEqual(cancelled[0]["reason"], "execution bar follows a data gap")
+
+    def test_exit_is_not_blocked_by_gap(self) -> None:
+        data = bars([FLAT] * 5)
+        data = replace(data, after_gap=frozenset({data.bars[3].start}))
+        result = IntradayEngine(self.config, instrument(), [Scripted({0: 95.0}, frozenset({2}))]).run({"X": data})
+        self.assertEqual([f.timestamp for f in result.fills], [data.bars[1].start, data.bars[3].start])
+        self.assertEqual(result.trades[0].exit_reason, "scripted exit")
+
+    def test_stale_entry_after_overnight_break_is_cancelled(self) -> None:
+        data = bars([FLAT] * 3)
+        late = [
+            replace(
+                b,
+                start=b.start + timedelta(days=1),
+                end=b.end + timedelta(days=1),
+                received_at=b.received_at + timedelta(days=1),
+            )
+            for b in data.bars[2:]
+        ]
+        data = replace(data, bars=data.bars[:2] + late)
+        result = IntradayEngine(self.config, instrument(), [Scripted({1: 95.0})]).run({"X": data})
+        self.assertEqual(result.fills, [])
+        self.assertTrue(any(d.get("reason") == "signal too old for entry" for d in result.decisions))
 
     def test_drawdown_kill_switch_forces_controlled_exit(self) -> None:
         config = load_config()
