@@ -30,4 +30,6 @@ Bisher lagen Anforderungen nur in den claude.ai-Projektanweisungen und einer äl
 ## Konsequenzen
 
 - Mehr Dokumentationspflege je Aufgabe; dafür ist jede Aufgabe ohne Chatverlauf fortsetzbar.
-- Integration nach `main` bleibt beim Benutzer bzw. einem ausdrücklich beauftragten Integrationsschritt.
+- Integration nach `main`: Benutzerentscheidung vom 2026-11-17 erlaubt den Merge durch einen Integrationsagenten
+  einer anderen Agentenart nach unabhängigem Review und grüner CI (AGENTS.md §2a, Spec §21). Eigene PRs nie.
+- Jede Sitzung beginnt mit dem Review offener fremder PRs (AGENTS.md §0).

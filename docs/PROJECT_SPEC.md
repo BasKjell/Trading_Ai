@@ -9,7 +9,7 @@ Umsetzungsstand: [`docs/STATUS.md`](STATUS.md). Arbeitsregeln: [`AGENTS.md`](../
 
 ---
 
-Du bist verantwortlich für die selbstständige Entwicklung eines Trading-Systems mit kontrollierter, datenbasierter Weiterentwicklung.
+Du bist verantwortlich für die selbstständige Entwicklung eines Trading-Systems mit kontrollierter, datenbasierter Weiterentwicklung. Du arbeitest gemeinsam mit anderen Entwicklern.
 
 Arbeite als erfahrener Python-Entwickler, Quant Research Engineer und Test Engineer. Implementiere das System vollständig, statt nur Architekturvorschläge oder Codegerüste zu liefern.
 
@@ -569,7 +569,7 @@ Vorgehen:
 
 Nutze beispielsweise Commit-Präfixe wie feat, fix, test, docs oder refactor.
 
-Kein automatisches Merge nach main, kein Force-Push und kein Umschreiben bestehender Historie. Branch-Schutzregeln müssen eingehalten werden.
+Kein automatisches Merge nach main, kein Force-Push und kein Umschreiben bestehender Historie. Branch-Schutzregeln müssen eingehalten werden. *(Präzisiert durch §21: Merge durch einen Integrationsagenten nach unabhängigem Review ist erlaubt.)*
 
 Fremde oder bereits vorhandene uncommittete Änderungen dürfen nicht versehentlich mitcommittet oder verworfen werden.
 
@@ -948,7 +948,7 @@ Pushe Änderungen auf den eigenen Arbeitsbranch und erstelle einen Pull Request 
 - Einschränkungen,
 - Datenbank- oder Konfigurationsänderungen.
 
-Kein automatisches Merge nach main.
+Kein automatisches Merge nach main. *(Präzisiert durch §21.)*
 
 Vor Integration:
 
@@ -1052,3 +1052,13 @@ Forschungscode darf den laufenden Produktionsdienst nicht verändern. Experiment
 - Nach zwei erfolglosen Lösungsversuchen: Keine weiteren spekulativen Änderungen. Erstelle eine Übergabe mit Fehlerreproduktion, Befunden und verworfenen Ansätzen und empfehle eine unabhängige Analyse durch ein stärkeres Modell.
 - Änderungen an Risikosteuerung, Orderausführung und statistischer Validierung benötigen unabhängig vom implementierenden Modell ein separates Review.
 - Beurteile Modelle anhand bestandener Abnahmekriterien, gefundener Fehler und Gesamtaufwand einschließlich Nacharbeit.
+
+## 21. Integration durch Agenten
+
+(Benutzerentscheidung vom 2026-11-17)
+
+- Erster Schritt jeder Sitzung ist das Review offener Pull Requests anderer Agenten (Label `needs-independent-review` oder `review`). Eigene PRs werden nicht reviewt.
+- Ein Agent darf einen PR als Integrationsagent nach main mergen, wenn: der PR von einer anderen Agentenart/Modellfamilie oder vom Benutzer stammt, ein unabhängiges Review mit Freigabe vorliegt, der aktuelle Stand von main einbezogen ist, `make check` und CI grün sind und keine offenen Blockaden, WIP-Commits oder Benutzerentscheidungen bestehen. Merge per Merge-Commit, kein Force-Push.
+- Eigene PRs werden nie selbst gemergt.
+- Integration in main ist keine Livefreigabe; §18 bleibt unverändert.
+- Die Einzelheiten stehen in AGENTS.md §0 und §2a.

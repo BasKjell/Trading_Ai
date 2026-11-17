@@ -49,7 +49,7 @@ Mit den verfügbaren Daten (DAX, 165 Handelstage) wurde **keine belastbare profi
 
 ## Nächste Ziele (Reihenfolge)
 
-1. Review und Integration von PR `dev/trading-system`.
+1. Unabhängiges Review (nicht durch Claude) und Integration von PR #17, danach PR #18 auf `main` umstellen.
 2. T-005 Orderzustandsautomat (kritisch, höhere Denkstufe, separates Review).
 3. T-008 Walk-forward/Champion-Challenger (parallel möglich; kritisch, separates Review).
 4. T-006 Paper-Betrieb, danach T-007 Dashboard, T-010 (#5) Abnahme.
