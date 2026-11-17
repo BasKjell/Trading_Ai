@@ -2,7 +2,12 @@
 
 One immutable JSON file per experiment under ``experiments/`` avoids write conflicts between agents.
 Files are created exclusively and never rewritten; corrections are new experiments that reference the
-old one. ``total_variants`` counts every tested variant across all agents so the multiple-testing burden
+old one.
+
+IDs are scoped to the task: ``EXP-T009-001`` belongs to task ``T-009``. A task is claimed by exactly one
+agent working in its own worktree (AGENTS.md §1), so two agents never draw from the same sequence and
+separate registers merge without collisions. A purely global counter would hand out the same next ID
+in every worktree that starts from the same commit. ``EXP-0001`` is the only legacy ID and stays valid. ``total_variants`` counts every tested variant across all agents so the multiple-testing burden
 stays visible.
 """
 
@@ -14,8 +19,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-ID_PATTERN = re.compile(r"^EXP-\d{4}$")
-TASK_PATTERN = re.compile(r"^T-\d{3}$")
+LEGACY_IDS = frozenset({"EXP-0001"})
+ID_PATTERN = re.compile(r"^EXP-T(\d{3})-(\d{3})$")
+TASK_PATTERN = re.compile(r"^T-(\d{3})$")
 DEFAULT_DIRECTORY = Path("experiments")
 
 
@@ -48,10 +54,15 @@ class ExperimentRecord:
     references: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
-        if not ID_PATTERN.match(self.experiment_id):
-            raise ValueError("experiment_id must look like EXP-0001")
-        if not TASK_PATTERN.match(self.task_id):
+        task = TASK_PATTERN.match(self.task_id)
+        if not task:
             raise ValueError("task_id must look like T-001")
+        if self.experiment_id not in LEGACY_IDS:
+            match = ID_PATTERN.match(self.experiment_id)
+            if not match:
+                raise ValueError("experiment_id must look like EXP-T001-001")
+            if match.group(1) != task.group(1):
+                raise ValueError("experiment_id must belong to task_id (EXP-T009-xxx for T-009)")
         if not self.variants:
             raise ValueError("at least one variant must be recorded")
         if not self.code_version or not self.data_versions:
@@ -88,9 +99,17 @@ def total_variants(records: list[ExperimentRecord]) -> int:
     return sum(len(record.variants) for record in records)
 
 
-def next_experiment_id(directory: str | Path = DEFAULT_DIRECTORY) -> str:
-    numbers = [int(p.stem.split("-")[1]) for p in Path(directory).glob("EXP-*.json")]
-    return f"EXP-{max(numbers, default=0) + 1:04d}"
+def next_experiment_id(task_id: str, directory: str | Path = DEFAULT_DIRECTORY) -> str:
+    """Next ID within ``task_id``; only the agent that claimed the task may draw from this sequence."""
+    task = TASK_PATTERN.match(task_id)
+    if not task:
+        raise ValueError("task_id must look like T-001")
+    numbers = []
+    for path in Path(directory).glob(f"EXP-T{task.group(1)}-*.json"):
+        match = ID_PATTERN.match(path.stem)
+        if match:
+            numbers.append(int(match.group(2)))
+    return f"EXP-T{task.group(1)}-{max(numbers, default=0) + 1:03d}"
 
 
 def summary(directory: str | Path = DEFAULT_DIRECTORY) -> dict[str, Any]:
@@ -99,7 +118,6 @@ def summary(directory: str | Path = DEFAULT_DIRECTORY) -> dict[str, Any]:
         "experiments": len(records),
         "total_variants_tested": total_variants(records),
         "holdout_uses": sum(1 for r in records if r.holdout_used),
-        "next_id": next_experiment_id(directory),
         "entries": [
             {
                 "id": r.experiment_id,

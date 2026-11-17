@@ -50,7 +50,7 @@ Risikodefinitionen (High-Water-Mark, Drawdown, Freigabe): Docstring von `risk.py
 |---|---|---|
 | Paper-Zustand, Audit | `state/*.json`, `state/*.jsonl` (nicht versioniert) | implementiert |
 | Research-Lab | `research_registry/research.db` (SQLite, nicht versioniert) | implementiert |
-| Experimentregister | `experiments/EXP-xxxx.json` (versioniert, unveränderlich) | getestet |
+| Experimentregister | `experiments/EXP-T<nnn>-<lfd>.json` (versioniert, unveränderlich, IDs je Aufgabe) | getestet |
 | Orders, Trades, Zustände in PostgreSQL | – | geplant (T-017, Entscheidung offen) |
 | Marktdaten Parquet | – | geplant (T-017) |
 

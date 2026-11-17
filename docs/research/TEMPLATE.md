@@ -1,7 +1,7 @@
-# EXP-xxxx – <Titel>
+# EXP-T<nnn>-<lfd> – <Titel>
 
 - **Task-ID:** T-xxx · **Agent/Modell:** … · **Datum:** …
-- **Registereintrag:** `experiments/EXP-xxxx.json`
+- **Registereintrag:** `experiments/EXP-T<nnn>-<lfd>.json`
 
 ## Vor dem Experiment (vor Einsicht in Ergebnisse festlegen)
 - **Hypothese:**
