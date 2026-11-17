@@ -1,0 +1,29 @@
+{
+  "name": "etf_trend_baseline",
+  "family": "etf_trend",
+  "market": "equity",
+  "universe": ["SPY", "QQQ"],
+  "indicators": [
+    {"alias": "fast", "kind": "sma", "window": 50, "source": "close"},
+    {"alias": "slow", "kind": "sma", "window": 200, "source": "close"},
+    {"alias": "high55", "kind": "breakout_high", "window": 55, "source": "close"},
+    {"alias": "atr20", "kind": "atr", "window": 20, "source": "close"}
+  ],
+  "entry_all": [
+    {"left": "close", "op": ">", "right": "slow"},
+    {"left": "fast", "op": ">", "right": "slow"},
+    {"left": "close", "op": ">=", "right": "high55"}
+  ],
+  "exit_any": [
+    {"left": "close", "op": "<", "right": "fast"},
+    {"left": "fast", "op": "<", "right": "slow"}
+  ],
+  "stop_atr_alias": "atr20",
+  "stop_atr_multiple": 3.0,
+  "rank_by": null,
+  "max_positions": 2,
+  "rebalance_every": 1,
+  "data_requirements": [],
+  "rationale": "Long/cash ETF trend and breakout baseline.",
+  "version": "1.0"
+}

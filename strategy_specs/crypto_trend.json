@@ -1,0 +1,29 @@
+{
+  "name": "crypto_trend_baseline",
+  "family": "crypto_trend",
+  "market": "crypto",
+  "universe": ["BTC-USD", "ETH-USD"],
+  "indicators": [
+    {"alias": "fast", "kind": "ema", "window": 50, "source": "close"},
+    {"alias": "slow", "kind": "ema", "window": 200, "source": "close"},
+    {"alias": "high55", "kind": "breakout_high", "window": 55, "source": "close"},
+    {"alias": "atr20", "kind": "atr", "window": 20, "source": "close"}
+  ],
+  "entry_all": [
+    {"left": "close", "op": ">", "right": "slow"},
+    {"left": "fast", "op": ">", "right": "slow"},
+    {"left": "close", "op": ">=", "right": "high55"}
+  ],
+  "exit_any": [
+    {"left": "close", "op": "<", "right": "fast"},
+    {"left": "fast", "op": "<", "right": "slow"}
+  ],
+  "stop_atr_alias": "atr20",
+  "stop_atr_multiple": 3.5,
+  "rank_by": null,
+  "max_positions": 2,
+  "rebalance_every": 1,
+  "data_requirements": [],
+  "rationale": "BTC/ETH spot trend-following baseline without leverage.",
+  "version": "1.0"
+}

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # CI never trades: no broker credentials, offline paper mode only.
+      TRADING_MODE: paper
+      LIVE_TRADING_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned dev tools
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Format check
+        run: make format-check
+      - name: Lint
+        run: make lint
+      - name: Type check
+        run: make typecheck
+      - name: Tests with coverage
+        run: make test-cov PY=python
+      - name: Secret scan
+        run: make secret-scan PY=python
+      - name: Config check
+        run: make config-check PY=python
+      - name: Validate workflow files
+        run: python -c "import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" .github/workflows/*.yml
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            reports/junit.xml
+            reports/coverage.xml
+          if-no-files-found: warn

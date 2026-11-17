@@ -1,0 +1,30 @@
+{
+  "name": "multi_asset_trend_baseline",
+  "family": "multi_asset_trend",
+  "market": "multi_asset",
+  "universe": ["SPY", "QQQ", "BTC-USD", "ETH-USD", "EUR-USD", "GLD", "TLT"],
+  "indicators": [
+    {"alias": "trend", "kind": "ema", "window": 150, "source": "close"},
+    {"alias": "mom90", "kind": "momentum", "window": 90, "source": "close"},
+    {"alias": "atr20", "kind": "atr", "window": 20, "source": "close"},
+    {"alias": "vol20", "kind": "volatility", "window": 20, "source": "close"}
+  ],
+  "entry_all": [
+    {"left": "close", "op": ">", "right": "trend"},
+    {"left": "mom90", "op": ">", "right": 0.0}
+  ],
+  "exit_any": [
+    {"left": "close", "op": "<", "right": "trend"},
+    {"left": "mom90", "op": "<", "right": 0.0}
+  ],
+  "stop_atr_alias": "atr20",
+  "stop_atr_multiple": 3.0,
+  "stop_mode": "trailing",
+  "stop_expression": ["close", 3.0, "atr20", "*", "-"],
+  "rank_by": "mom90",
+  "max_positions": 4,
+  "rebalance_every": 5,
+  "data_requirements": [],
+  "rationale": "Long/cash cross-asset trend ranking over available unlevered spot and ETF proxies.",
+  "version": "1.0"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "news_underreaction_shadow",
+  "family": "news_underreaction",
+  "market": "equity",
+  "universe": ["AAPL", "MSFT", "NVDA"],
+  "indicators": [
+    {"alias": "trend", "kind": "sma", "window": 50, "source": "close"},
+    {"alias": "atr20", "kind": "atr", "window": 20, "source": "close"}
+  ],
+  "entry_all": [{"left": "close", "op": ">", "right": "trend"}],
+  "exit_any": [{"left": "close", "op": "<", "right": "trend"}],
+  "stop_atr_alias": "atr20",
+  "stop_atr_multiple": 3.0,
+  "rank_by": null,
+  "max_positions": 2,
+  "rebalance_every": 5,
+  "data_requirements": ["point_in_time_news", "publication_timestamp", "event_novelty"],
+  "rationale": "Shadow-only multi-day news underreaction research.",
+  "version": "0.1-shadow"
+}

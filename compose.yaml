@@ -1,0 +1,39 @@
+services:
+  backtest:
+    build: .
+    command: ["python", "-m", "localtrader", "backtest", "--days", "1000", "--output", "reports/docker"]
+    volumes:
+      - ./reports:/app/reports
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+  tests:
+    build: .
+    command: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+  strategy-lab:
+    build: .
+    command: ["python", "-m", "localtrader", "evaluate-strategies", "--days", "900"]
+    volumes:
+      - ./research_registry:/app/research_registry
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+  paper-demo:
+    build: .
+    command: ["python", "-m", "localtrader", "paper-demo", "--state", "state/paper_state.json", "--audit", "state/audit.jsonl"]
+    volumes:
+      - ./state:/app/state
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
