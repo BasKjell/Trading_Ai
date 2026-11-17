@@ -8,8 +8,8 @@ Stand: 2026-11-17. Kennzeichnung: **geplant / implementiert / getestet / integri
 | Branch | Inhalt | Zustand |
 |---|---|---|
 | `main` | Notebook von 2021 | integriert (Altstand) |
-| `dev/trading-system` | T-001 bis T-004 (#15) | getestet, CI grün, PR offen – **wartet auf unabhängiges Review** (Risiko, Ausführung) |
-| `agent/T-009-agent-collaboration` | T-009 (#16) | getestet, PR offen (basiert auf `dev/trading-system`) |
+| `dev/trading-system` | T-001 bis T-004 (#15) | getestet, CI grün, PR #17 offen – **wartet auf unabhängiges Review** (Risiko, Ausführung) |
+| `agent/T-009-agent-collaboration` | T-009 (#16) | getestet, PR #18 offen (basiert auf `dev/trading-system`) |
 
 ## Funktionen
 
