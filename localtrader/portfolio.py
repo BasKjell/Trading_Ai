@@ -86,6 +86,13 @@ class Portfolio:
         self.cash -= amount
         self.realized_costs += amount
 
+    def receive_income(self, amount: float) -> None:
+        """Investment income such as a cash dividend (net of withholding). Unlike a deposit it is P&L,
+        so the high-water mark is not moved."""
+        if amount < 0:
+            raise ValueError("income must be non-negative")
+        self.cash += amount
+
     def deposit(self, amount: float) -> None:
         """External cash flow in. The high-water mark moves by the same amount, so flows are not P&L."""
         if amount <= 0:

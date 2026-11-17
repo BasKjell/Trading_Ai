@@ -42,6 +42,8 @@ class DataRequestSpec:
     feed: str | None
     purpose: str
     strategy_name: str
+    # Stock bars only: "all" (split/dividend adjusted, analysis) or "raw" (as traded, execution).
+    adjustment: str = "all"
 
     def __post_init__(self) -> None:
         if self.start.tzinfo is None or self.end.tzinfo is None:
@@ -63,6 +65,8 @@ class DataRequestSpec:
             "feed": self.feed,
             "purpose": self.purpose,
             "strategy_name": self.strategy_name,
+            # omitted for the default so request IDs of earlier downloads stay unchanged
+            **({"adjustment": self.adjustment} if self.adjustment != "all" else {}),
         }
 
     @classmethod
@@ -77,6 +81,7 @@ class DataRequestSpec:
             feed=str(raw["feed"]) if raw.get("feed") else None,
             purpose=str(raw["purpose"]),
             strategy_name=str(raw["strategy_name"]),
+            adjustment=str(raw.get("adjustment", "all")),
         )
 
 
@@ -87,6 +92,8 @@ class DataRequestPolicy:
     def validate(self, request: DataRequestSpec) -> DataRequestSpec:
         if request.provider != "alpaca" or request.endpoint_type not in {"stocks", "crypto"}:
             raise DataRequestError("only allowlisted Alpaca stock/crypto bar requests are supported")
+        if request.adjustment not in {"all", "raw"}:
+            raise DataRequestError("adjustment must be 'all' or 'raw'")
         if request.timeframe not in ALLOWED_TIMEFRAMES:
             raise DataRequestError(f"unsupported timeframe: {request.timeframe}")
         if not 1 <= len(request.symbols) <= 20 or len(set(request.symbols)) != len(request.symbols):
@@ -252,7 +259,7 @@ class AlpacaDatasetDownloader:
             "sort": "asc",
         }
         if request.endpoint_type == "stocks":
-            params.update({"feed": request.feed, "adjustment": "all"})
+            params.update({"feed": request.feed, "adjustment": request.adjustment})
         if page_token:
             params["page_token"] = page_token
         return params

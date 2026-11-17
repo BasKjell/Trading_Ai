@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,8 +19,9 @@ from .data_requests import (
     DataWorker,
 )
 from .domain import Market
-from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, split_holdout, synthetic_intraday
+from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, synthetic_intraday
 from .intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics, instruments_from_config
+from .intraday_fetch import output_paths, read_dividends
 from .intraday_report import run_scenarios, strategies_from_config, write_intraday_report
 from .ollama_lab import OllamaClient, OllamaStrategySearch
 from .paper import PaperSession
@@ -81,6 +83,11 @@ def _load_intraday(
     if synthetic_days:
         data = synthetic_intraday(symbol, synthetic_days, config.seed, 15000.0, spec.session)
         return config, instruments, {symbol: data}, holdout
+    holdout_start = config.raw.get("holdout", {}).get("start")
+    cutoff = None
+    if holdout_start:
+        holdout["start"] = str(holdout_start)
+        cutoff = None if use_holdout else datetime.fromisoformat(str(holdout_start))
     data = import_csv(
         CsvImportSpec(
             data_file or str(raw.get("data_file", settings["data_file"])),
@@ -90,14 +97,21 @@ def _load_intraday(
             str(raw.get("data_source", settings["data_source"])),
             str(raw.get("data_timezone", settings["data_timezone"])),
             int(settings["signal_interval_minutes"]),
+            available_until=cutoff,
         ),
         spec.session,
     )
-    start = config.raw.get("holdout", {}).get("start")
-    if start:
-        holdout["start"] = str(start)
-        if not use_holdout:
-            data, holdout["excluded_bars"] = split_holdout(data, datetime.fromisoformat(str(start)))
+    holdout["excluded_bars"] = data.manifest.quality.get("holdout_rows_withheld", 0)
+    if raw.get("corporate_actions") == "dividends_file":
+        # written by fetch-intraday next to the raw price file; missing file = fail closed
+        dividends_path = output_paths(data_file or str(raw["data_file"]))["dividends"]
+        if not dividends_path.exists():
+            raise SystemExit(f"{dividends_path} missing: run fetch-intraday --symbol {symbol}")
+        dividends = read_dividends(dividends_path)
+        if cutoff is not None:
+            # an ex-date is known from its morning on; only dates before the holdout day are kept
+            dividends = {day: v for day, v in dividends.items() if day < spec.session.local_date(cutoff)}
+        data = replace(data, dividends=dividends)
     if not data.bars:
         raise SystemExit("no bars left for the research period")
     return config, instruments, {symbol: data}, holdout
@@ -404,7 +418,9 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--start", default="2016-01-01T00:00:00+00:00")
     fetch.add_argument("--end", default=None, help="default: latest allowed time")
     fetch.add_argument("--feed", default="sip", choices=["sip", "iex"])
-    fetch.add_argument("--output", default=None, help="default: data/<SYMBOL>_15m.csv")
+    fetch.add_argument(
+        "--output", default=None, help="raw file; default data/<SYMBOL>_15m.csv (+ _adjusted, _dividends)"
+    )
     fetch.add_argument("--env", default=".env", help="local .env with the Alpaca paper key")
     fetch.set_defaults(func=run_fetch_intraday)
     paper = sub.add_parser("paper-demo")

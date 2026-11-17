@@ -3,33 +3,68 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
 from localtrader.cli import _load_intraday
+from localtrader.config import load_config
 from localtrader.domain import Bar, Market
-from localtrader.intraday_data import CsvImportSpec, import_csv, split_holdout
-from localtrader.intraday_fetch import US_REGULAR_SESSION, default_end, fetch_intraday_csv, regular_session_bars
+from localtrader.execution import CostProfile
+from localtrader.intraday_data import CsvImportSpec, DatasetManifest, ImportedDataset, SessionSpec, import_csv
+from localtrader.intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics
+from localtrader.intraday_fetch import (
+    US_REGULAR_SESSION,
+    CorporateActionError,
+    default_end,
+    derive_dividends,
+    fetch_intraday_csv,
+    output_paths,
+    read_dividends,
+    regular_session_bars,
+)
+from localtrader.intraday_strategies import StrategyContext
 
 REPO = Path(__file__).resolve().parent.parent
 
 
-def bar(symbol: str, start: datetime, price: float = 100.0) -> Bar:
+def bar(symbol: str, start: datetime, close: float = 100.5, delay: timedelta = timedelta(0)) -> Bar:
     end = start + timedelta(minutes=15)
     return Bar(
-        symbol, Market.EQUITY, "15Min", start, end, price, price + 1, price - 1, price + 0.5, 1000.0, "alpaca_sip", end
+        symbol,
+        Market.EQUITY,
+        "15Min",
+        start,
+        end,
+        close - 0.5,
+        close + 0.5,
+        close - 1,
+        close,
+        1000.0,
+        "alpaca",
+        end + delay,
     )
 
 
 class FakeDownloader:
-    def __init__(self, bars: list[Bar]) -> None:
-        self.bars = bars
+    """Returns raw bars for adjustment=raw and the same bars scaled by ``factor(day)`` for adjustment=all."""
+
+    def __init__(self, raw: list[Bar], factor: Any = lambda day: 1.0) -> None:
+        self.raw = raw
+        self.factor = factor
         self.requests: list[Any] = []
 
     def download(self, request: Any, progress: Any = None) -> tuple[list[Bar], dict[str, Any], Path]:
         self.requests.append(request)
-        return self.bars, {"request_id": "abc", "downloaded_at": "2026-11-17T00:00:00+00:00"}, Path("x")
+        if request.adjustment == "raw":
+            bars = self.raw
+        else:
+            bars = []
+            for b in self.raw:
+                f = self.factor(US_REGULAR_SESSION.local_date(b.start))
+                bars.append(replace(b, open=b.open * f, high=b.high * f, low=b.low * f, close=b.close * f))
+        return bars, {"request_id": request.adjustment, "downloaded_at": "2026-11-17T00:00:00+00:00"}, Path("x")
 
 
 # 2024-03-05 is a Tuesday; New York is UTC-5 (before the DST switch on 2024-03-10).
@@ -40,35 +75,110 @@ LAST = DAY.replace(hour=20, minute=45)  # 15:45 New York
 AFTER = DAY.replace(hour=21, minute=0)  # 16:00 New York, after-hours
 
 
-class FetchTests(unittest.TestCase):
+class SessionTests(unittest.TestCase):
     def test_only_regular_session_bars_are_kept(self) -> None:
         kept = regular_session_bars([bar("SPY", t) for t in (PRE_MARKET, OPEN, LAST, AFTER)])
         self.assertEqual([b.start for b in kept], [OPEN, LAST])
 
     def test_session_follows_daylight_saving_time(self) -> None:
-        summer_open = datetime(2024, 7, 2, 13, 30, tzinfo=UTC)  # 09:30 New York in summer
-        self.assertEqual(len(regular_session_bars([bar("SPY", summer_open)])), 1)
-        self.assertTrue(US_REGULAR_SESSION.contains(summer_open))
+        self.assertTrue(US_REGULAR_SESSION.contains(datetime(2024, 7, 2, 13, 30, tzinfo=UTC)))  # 09:30 EDT
 
-    def test_csv_round_trip_through_import_with_manifest(self) -> None:
-        source = [bar("SPY", t, 100 + i) for i, t in enumerate((PRE_MARKET, OPEN, OPEN + timedelta(minutes=15)))]
-        source.append(bar("QQQ", OPEN))  # other symbols in the response are ignored
-        downloader = FakeDownloader(source)
+    def test_early_close_ends_the_session_at_13_00(self) -> None:
+        # Regression (PR #21 review): 2026-11-27 13:15 New York was accepted although NYSE closes at 13:00.
+        self.assertFalse(US_REGULAR_SESSION.contains(datetime(2026, 11, 27, 18, 15, tzinfo=UTC)))
+        self.assertTrue(US_REGULAR_SESSION.contains(datetime(2026, 11, 27, 17, 45, tzinfo=UTC)))  # 12:45
+        self.assertFalse(US_REGULAR_SESSION.contains(datetime(2024, 12, 24, 18, 0, tzinfo=UTC)))
+        self.assertTrue(US_REGULAR_SESSION.contains(datetime(2024, 12, 23, 18, 0, tzinfo=UTC)))  # normal day
+
+    def test_days_beyond_the_known_calendar_are_not_traded(self) -> None:
+        self.assertFalse(US_REGULAR_SESSION.contains(datetime(2027, 1, 5, 15, 0, tzinfo=UTC)))
+
+    def test_config_uses_the_calendar(self) -> None:
+        from localtrader.intraday_engine import instruments_from_config
+
+        session = instruments_from_config(load_config())["SPY"].session
+        self.assertFalse(session.contains(datetime(2026, 11, 27, 18, 15, tzinfo=UTC)))
+
+
+def _days(n: int) -> list[datetime]:
+    """Opening bars of n consecutive weekdays from Monday 2024-03-04 (EST)."""
+    out: list[datetime] = []
+    day = datetime(2024, 3, 4, 14, 30, tzinfo=UTC)
+    while len(out) < n:
+        if day.weekday() < 5:
+            out.append(day)
+        day += timedelta(days=1)
+    return out
+
+
+class DividendTests(unittest.TestCase):
+    def test_dividend_is_derived_from_raw_and_adjusted_series(self) -> None:
+        starts = _days(4)
+        raw = [bar("SPY", s, 100.0) for s in starts]
+        ex_day = US_REGULAR_SESSION.local_date(starts[2])
+        # 1.00 dividend on prev close 100.0: earlier prices scaled by 0.99
+        factor = lambda day: 0.99 if day < ex_day else 1.0  # noqa: E731
+        adjusted = FakeDownloader(raw, factor).download(replace_request("all"))[0]
+        self.assertEqual(derive_dividends(raw, adjusted), {ex_day: 1.0})
+
+    def test_missing_quarters_are_reported(self) -> None:
+        from localtrader.intraday_fetch import dividend_gaps
+
+        dividends = {date(2018, 3, 16): 1.1, date(2018, 9, 21): 1.3, date(2018, 12, 21): 1.4}
+        self.assertEqual(dividend_gaps(dividends, date(2018, 1, 2), date(2019, 2, 1)), ["2018-03-16..2018-09-21"])
+
+    def test_split_is_rejected(self) -> None:
+        starts = _days(3)
+        raw = [bar("SPY", s, 100.0) for s in starts]
+        ex_day = US_REGULAR_SESSION.local_date(starts[1])
+        adjusted = FakeDownloader(raw, lambda day: 0.5 if day < ex_day else 1.0).download(replace_request("all"))[0]
+        with self.assertRaises(CorporateActionError):
+            derive_dividends(raw, adjusted)
+
+    def test_adjustment_changing_within_a_day_is_rejected(self) -> None:
+        raw = [bar("SPY", OPEN, 100.0), bar("SPY", OPEN + timedelta(minutes=15), 100.0)]
+        adjusted = [raw[0], replace(raw[1], close=99.0)]
+        with self.assertRaises(CorporateActionError):
+            derive_dividends(raw, adjusted)
+
+
+def replace_request(adjustment: str) -> Any:
+    class R:
+        pass
+
+    request = R()
+    request.adjustment = adjustment  # type: ignore[attr-defined]
+    return request
+
+
+class FetchTests(unittest.TestCase):
+    def test_raw_adjusted_and_dividends_are_written_separately(self) -> None:
+        starts = _days(3)
+        raw = [bar("SPY", s, 100.0 + i) for i, s in enumerate(starts)]
+        raw.insert(0, bar("SPY", starts[0] - timedelta(hours=1)))  # pre-market, dropped
+        raw.append(bar("QQQ", starts[0]))  # other symbol, ignored
+        ex_day = US_REGULAR_SESSION.local_date(starts[2])
+        downloader = FakeDownloader(raw, lambda day: 0.99 if day < ex_day else 1.0)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "SPY_15m.csv"
-            summary = fetch_intraday_csv(downloader, "SPY", DAY, DAY + timedelta(days=1), path)
-            self.assertEqual(downloader.requests[0].feed, "sip")
-            self.assertEqual(downloader.requests[0].timeframe, "15Min")
-            self.assertEqual(summary["bars_regular_session"], 2)
-            manifest = json.loads(Path(str(path) + ".manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["csv_sha256"], summary["csv_sha256"])
+            summary = fetch_intraday_csv(downloader, "SPY", starts[0], starts[-1] + timedelta(days=1), path)
+            paths = output_paths(path)
+            self.assertEqual([r.adjustment for r in downloader.requests], ["raw", "all"])
+            self.assertEqual(summary["bars_regular_session"], 3)
+            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(manifest["files"]["raw"]["sha256"], summary["files"]["raw"]["sha256"])
             data = import_csv(
-                CsvImportSpec(str(path), "SPY", Market.ETF, "test", "alpaca_sip", "UTC"), US_REGULAR_SESSION
+                CsvImportSpec(str(path), "SPY", Market.ETF, "t", "alpaca_sip_raw", "UTC"), US_REGULAR_SESSION
             )
-        self.assertEqual([b.start for b in data.bars], [OPEN, OPEN + timedelta(minutes=15)])
-        self.assertEqual([b.open for b in data.bars], [101.0, 102.0])
+            adjusted = import_csv(
+                CsvImportSpec(str(paths["adjusted"]), "SPY", Market.ETF, "t", "alpaca_sip_all", "UTC"),
+                US_REGULAR_SESSION,
+            )
+            dividends = read_dividends(paths["dividends"])
+        self.assertEqual([b.close for b in data.bars], [100.0, 101.0, 102.0])  # as traded
+        self.assertAlmostEqual(adjusted.bars[0].close, 99.0)
+        self.assertEqual(dividends, {ex_day: 1.01})
         self.assertEqual(data.bars[0].received_at, data.bars[0].end)
-        self.assertEqual(data.manifest.quality["rejected"], {})
 
     def test_default_end_is_old_enough_and_aligned(self) -> None:
         now = datetime(2026, 11, 17, 19, 52, 13, tzinfo=UTC)
@@ -77,38 +187,109 @@ class FetchTests(unittest.TestCase):
         self.assertEqual((end.minute % 15, end.second, end.microsecond), (0, 0, 0))
 
 
-class HoldoutTests(unittest.TestCase):
-    def _csv(self, tmp: str, starts: list[datetime]) -> Path:
-        path = Path(tmp) / "SPY_15m.csv"
-        rows = ["timestamp,open,high,low,close,volume"]
-        rows += [f"{s.isoformat()},100,101,99,100.5,1000" for s in starts]
-        path.write_text("\n".join(rows) + "\n", encoding="utf-8")
-        return path
+def _csv(tmp: str, rows: list[tuple[datetime, float]]) -> Path:
+    path = Path(tmp) / "SPY_15m.csv"
+    lines = ["timestamp,open,high,low,close,volume"]
+    lines += [f"{s.isoformat()},{p},{p + 1},{p - 1},{p},1000" for s, p in rows]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
-    def test_split_removes_holdout_bars_and_their_gap_marks(self) -> None:
+
+class HoldoutTests(unittest.TestCase):
+    def _import(self, path: Path, cutoff: datetime | None, delay: int = 0) -> ImportedDataset:
+        return import_csv(
+            CsvImportSpec(
+                str(path), "SPY", Market.ETF, "t", "s", "UTC", availability_delay_seconds=delay, available_until=cutoff
+            ),
+            US_REGULAR_SESSION,
+        )
+
+    def test_holdout_prices_do_not_reach_research_metadata(self) -> None:
+        # Regression (PR #21 review): a jump inside the holdout appeared in quality.jumps of research reports.
+        before = datetime(2025, 10, 31, 14, 30, tzinfo=UTC)
+        inside = datetime(2025, 11, 3, 14, 30, tzinfo=UTC)
+        cutoff = datetime(2025, 11, 1, tzinfo=UTC)
         with tempfile.TemporaryDirectory() as tmp:
-            starts = [OPEN, OPEN + timedelta(minutes=15), OPEN + timedelta(minutes=45)]
-            data = import_csv(
-                CsvImportSpec(str(self._csv(tmp, starts)), "SPY", Market.ETF, "t", "s", "UTC"), US_REGULAR_SESSION
-            )
-        self.assertEqual(data.after_gap, frozenset({starts[2]}))
-        research, removed = split_holdout(data, starts[2])
-        self.assertEqual(removed, 1)
-        self.assertEqual([b.start for b in research.bars], starts[:2])
-        self.assertEqual(research.after_gap, frozenset())
-        with self.assertRaises(ValueError):
-            split_holdout(data, datetime(2024, 1, 1))
+            calm = self._import(_csv(tmp, [(before, 100.0), (inside, 100.0)]), cutoff)
+            jump = self._import(_csv(tmp, [(before, 100.0), (inside, 200.0)]), cutoff)
+        self.assertEqual([b.start for b in jump.bars], [before])
+        self.assertEqual(jump.manifest.quality["holdout_rows_withheld"], 1)
+        self.assertEqual(jump.manifest.quality["jumps"], [])
+        self.assertEqual(jump.manifest.quality["last_bar"], before.isoformat())
+        self.assertEqual(jump.manifest.data_version, calm.manifest.data_version)
+        self.assertEqual(jump.manifest.quality, calm.manifest.quality)
+
+    def test_bar_straddling_the_cutoff_is_withheld(self) -> None:
+        # Regression (PR #21 review): a 14:30-14:45 bar stayed in research with cutoff 14:37.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _csv(tmp, [(OPEN, 100.0), (OPEN + timedelta(minutes=15), 100.0)])
+            data = self._import(path, OPEN + timedelta(minutes=7))
+            self.assertEqual(data.bars, [])
+            exact = self._import(path, OPEN + timedelta(minutes=15))
+            self.assertEqual([b.start for b in exact.bars], [OPEN])
+            delayed = self._import(path, OPEN + timedelta(minutes=15), delay=60)  # available 14:46
+            self.assertEqual(delayed.bars, [])
+
+    def test_naive_cutoff_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
+            self._import(_csv(tmp, [(OPEN, 100.0)]), datetime(2025, 11, 1))
 
     def test_research_runs_exclude_the_configured_holdout(self) -> None:
         before = datetime(2025, 10, 31, 14, 30, tzinfo=UTC)
         inside = datetime(2025, 11, 3, 14, 30, tzinfo=UTC)
         with tempfile.TemporaryDirectory() as tmp:
-            path = str(self._csv(tmp, [before, inside]))
+            path = str(_csv(tmp, [(before, 100.0), (inside, 100.0)]))
+            dividends = Path(tmp) / "SPY_dividends.csv"
+            dividends.write_text("ex_date,amount\n2025-09-22,1.5\n2025-12-22,1.6\n", encoding="utf-8")
             config = str(REPO / "config" / "default.toml")
             _, _, datasets, holdout = _load_intraday(config, path, None, "SPY")
             self.assertEqual([b.start for b in datasets["SPY"].bars], [before])
             self.assertEqual(holdout["excluded_bars"], 1)
             self.assertFalse(holdout["used"])
+            self.assertEqual(datasets["SPY"].dividends, {date(2025, 9, 22): 1.5})  # holdout dividend withheld
+            dividends.unlink()
+            with self.assertRaises(SystemExit):  # missing corporate actions: fail closed
+                _load_intraday(config, path, None, "SPY")
+            dividends.write_text("ex_date,amount\n2025-09-22,1.5\n2025-12-22,1.6\n", encoding="utf-8")
             _, _, datasets, holdout = _load_intraday(config, path, None, "SPY", use_holdout=True)
             self.assertEqual(len(datasets["SPY"].bars), 2)
             self.assertTrue(holdout["used"])
+
+
+SESSION = SessionSpec("UTC", time(0, 0), time(23, 59))
+
+
+class HoldThrough:
+    name = "hold"
+
+    def parameters(self) -> dict[str, float]:
+        return {}
+
+    def evaluate(self, ctx: StrategyContext) -> Any:
+        from localtrader.domain import Direction, Signal
+
+        if not ctx.in_position and len(ctx.bars) == 1:
+            return Signal("hold", "X", Market.ETF, ctx.now, ctx.now, Direction.LONG, 1.0, "hold", stop_price=95.0)
+        return None
+
+
+class DividendBookingTests(unittest.TestCase):
+    def test_dividend_is_credited_net_of_withholding_and_in_the_benchmark(self) -> None:
+        config = load_config()
+        spec = InstrumentSpec("X", Market.ETF, "t", "USD", SESSION, CostProfile(0, 0, 0, 0), 0.001, 0.0, 0.15)
+        starts = [datetime(2024, 3, 4, 10, tzinfo=UTC) + timedelta(minutes=15 * i) for i in range(3)]
+        starts += [datetime(2024, 3, 5, 10, tzinfo=UTC) + timedelta(minutes=15 * i) for i in range(3)]
+        bars_ = [replace(bar("X", s, 100.0), market=Market.ETF) for s in starts]
+        manifest = DatasetManifest("X", "etf", "t", "unit", "UTC", 15, "v", "v", False, {})
+        ex_day = date(2024, 3, 5)
+        with_div = ImportedDataset(bars_, manifest, frozenset(), {ex_day: 2.0})
+        without = ImportedDataset(bars_, manifest, frozenset())
+        a = IntradayEngine(config, {"X": spec}, [HoldThrough()]).run({"X": with_div})
+        b = IntradayEngine(config, {"X": spec}, [HoldThrough()]).run({"X": without})
+        quantity = a.fills[0].quantity
+        self.assertAlmostEqual(a.dividend_income, quantity * 2.0 * 0.85)
+        self.assertAlmostEqual(a.equity[-1].equity - b.equity[-1].equity, quantity * 2.0 * 0.85)
+        self.assertAlmostEqual(compute_metrics(a)["dividends_received"], a.dividend_income)
+        bh_with = buy_and_hold({"X": with_div}, {"X": spec}, config)["buy_and_hold_total_return"]
+        bh_without = buy_and_hold({"X": without}, {"X": spec}, config)["buy_and_hold_total_return"]
+        self.assertGreater(bh_with, bh_without)

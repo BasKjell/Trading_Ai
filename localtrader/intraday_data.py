@@ -42,6 +42,9 @@ class CsvImportSpec:
     # Minimum delay between bar end and availability to the strategy.
     availability_delay_seconds: int = 0
     jump_threshold: float = 0.03
+    # Holdout: only bars completely available (received_at) at or before this moment are imported.
+    # Later rows are dropped before any quality check, so no holdout price reaches the manifest.
+    available_until: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,10 +54,21 @@ class SessionSpec:
     timezone: str
     start: time
     end: time
+    # Optional exchange calendar: days that close early, and the last day the calendar is known for.
+    early_closes: frozenset[date] = frozenset()
+    early_close: time | None = None
+    calendar_until: date | None = None
+
+    def close_on(self, day: date) -> time:
+        if self.early_close is not None and day in self.early_closes:
+            return self.early_close
+        return self.end
 
     def contains(self, moment: datetime) -> bool:
         local = moment.astimezone(ZoneInfo(self.timezone))
-        return local.weekday() < 5 and self.start <= local.time() < self.end
+        if self.calendar_until is not None and local.date() > self.calendar_until:
+            return False  # unknown calendar: fail closed
+        return local.weekday() < 5 and self.start <= local.time() < self.close_on(local.date())
 
     def local_date(self, moment: datetime) -> date:
         return moment.astimezone(ZoneInfo(self.timezone)).date()
@@ -70,6 +84,8 @@ class QualityReport:
     jumps: list[str] = field(default_factory=list)
     first_bar: str | None = None
     last_bar: str | None = None
+    # Rows withheld for the holdout. Only the count is recorded, never prices or timestamps.
+    holdout_rows_withheld: int = 0
 
     def reject(self, reason: str) -> None:
         self.rejected[reason] = self.rejected.get(reason, 0) + 1
@@ -98,6 +114,8 @@ class ImportedDataset:
     manifest: DatasetManifest
     # Start times (UTC) of bars that directly follow an unexpected gap inside a session.
     after_gap: frozenset[datetime]
+    # Cash dividend per share by ex-date (exchange-local date), booked on held positions.
+    dividends: dict[date, float] = field(default_factory=dict)
 
 
 def _parse_timestamp(row: dict[str, str], zone: ZoneInfo) -> datetime:
@@ -115,6 +133,8 @@ def _file_sha256(path: Path) -> str:
 
 
 def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> ImportedDataset:
+    if spec.available_until is not None and spec.available_until.tzinfo is None:
+        raise ValueError("available_until must be timezone-aware")
     path = Path(spec.path)
     zone = ZoneInfo(spec.source_timezone)
     step = timedelta(minutes=spec.timeframe_minutes)
@@ -128,6 +148,15 @@ def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> Impor
             row = {key.strip().lower(): (value or "").strip() for key, value in raw.items() if key}
             try:
                 start = _parse_timestamp(row, zone)
+            except (KeyError, ValueError):
+                report.reject("unparseable")
+                continue
+            if spec.available_until is not None and (
+                start + step + timedelta(seconds=spec.availability_delay_seconds) > spec.available_until
+            ):
+                report.holdout_rows_withheld += 1
+                continue
+            try:
                 o, h, low, c = (float(row[k]) for k in ("open", "high", "low", "close"))
                 volume = float(row.get("volume") or 0.0)
             except (KeyError, ValueError):
@@ -321,13 +350,3 @@ def synthetic_intraday(
         asdict(QualityReport(rows_read=len(bars), bars_accepted=len(bars))),
     )
     return ImportedDataset(bars, manifest, frozenset())
-
-
-def split_holdout(data: ImportedDataset, holdout_start: datetime) -> tuple[ImportedDataset, int]:
-    """Remove every bar starting at/after ``holdout_start``; returns the research part and the removed count."""
-    require = holdout_start.tzinfo is not None
-    if not require:
-        raise ValueError("holdout_start must be timezone-aware")
-    kept = [bar for bar in data.bars if bar.start < holdout_start]
-    after_gap = frozenset(moment for moment in data.after_gap if moment < holdout_start)
-    return ImportedDataset(kept, data.manifest, after_gap), len(data.bars) - len(kept)
