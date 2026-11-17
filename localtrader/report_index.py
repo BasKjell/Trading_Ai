@@ -70,22 +70,45 @@ def experiments_overview(directory: str | Path = "experiments") -> dict[str, Any
     }
 
 
+def _field(raw: dict[str, Any], key: str, kind: type, default: Any) -> Any:
+    """Optional field of a given JSON type; a present value of another type makes the file invalid."""
+    value = raw.get(key)
+    if value is None:
+        return default
+    if not isinstance(value, kind):
+        raise ValueError(f"{key} must be a JSON {kind.__name__}")
+    return value
+
+
+def _number(value: Any, key: str) -> Any:
+    if value is None or isinstance(value, bool):
+        return value if value is None else None
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, list) and all(isinstance(item, (int, float)) for item in value):
+        return value
+    raise ValueError(f"metrics.{key} must be numeric")
+
+
 def _backtest_entry(name: str, raw: dict[str, Any]) -> dict[str, Any]:
-    metrics = raw.get("metrics", {})
-    datasets = raw.get("datasets") or []
-    holdout = raw.get("holdout") or {}
+    metrics = _field(raw, "metrics", dict, {})
+    datasets = _field(raw, "datasets", list, [])
+    if not all(isinstance(item, dict) for item in datasets):
+        raise ValueError("datasets must be a list of objects")
+    holdout = _field(raw, "holdout", dict, {})
+    benchmark = _field(raw, "benchmark", dict, {})
     return {
         "name": name,
         "kind": "backtest",
-        "symbols": [d.get("symbol") for d in datasets if isinstance(d, dict)],
-        "synthetic": any(bool(d.get("synthetic")) for d in datasets if isinstance(d, dict)),
-        "strategies": sorted((raw.get("parameters") or {}).keys()),
-        "settings": raw.get("settings") or {},
-        "metrics": {key: metrics.get(key) for key in METRIC_KEYS},
-        "benchmark": raw.get("benchmark") or {},
+        "symbols": [str(d.get("symbol")) for d in datasets],
+        "synthetic": any(bool(d.get("synthetic")) for d in datasets),
+        "strategies": sorted(str(key) for key in _field(raw, "parameters", dict, {})),
+        "settings": _field(raw, "settings", dict, {}),
+        "metrics": {key: _number(metrics.get(key), key) for key in METRIC_KEYS},
+        "benchmark": {key: _number(value, key) for key, value in benchmark.items()},
         "holdout_used": bool(holdout.get("used")),
         "holdout_start": holdout.get("start"),
-        "warnings": raw.get("warnings") or [],
+        "warnings": [str(item) for item in _field(raw, "warnings", list, [])],
     }
 
 
@@ -130,7 +153,7 @@ def reports_overview(root: str | Path = "reports") -> dict[str, Any]:
                 if not isinstance(raw, dict):
                     raise ValueError("not a JSON object")
                 entry = build(directory.name, raw)
-            except (OSError, ValueError) as error:
+            except (OSError, ValueError, TypeError, AttributeError) as error:  # one bad file never hides the rest
                 errors.append(f"{directory.name}/{filename}: {str(error)[:120]}")
                 continue
             entry["modified"] = file.stat().st_mtime

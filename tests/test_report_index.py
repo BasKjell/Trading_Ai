@@ -61,6 +61,16 @@ def write_reports(root: Path) -> None:
         ),
         encoding="utf-8",
     )
+    for name, content in (
+        ("null_metrics", {"metrics": None}),  # null is treated as missing
+        ("bad_metrics", {"metrics": [1, 2]}),
+        ("bad_datasets", {"datasets": "SPY"}),
+        ("bad_holdout", {"holdout": True}),
+        ("bad_parameters", {"parameters": ["x"]}),
+        ("bad_number", {"metrics": {"total_return": "high"}}),
+    ):
+        (root / name).mkdir()
+        (root / name / "summary.json").write_text(json.dumps(content), encoding="utf-8")
     (root / "broken").mkdir()
     (root / "broken" / "summary.json").write_text("{not json", encoding="utf-8")
 
@@ -92,7 +102,9 @@ class ReportIndexTests(unittest.TestCase):
         self.assertTrue(stress["holdout_used"])  # a holdout run is flagged, never hidden
         self.assertEqual(stress["phases"], ["phase_1_2016-01-04_2019-04-12"])
         self.assertNotIn("holdout", stress["scenarios"])
-        self.assertEqual(len(overview["errors"]), 1)
+        # Regression (PR #24 review): wrongly typed files are listed as errors, healthy reports still shown
+        self.assertEqual(len(overview["errors"]), 6)
+        self.assertIn("null_metrics", kinds)
         json.dumps(overview, allow_nan=False)
 
 
@@ -122,4 +134,5 @@ class ReportEndpointTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
         self.assertEqual(payload["experiments"]["experiments"], 1)
-        self.assertEqual(len(payload["intraday"]["reports"]), 2)
+        self.assertEqual(len(payload["intraday"]["reports"]), 3)
+        self.assertEqual(len(payload["intraday"]["errors"]), 6)
