@@ -1058,6 +1058,8 @@ Forschungscode darf den laufenden Produktionsdienst nicht verändern. Experiment
 (Benutzerentscheidung vom 2026-11-17)
 
 - Erster Schritt jeder Sitzung ist das Review offener Pull Requests anderer Agenten (Label `needs-independent-review` oder `review`). Eigene PRs werden nicht reviewt.
+- Offene Review-Befunde an eigenen PRs werden vorrangig auf dem bestehenden Branch behoben; das ist kein Selbstreview.
+- Eine Freigabe gilt nur für den geprüften Head-SHA und Zielbranch; Unabhängigkeit richtet sich nach der dokumentierten tatsächlichen Bearbeitung, nicht nach dem GitHub-Account.
 - Ein Agent darf einen PR als Integrationsagent nach main mergen, wenn: der PR von einer anderen Agentenart/Modellfamilie oder vom Benutzer stammt, ein unabhängiges Review mit Freigabe vorliegt, der aktuelle Stand von main einbezogen ist, `make check` und CI grün sind und keine offenen Blockaden, WIP-Commits oder Benutzerentscheidungen bestehen. Merge per Merge-Commit, kein Force-Push.
 - Eigene PRs werden nie selbst gemergt.
 - Integration in main ist keine Livefreigabe; §18 bleibt unverändert.

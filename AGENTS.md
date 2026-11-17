@@ -8,17 +8,36 @@ klären, nicht stillschweigend interpretieren.
 ## 0. Erster Schritt jeder Sitzung: offene Reviews
 
 Vor jeder neuen Aufgabe:
-1. Offene Pull Requests mit Label `needs-independent-review` oder `review` abrufen
-   (`gh api repos/BasKjell/Trading_Ai/pulls`).
-2. Eigene PRs überspringen: PRs, deren Feld „Agent" in der Beschreibung oder deren Co-Authored-By-Zeilen
-   dieselbe Agentenart/Modellfamilie nennen (z. B. Claude reviewt keine Claude-PRs, Codex keine Codex-PRs).
+1. **Alle** offenen Pull Requests abrufen, samt Reviews, Review-Kommentaren und PR-Kommentaren
+   (`gh api repos/BasKjell/Trading_Ai/pulls`, `…/pulls/<n>/reviews`, `…/pulls/<n>/comments`,
+   `…/issues/<n>/comments`). Fehlt `gh` oder ist es nicht angemeldet, lesend über die REST-API
+   (`curl https://api.github.com/repos/BasKjell/Trading_Ai/...`) und dem Benutzer melden, dass
+   Schreibaktionen (Kommentare, Labels, Reviews, Push) nicht möglich sind.
+2. **Eigene PRs** (gleiche Agentenart/Modellfamilie laut Feld „Agent" bzw. Co-Authored-By): nicht
+   reviewen, aber auf Befunde anderer prüfen. Liegt ein Review mit „Änderungen nötig" oder ein
+   unbeantworteter Befund vor, hat dessen Behebung Vorrang vor neuen Aufgaben: auf dem bestehenden
+   Branch mit Regressionstests beheben, im PR auf jeden Befund antworten (behoben in `<SHA>` / begründet
+   abgelehnt) und erneutes Review anfordern. Das ist Fehlerbehebung, kein Selbstreview. Erst wenn eigene
+   PRs keine offenen Befunde haben, gilt §0 für sie als erledigt.
 3. Fremde PRs reviewen: Code und Tests lesen, `make check` im eigenen Worktree ausführen, Look-ahead,
    Kosten, Risikogrenzen, Orderlogik und Validierung gezielt prüfen. Ergebnis als PR-Review mit klarer
    Empfehlung (freigeben / Änderungen nötig) und gefundenen Fehlern; Fehler in
    `docs/agents/MODEL_EVALUATION.md` beim verursachenden Eintrag nachtragen.
 4. Bei Freigabe als Integrationsagent mergen (Abschnitt 2a). Sonst Label `review` belassen und Befunde
    im PR dokumentieren.
-5. Dem Benutzer am Sitzungsende melden, welche PRs reviewt, gemergt oder zurückgewiesen wurden.
+5. Dem Benutzer am Sitzungsende melden, welche PRs reviewt, gemergt, zurückgewiesen oder (eigene)
+   nach Befunden korrigiert wurden.
+
+**Unabhängigkeit und Form des Reviews**
+- Herkunft und Unabhängigkeit richten sich nach der dokumentierten tatsächlichen Bearbeitung (Feld
+  „Agent", Co-Authored-By, Handoff), nicht nach dem GitHub-Autor: Alle Agenten nutzen denselben
+  GitHub-Account.
+- Weil derselbe Account keinen eigenen PR formal freigeben kann, wird ein Agentenreview als
+  `COMMENT`-Review abgegeben, das beginnt mit `<Agent>: unabhängiges Review`, den geprüften
+  **Head-SHA** und Zielbranch nennt und mit „Empfehlung: FREIGEBEN" oder „Empfehlung: ÄNDERUNGEN NÖTIG"
+  endet. Vorhandene GitHub-Pflicht-Approvals und Branch-Schutzregeln bleiben unverändert zu erfüllen.
+- Eine Freigabe gilt nur für den genannten Head-SHA und Zielbranch. Nach jedem neuen Commit, Rebase
+  oder Umstellen des Zielbranches ist sie verfallen; Review der Änderungen und CI sind erneut nötig.
 
 ## 1. Einstieg (vor jeder Änderung)
 
@@ -65,11 +84,16 @@ Bedingungen erfüllt sind:
    Validierung zwingend; sonst durch den mergenden Agenten selbst).
 3. Der PR enthält den aktuellen Stand von `main`; Konflikte sind fachlich gelöst (nie pauschal
    ours/theirs); `make check` lokal und die CI des PRs sind grün.
+3a. Die Freigabe nennt genau den aktuellen Head-SHA des PRs und `main` als Ziel. Gemergt wird mit
+   erwartetem Head (`gh pr merge <n> --merge --match-head-commit <SHA>` bzw. REST-Feld `sha`).
 4. Keine offenen Blockaden, keine WIP-Commits, keine ungeklärten Benutzerentscheidungen im PR.
 5. Merge per Merge-Commit (kein Squash/Rebase der fremden Historie), kein Force-Push.
 
-Danach im selben Integrationsschritt: `changelog.d/T-xxx.md` in `CHANGELOG.md` übernehmen und löschen,
-`docs/STATUS.md` auf „integriert" setzen, Issue auf `done`, abhängige PRs auf `main` umstellen.
+Vor der abschließenden Freigabe nimmt der PR-Autor den Integrationsstand in den PR auf:
+`changelog.d/T-xxx.md` in `CHANGELOG.md` übernommen und gelöscht, `docs/STATUS.md` mit „integriert
+(PR #n)". Der Reviewer prüft genau diesen Stand. **Keine ungeprüften Direktänderungen an `main`.**
+Nach dem Merge nur noch außerhalb von Git: Issue auf `done`, abhängige PRs auf `main` umstellen (deren
+Freigaben verfallen damit, siehe §0).
 Integration in `main` ist **keine Livefreigabe** (Spec §18).
 
 ## 3. Modellwahl, Denkstufe und Eskalation
@@ -93,10 +117,13 @@ Integration in `main` ist **keine Livefreigabe** (Spec §18).
 
 ## 4. Forschung
 
-- Vor jedem Experiment `docs/research/EXP-xxxx.md` (Vorlage `docs/research/TEMPLATE.md`): Hypothese,
+- Experiment-IDs sind aufgabenbezogen: `EXP-T<nnn>-<lfd>` (z. B. `EXP-T009-001` für T-009), nächste ID
+  mit `next_experiment_id("T-009")`. Nur der Agent, der die Aufgabe beansprucht hat, vergibt IDs dieser
+  Aufgabe; so kollidieren getrennte Worktrees nicht. `EXP-0001` ist die einzige Alt-ID.
+- Vor jedem Experiment `docs/research/EXP-T<nnn>-<lfd>.md` (Vorlage `docs/research/TEMPLATE.md`): Hypothese,
   Plausibilität, Unterschied zur bestehenden Methode, Daten und Verfügbarkeit, Vergleichsmodell,
   Parameterraum, Bewertungs-/Abbruchkriterien, Budget. Ohne Budget nur lokale Experimente.
-- Ergebnisse als unveränderliche Datei im Experimentregister `experiments/EXP-xxxx.json`
+- Ergebnisse als unveränderliche Datei im Experimentregister `experiments/EXP-T<nnn>-<lfd>.json`
   (`localtrader/experiment_registry.py`). Alle Varianten inkl. verworfener erfassen; die Gesamtzahl der
   Versuche aller Agenten (`python3 -m localtrader experiments`) bei der Bewertung berücksichtigen.
 - Der finale unabhängige Testzeitraum wird zentral kontrolliert; Forschungsagenten werten ihn nicht aus.
