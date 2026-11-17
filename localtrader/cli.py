@@ -125,6 +125,21 @@ def run_intraday_stress(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_fetch_fx(args: argparse.Namespace) -> int:
+    from datetime import date
+
+    from .fx_rates import ECB_URL, fetch_ecb_csv, parse_ecb_csv, write_fx_file
+
+    start = date.fromisoformat(args.start)
+    end = date.fromisoformat(args.end) if args.end else datetime.now(UTC).date()
+    series, report = parse_ecb_csv(fetch_ecb_csv(start, end))
+    if not series:
+        raise SystemExit("ECB returned no usable rates")
+    manifest = write_fx_file(series, args.output, report, ECB_URL)
+    print(json.dumps(manifest, indent=2))
+    return 0
+
+
 def run_paper(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     session = PaperSession(config, args.state, args.audit)
@@ -349,6 +364,11 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--spread-multiplier", type=float, default=1.0)
             command.add_argument("--delay-bars", type=int, default=0)
         command.set_defaults(func=func)
+    fx = sub.add_parser("fetch-fx", help="download ECB EUR/USD reference rates into data/")
+    fx.add_argument("--start", default="2015-12-01")
+    fx.add_argument("--end", default=None, help="default: today")
+    fx.add_argument("--output", default="data/EURUSD_ecb.csv")
+    fx.set_defaults(func=run_fetch_fx)
     paper = sub.add_parser("paper-demo")
     paper.add_argument("--state", default="state/paper_state.json")
     paper.add_argument("--audit", default="state/audit.jsonl")
