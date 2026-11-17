@@ -18,7 +18,7 @@ from .data_requests import (
     DataWorker,
 )
 from .domain import Market
-from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, synthetic_intraday
+from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, split_holdout, synthetic_intraday
 from .intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics, instruments_from_config
 from .intraday_report import run_scenarios, strategies_from_config, write_intraday_report
 from .ollama_lab import OllamaClient, OllamaStrategySearch
@@ -63,30 +63,44 @@ def run_backtest(args: argparse.Namespace) -> int:
 
 
 def _load_intraday(
-    config_path: str, data_file: str | None, synthetic_days: int | None
-) -> tuple[AppConfig, dict[str, InstrumentSpec], dict[str, ImportedDataset]]:
-
+    config_path: str,
+    data_file: str | None,
+    synthetic_days: int | None,
+    symbol: str | None = None,
+    use_holdout: bool = False,
+) -> tuple[AppConfig, dict[str, InstrumentSpec], dict[str, ImportedDataset], dict[str, object]]:
     config = load_config(config_path)
     instruments = instruments_from_config(config)
     settings = config.raw["intraday"]
-    symbol = str(settings["data_symbol"])
+    symbol = symbol or str(settings["data_symbol"])
+    if symbol not in instruments:
+        raise SystemExit(f"no [instruments.{symbol}] in the config")
     spec = instruments[symbol]
+    raw = config.raw["instruments"][symbol]
+    holdout: dict[str, object] = {"start": None, "excluded_bars": 0, "used": use_holdout}
     if synthetic_days:
         data = synthetic_intraday(symbol, synthetic_days, config.seed, 15000.0, spec.session)
-    else:
-        data = import_csv(
-            CsvImportSpec(
-                data_file or str(settings["data_file"]),
-                symbol,
-                spec.market,
-                spec.venue,
-                str(settings["data_source"]),
-                str(settings["data_timezone"]),
-                int(settings["signal_interval_minutes"]),
-            ),
-            spec.session,
-        )
-    return config, instruments, {symbol: data}
+        return config, instruments, {symbol: data}, holdout
+    data = import_csv(
+        CsvImportSpec(
+            data_file or str(raw.get("data_file", settings["data_file"])),
+            symbol,
+            spec.market,
+            spec.venue,
+            str(raw.get("data_source", settings["data_source"])),
+            str(raw.get("data_timezone", settings["data_timezone"])),
+            int(settings["signal_interval_minutes"]),
+        ),
+        spec.session,
+    )
+    start = config.raw.get("holdout", {}).get("start")
+    if start:
+        holdout["start"] = str(start)
+        if not use_holdout:
+            data, holdout["excluded_bars"] = split_holdout(data, datetime.fromisoformat(str(start)))
+    if not data.bars:
+        raise SystemExit("no bars left for the research period")
+    return config, instruments, {symbol: data}, holdout
 
 
 def _strategy_names(value: str) -> list[str]:
@@ -97,7 +111,9 @@ def _strategy_names(value: str) -> list[str]:
 
 
 def run_intraday_backtest(args: argparse.Namespace) -> int:
-    config, instruments, datasets = _load_intraday(args.config, args.data, args.synthetic_days)
+    config, instruments, datasets, holdout = _load_intraday(
+        args.config, args.data, args.synthetic_days, args.symbol, args.use_holdout
+    )
     strategies = strategies_from_config(config, _strategy_names(args.strategies))
     engine = IntradayEngine(
         config,
@@ -109,19 +125,47 @@ def run_intraday_backtest(args: argparse.Namespace) -> int:
     )
     result = engine.run(datasets)
     benchmark = buy_and_hold(datasets, instruments, config, args.cost_multiplier)
-    output = write_intraday_report(result, args.output, benchmark, {"config_digest": config.digest})
+    output = write_intraday_report(result, args.output, benchmark, {"config_digest": config.digest, "holdout": holdout})
     metrics = compute_metrics(result)
-    print(json.dumps({"report": str(output), "metrics": metrics, "benchmark": benchmark}, indent=2, default=str))
+    print(
+        json.dumps(
+            {"report": str(output), "metrics": metrics, "benchmark": benchmark, "holdout": holdout},
+            indent=2,
+            default=str,
+        )
+    )
     return 0
 
 
 def run_intraday_stress(args: argparse.Namespace) -> int:
-    config, instruments, datasets = _load_intraday(args.config, args.data, args.synthetic_days)
+    config, instruments, datasets, holdout = _load_intraday(
+        args.config, args.data, args.synthetic_days, args.symbol, args.use_holdout
+    )
     output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets)
+    output["holdout"] = holdout
     path = Path(args.output)
     path.mkdir(parents=True, exist_ok=True)
     (path / "scenarios.json").write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
     print(json.dumps(output, indent=2, default=str))
+    return 0
+
+
+def run_fetch_intraday(args: argparse.Namespace) -> int:
+    from .data_requests import AlpacaDatasetDownloader
+    from .intraday_fetch import default_end, fetch_intraday_csv
+
+    downloader = AlpacaDatasetDownloader.from_env(args.env)
+    end = datetime.fromisoformat(args.end) if args.end else default_end()
+    summary = fetch_intraday_csv(
+        downloader,
+        args.symbol,
+        datetime.fromisoformat(args.start),
+        end,
+        args.output or f"data/{args.symbol}_15m.csv",
+        args.feed,
+        progress=lambda message: print(message, file=sys.stderr),
+    )
+    print(json.dumps(summary, indent=2))
     return 0
 
 
@@ -344,11 +388,25 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--data", default=None, help="CSV file; default from [intraday] in the config")
         command.add_argument("--synthetic-days", type=int, default=None, help="use labelled synthetic data")
         command.add_argument("--output", default=default_out)
+        command.add_argument("--symbol", default=None, help="instrument from [instruments.*]; default [intraday]")
+        command.add_argument(
+            "--use-holdout",
+            action="store_true",
+            help="include the final test period from [holdout]; only for the central holdout evaluation",
+        )
         if name == "intraday-backtest":
             command.add_argument("--cost-multiplier", type=float, default=1.0)
             command.add_argument("--spread-multiplier", type=float, default=1.0)
             command.add_argument("--delay-bars", type=int, default=0)
         command.set_defaults(func=func)
+    fetch = sub.add_parser("fetch-intraday", help="download 15-minute ETF bars from Alpaca into data/")
+    fetch.add_argument("--symbol", required=True)
+    fetch.add_argument("--start", default="2016-01-01T00:00:00+00:00")
+    fetch.add_argument("--end", default=None, help="default: latest allowed time")
+    fetch.add_argument("--feed", default="sip", choices=["sip", "iex"])
+    fetch.add_argument("--output", default=None, help="default: data/<SYMBOL>_15m.csv")
+    fetch.add_argument("--env", default=".env", help="local .env with the Alpaca paper key")
+    fetch.set_defaults(func=run_fetch_intraday)
     paper = sub.add_parser("paper-demo")
     paper.add_argument("--state", default="state/paper_state.json")
     paper.add_argument("--audit", default="state/audit.jsonl")

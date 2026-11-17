@@ -105,6 +105,49 @@ min_fee = 0.0
 qty_step = 0.1                  # 0.1 contract of 1 EUR/point
 financing_rate_annual = 0.05    # long overnight financing (reference rate + markup, assumption)
 
+# US index ETFs via Alpaca (T-018, ADR 0005). Data: Alpaca SIP 15-minute bars, regular session only,
+# split/dividend adjusted. Alpaca charges no commission; fee_bps approximates SEC/FINRA fees on sells.
+# Prices are in USD and are treated 1:1 as account currency until T-011 adds FX (known limitation).
+[instruments.SPY]
+market = "etf"
+venue = "NYSE Arca via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 0.5                # typical 1 cent at ~500 USD is 0.2 bp; doubled as a margin
+slippage_bps = 1.0
+min_fee = 0.0
+qty_step = 0.001                # fractional shares (Alpaca, market day orders)
+financing_rate_annual = 0.0     # cash account, no margin
+data_file = "data/SPY_15m.csv"
+data_source = "alpaca_sip"
+data_timezone = "UTC"
+
+[instruments.QQQ]
+market = "etf"
+venue = "Nasdaq via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 0.5
+slippage_bps = 1.0
+min_fee = 0.0
+qty_step = 0.001
+financing_rate_annual = 0.0
+data_file = "data/QQQ_15m.csv"
+data_source = "alpaca_sip"
+data_timezone = "UTC"
+
+# Final independent test period, fixed before the first evaluation of the ETF data (T-018, ADR 0005).
+# Bars from `start` on are removed from every research run; only the central holdout evaluation may
+# use them (`--use-holdout`, logged in the report). Do not move this date after looking at results.
+[holdout]
+start = "2025-11-01T00:00:00+00:00"
+
 [intraday]
 signal_interval_minutes = 15
 data_file = "data/DAX3015.csv"

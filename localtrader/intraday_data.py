@@ -321,3 +321,13 @@ def synthetic_intraday(
         asdict(QualityReport(rows_read=len(bars), bars_accepted=len(bars))),
     )
     return ImportedDataset(bars, manifest, frozenset())
+
+
+def split_holdout(data: ImportedDataset, holdout_start: datetime) -> tuple[ImportedDataset, int]:
+    """Remove every bar starting at/after ``holdout_start``; returns the research part and the removed count."""
+    require = holdout_start.tzinfo is not None
+    if not require:
+        raise ValueError("holdout_start must be timezone-aware")
+    kept = [bar for bar in data.bars if bar.start < holdout_start]
+    after_gap = frozenset(moment for moment in data.after_gap if moment < holdout_start)
+    return ImportedDataset(kept, data.manifest, after_gap), len(data.bars) - len(kept)
