@@ -2,3 +2,6 @@
 data/.DS_Store
 .DS_Store
 .ipynb_checkpoints/ai-checkpoint.ipynb
+
+# Local secrets – never commit
+.env
