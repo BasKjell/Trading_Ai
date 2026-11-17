@@ -11,6 +11,7 @@ from typing import Any
 from localtrader.attempt_journal import AttemptJournal, Budget, JournalError
 from localtrader.model_registry import CASH_CHAMPION, ModelRegistry, RegistryError
 from localtrader.research_protocol import (
+    INPUT_BINDINGS,
     ProtocolBlocked,
     assert_startable,
     check_structure,
@@ -18,6 +19,7 @@ from localtrader.research_protocol import (
     expected_budget,
     file_digests,
     load_protocol,
+    make_receipt,
     receipt_digest,
 )
 
@@ -45,17 +47,78 @@ class ProtocolTests(unittest.TestCase):
             },
         )
 
-    def test_unfrozen_protocol_blocks_the_start(self) -> None:
-        with self.assertRaises(ProtocolBlocked) as caught:
-            assert_startable(self.protocol, self.text)
-        self.assertIn("state is 'proposed_unrun', a run needs 'frozen'", caught.exception.problems)
-        self.assertIn("no binding freeze receipt", caught.exception.problems)
+    def freeze(self, tmp: str, mutate: Any = None, after: Any = None) -> tuple[Path, Path, dict[str, str]]:
+        """Write a frozen copy of protocol + plan with a valid receipt; ``after`` edits the protocol later."""
+        protocol = copy.deepcopy(self.protocol)
+        if mutate:
+            mutate(protocol)
+        protocol["state"] = "frozen"
+        protocol["freeze"]["binding_receipt"] = "receipt.json"
+        protocol_path, plan_path = Path(tmp) / "protocol.json", Path(tmp) / "plan.md"
+        protocol_path.write_text(json.dumps(protocol, indent=2), encoding="utf-8")
+        plan_path.write_text(self.text, encoding="utf-8")
+        bindings = {name: f"{index:064x}" for index, name in enumerate(protocol["freeze"]["required"], 1)}
+        receipt = make_receipt(protocol_path, plan_path, bindings)
+        (Path(tmp) / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        if after:
+            after(protocol)
+            protocol_path.write_text(json.dumps(protocol, indent=2), encoding="utf-8")
+        inputs = {name: value for name, value in bindings.items() if name in INPUT_BINDINGS}
+        return protocol_path, plan_path, inputs
 
-    def test_frozen_consistent_protocol_may_start(self) -> None:
-        frozen = copy.deepcopy(self.protocol)
-        frozen["state"] = "frozen"
-        frozen["freeze"]["binding_receipt"] = "receipts/T-008.json"
-        assert_startable(frozen, self.text)
+    def blocked(self, *args: Any, **kwargs: Any) -> list[str]:
+        with self.assertRaises(ProtocolBlocked) as caught:
+            assert_startable(*args, **kwargs)
+        return caught.exception.problems
+
+    def test_unfrozen_protocol_blocks_the_start(self) -> None:
+        problems = self.blocked(PROTOCOL, PLAN)
+        self.assertIn("state is 'proposed_unrun', a run needs 'frozen'", problems)
+        self.assertIn("no binding freeze receipt", problems)
+
+    def test_frozen_protocol_with_valid_receipt_and_matching_inputs_may_start(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            protocol, plan, inputs = self.freeze(tmp)
+            assert_startable(protocol, plan, inputs)
+
+    def test_missing_receipt_blocks(self) -> None:
+        # Regression (PR #23 review): state=frozen with a nonexistent receipt path allowed the start.
+        with tempfile.TemporaryDirectory() as tmp:
+            protocol, plan, inputs = self.freeze(tmp)
+            (Path(tmp) / "receipt.json").unlink()
+            self.assertTrue(any("receipt unreadable" in p for p in self.blocked(protocol, plan, inputs)))
+
+    def test_criteria_changed_after_freeze_block(self) -> None:
+        # Regression (PR #23 review): outer criteria edited after the freeze must not pass.
+        def loosen(p: dict[str, Any]) -> None:
+            p["outer_accept_all"]["pooled_base_net_total_return_gt"] = -1
+
+        with tempfile.TemporaryDirectory() as tmp:
+            protocol, plan, inputs = self.freeze(tmp, after=loosen)
+            self.assertTrue(any("criteria changed" in p for p in self.blocked(protocol, plan, inputs)))
+        with tempfile.TemporaryDirectory() as tmp:
+            protocol, plan, inputs = self.freeze(tmp)
+            plan.write_text(self.text + "\nNachtrag", encoding="utf-8")
+            self.assertTrue(any("plan bytes" in p for p in self.blocked(protocol, plan, inputs)))
+
+    def test_tampered_or_incomplete_receipt_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            protocol, plan, inputs = self.freeze(tmp)
+            path = Path(tmp) / "receipt.json"
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+            receipt["bindings"]["calendar_digest"] = "f" * 64  # digest no longer matches
+            path.write_text(json.dumps(receipt), encoding="utf-8")
+            self.assertTrue(any("receipt digest" in p for p in self.blocked(protocol, plan, inputs)))
+            del receipt["bindings"]["independent_method_review"]
+            path.write_text(json.dumps(receipt), encoding="utf-8")
+            self.assertTrue(any("independent_method_review" in p for p in self.blocked(protocol, plan, inputs)))
+
+    def test_run_inputs_must_match_the_frozen_bindings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            protocol, plan, inputs = self.freeze(tmp)
+            self.assertTrue(any("not presented" in p for p in self.blocked(protocol, plan, {})))
+            changed = {**inputs, "complete_cost_schedule_digest": "e" * 64}
+            self.assertTrue(any("differs from the frozen" in p for p in self.blocked(protocol, plan, changed)))
 
     def test_text_and_json_mismatches_block(self) -> None:
         cases: list[tuple[str, Any]] = [
@@ -66,13 +129,9 @@ class ProtocolTests(unittest.TestCase):
             ("candidate id", lambda p: p["candidates"][0].__setitem__("id", "T13")),
         ]
         for name, mutate in cases:
-            with self.subTest(name):
-                changed = copy.deepcopy(self.protocol)
-                mutate(changed)
-                changed["state"] = "frozen"
-                changed["freeze"]["binding_receipt"] = "r"
-                with self.assertRaises(ProtocolBlocked):
-                    assert_startable(changed, self.text)
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                protocol, plan, inputs = self.freeze(tmp, mutate)  # frozen with a valid receipt, still blocked
+                self.blocked(protocol, plan, inputs)
 
     def test_structural_errors_are_found(self) -> None:
         cases: list[tuple[str, Any, str]] = [
@@ -170,6 +229,40 @@ class JournalTests(unittest.TestCase):
             with self.assertRaises(JournalError):
                 journal.events()
 
+    def test_truncated_end_is_detected_and_cannot_restart(self) -> None:
+        # Regression (PR #23 review): keeping only the first line made a failed attempt startable again.
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.journal(tmp)
+            journal.reserve("a", "strategy", {})
+            journal.transition("a", "started")
+            journal.transition("a", "failed", "crash")
+            first = journal.events_path.read_text(encoding="utf-8").splitlines()[0]
+            journal.events_path.write_text(first + "\n", encoding="utf-8")
+            with self.assertRaises(JournalError):
+                journal.status()
+            with self.assertRaises(JournalError):
+                journal.transition("a", "started")
+            (journal.root / "head.json").unlink()  # even without the head, the markers reveal the cut
+            with self.assertRaises(JournalError):
+                journal.status()
+
+    def test_crash_between_marker_and_event_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.journal(tmp)
+            journal.reserve("a", "strategy", {})
+            (journal.root / "attempts" / "a.started").touch()  # marker written, event never appended
+            with self.assertRaises(JournalError):
+                journal.status()
+
+    def test_crash_after_event_before_head_is_tolerated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.journal(tmp)
+            journal.reserve("a", "strategy", {})
+            head = (journal.root / "head.json").read_text(encoding="utf-8")
+            journal.transition("a", "started")
+            (journal.root / "head.json").write_text(head, encoding="utf-8")  # head update lost
+            self.assertEqual(journal.status()["a"]["status"], "started")
+
     def test_reservation_without_journal_entry_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             journal = self.journal(tmp)
@@ -212,6 +305,51 @@ CONFIRMED = {"new_entries_blocked": True, "orders_and_fills_reconciled": True, "
 
 
 class RegistryTests(unittest.TestCase):
+    def test_audit_failure_before_activation_changes_nothing(self) -> None:
+        # Regression (PR #23 review): with an unwritable audit log the model was active anyway.
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = ModelRegistry(tmp, clock=_clock())
+            registry.register(model())
+            audit = Path(tmp) / "audit.jsonl"
+            saved = audit.read_bytes()
+            audit.unlink()
+            audit.mkdir()
+            with self.assertRaises(OSError):
+                registry.activate("T12-F3-v1", "shadow", "user")
+            with self.assertRaises(OSError):
+                registry.active()  # unreadable audit: no answer rather than a guess
+            audit.rmdir()
+            audit.write_bytes(saved)
+            self.assertEqual(registry.active()["model_id"], CASH_CHAMPION)
+
+    def test_crash_before_commit_fails_closed_and_recovers(self) -> None:
+        for action in ("activate", "rollback"):
+            with self.subTest(action), tempfile.TemporaryDirectory() as tmp:
+                registry = ModelRegistry(tmp, clock=_clock())
+                registry.register(model())
+                if action == "rollback":
+                    registry.activate("T12-F3-v1", "shadow", "user")
+                before = registry.active()["model_id"]
+                original = registry._audit
+
+                def failing_commit(entry: dict[str, Any], original: Any = original, action: str = action) -> None:
+                    if entry.get("phase") == "commit" and entry.get("action") == action:
+                        raise OSError("disk full")
+                    original(entry)
+
+                registry._audit = failing_commit  # type: ignore[method-assign]
+                with self.assertRaises(OSError):
+                    if action == "activate":
+                        registry.activate("T12-F3-v1", "shadow", "user")
+                    else:
+                        registry.rollback("drift", CONFIRMED)
+                registry._audit = original  # type: ignore[method-assign]
+                with self.assertRaises(RegistryError):
+                    registry.active()
+                self.assertEqual(registry.recover()["model_id"], before)
+                self.assertEqual(registry.active()["model_id"], before)
+                self.assertEqual(registry.audit()[-1]["action"], "recover")
+
     def test_cash_is_the_initial_champion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(ModelRegistry(tmp, clock=_clock()).active()["model_id"], CASH_CHAMPION)
@@ -257,6 +395,6 @@ class RegistryTests(unittest.TestCase):
                 registry.rollback("drift", {**CONFIRMED, "positions_flat_or_protected": False})
             registry.rollback("drift", CONFIRMED)
             self.assertEqual(registry.active()["model_id"], CASH_CHAMPION)
-            actions = [entry["action"] for entry in registry.audit()]
+            actions = [entry["action"] for entry in registry.audit() if entry.get("phase") != "intent"]
             self.assertEqual(actions, ["init", "register", "activate", "rollback"])
             self.assertFalse((Path(tmp) / "active.tmp").exists())

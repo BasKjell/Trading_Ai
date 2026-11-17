@@ -253,12 +253,97 @@ def receipt_digest(digests: dict[str, str]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def assert_startable(protocol: dict[str, Any], plan_text: str, holdout_start: datetime | None = None) -> None:
-    """Raise ProtocolBlocked unless the protocol is consistent, frozen and bound to a receipt."""
-    problems = check_structure(protocol, holdout_start) + check_text(protocol, plan_text)
+RECEIPT_SCHEMA = "T008-freeze-receipt/1"
+HEX = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+# Bindings that describe the actual run inputs; the caller must present the same digests at start.
+INPUT_BINDINGS = frozenset(
+    {
+        "verified_integrated_code_sha",
+        "dependency_lock_digest",
+        "risk_config_digest",
+        "separate_research_only_manifest_digest",
+        "calendar_digest",
+        "point_in_time_corporate_actions_and_fx_digests",
+        "complete_cost_schedule_digest",
+        "prior_experiment_inventory_digest",
+    }
+)
+
+
+def make_receipt(protocol_path: str | Path, plan_path: str | Path, bindings: dict[str, str]) -> dict[str, Any]:
+    """Freeze receipt over the exact protocol and plan bytes plus all bindings (stored outside both files)."""
+    files = {
+        "protocol": hashlib.sha256(Path(protocol_path).read_bytes()).hexdigest(),
+        "plan": hashlib.sha256(Path(plan_path).read_bytes()).hexdigest(),
+    }
+    return {
+        "schema": RECEIPT_SCHEMA,
+        "files": files,
+        "bindings": dict(bindings),
+        "digest": receipt_digest({**{f"file:{k}": v for k, v in files.items()}, **bindings}),
+    }
+
+
+def check_receipt(
+    protocol: dict[str, Any],
+    protocol_bytes: bytes,
+    plan_bytes: bytes,
+    receipt: dict[str, Any],
+    run_inputs: dict[str, str],
+) -> list[str]:
+    """The receipt must bind exactly these protocol/plan bytes, every required binding and the run inputs."""
+    problems: list[str] = []
+    if receipt.get("schema") != RECEIPT_SCHEMA:
+        return [f"receipt schema must be {RECEIPT_SCHEMA}"]
+    files = receipt.get("files") or {}
+    if files.get("protocol") != hashlib.sha256(protocol_bytes).hexdigest():
+        problems.append("protocol bytes differ from the frozen receipt (criteria changed after freeze?)")
+    if files.get("plan") != hashlib.sha256(plan_bytes).hexdigest():
+        problems.append("plan bytes differ from the frozen receipt")
+    bindings = receipt.get("bindings") or {}
+    for name in protocol.get("freeze", {}).get("required", []):
+        if not isinstance(bindings.get(name), str) or not HEX.match(bindings[name]):
+            problems.append(f"receipt lacks a valid digest for {name}")
+    expected = receipt_digest({**{f"file:{k}": v for k, v in files.items()}, **bindings})
+    if receipt.get("digest") != expected:
+        problems.append("receipt digest does not match its contents")
+    for name in sorted(INPUT_BINDINGS & set(protocol.get("freeze", {}).get("required", []))):
+        if name not in run_inputs:
+            problems.append(f"run input {name} not presented")
+        elif run_inputs[name] != bindings.get(name):
+            problems.append(f"run input {name} differs from the frozen binding")
+    return problems
+
+
+def assert_startable(
+    protocol_path: str | Path,
+    plan_path: str | Path,
+    run_inputs: dict[str, str] | None = None,
+    holdout_start: datetime | None = None,
+) -> None:
+    """Raise ProtocolBlocked unless protocol and plan agree, the protocol is frozen and an existing receipt
+    binds the exact protocol/plan bytes, every required binding and the presented run inputs."""
+    protocol_bytes = Path(protocol_path).read_bytes()
+    plan_bytes = Path(plan_path).read_bytes()
+    protocol = json.loads(protocol_bytes)
+    problems = check_structure(protocol, holdout_start) + check_text(protocol, plan_bytes.decode("utf-8"))
     if protocol.get("state") != STARTABLE_STATE:
         problems.append(f"state is {protocol.get('state')!r}, a run needs {STARTABLE_STATE!r}")
-    if not protocol.get("freeze", {}).get("binding_receipt"):
+    reference = protocol.get("freeze", {}).get("binding_receipt")
+    if not reference:
         problems.append("no binding freeze receipt")
+    else:
+        receipt_path = Path(reference)
+        if not receipt_path.is_absolute():
+            receipt_path = Path(protocol_path).parent / receipt_path
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            problems.append(f"freeze receipt unreadable: {error}")
+        else:
+            if not isinstance(receipt, dict):
+                problems.append("freeze receipt must be a JSON object")
+            else:
+                problems += check_receipt(protocol, protocol_bytes, plan_bytes, receipt, run_inputs or {})
     if problems:
         raise ProtocolBlocked(problems)

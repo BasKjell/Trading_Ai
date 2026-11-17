@@ -2,7 +2,15 @@
 
 Every planned run first reserves an attempt with a unique identity, then appends status events. Nothing
 is ever rewritten: aborted, failed and rejected attempts keep their ID and status, and unstarted slots stay
-visible. Each event carries the SHA-256 of the previous event, so edits or deletions are detectable.
+visible. Each event carries the SHA-256 of the previous event, so edits inside the journal are detectable.
+
+A cut-off end of the journal is detected in two independent ways: every status is also recorded as an
+exclusively created marker file (``attempts/<id>.<status>``, written *before* the event), and
+``head.json`` keeps the sequence and hash of the last event. A marker without its event, or fewer events
+than the head records, blocks the journal (fail closed, manual recovery). Because a status marker can be
+created only once, a failed or completed attempt can never be started again, even after truncation.
+Limit: someone who rewrites events, markers and head consistently is not detected; that needs an
+external anchor (planned with the central holdout service).
 
 Reservation uses exclusive file creation (one file per attempt ID), which is atomic within one file
 system. Across machines or worktrees this is not a global lock; the central holdout service needs its
@@ -83,7 +91,10 @@ class AttemptJournal:
     # ------------------------------------------------------------------ reading and verification
     def events(self) -> list[dict[str, Any]]:
         """All events after verifying the hash chain; raises on any tampering."""
+        head = self._head()
         if not self.events_path.exists():
+            if head["sequence"]:
+                raise JournalError("journal missing but head records events")
             return []
         events = []
         previous = GENESIS
@@ -95,7 +106,30 @@ class AttemptJournal:
                 raise JournalError(f"journal sequence broken at event {number}")
             previous = event["hash"]
             events.append(event)
+        if len(events) < head["sequence"]:
+            raise JournalError(f"journal truncated: {len(events)} events, head records {head['sequence']}")
+        recorded = events[head["sequence"] - 1]["hash"] if head["sequence"] else GENESIS
+        if recorded != head["hash"]:
+            raise JournalError("journal does not match its head")
+        if len(events) > head["sequence"] + 1:
+            raise JournalError("journal is ahead of its head by more than one event")
         return events
+
+    def _head(self) -> dict[str, Any]:
+        path = self.root / "head.json"
+        if not path.exists():
+            return {"sequence": 0, "hash": GENESIS}
+        head: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return head
+
+    def _write_head(self, event: dict[str, Any]) -> None:
+        path = self.root / "head.json"
+        temporary = path.with_suffix(".tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump({"sequence": event["sequence"], "hash": event["hash"]}, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
 
     def status(self) -> dict[str, dict[str, Any]]:
         """Current state per attempt, from the verified chain."""
@@ -111,6 +145,14 @@ class AttemptJournal:
         reserved_files = {path.stem for path in (self.root / "attempts").glob("*.json")}
         if reserved_files != set(state):
             raise JournalError("reservation files and journal disagree")
+        seen: dict[str, set[str]] = {}
+        for event in self.events():
+            if event["status"] != "reserved":
+                seen.setdefault(event["attempt_id"], set()).add(event["status"])
+        for marker in (self.root / "attempts").iterdir():
+            attempt, _, status = marker.name.rpartition(".")
+            if status in STATUSES and status not in seen.get(attempt, set()):
+                raise JournalError(f"status marker {marker.name} without journal event (truncated or crashed)")
         return state
 
     def counts(self) -> dict[str, dict[str, int]]:
@@ -135,6 +177,7 @@ class AttemptJournal:
             handle.write(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+        self._write_head(event)
         return event
 
     def reserve(self, attempt_id: str, kind: str, slot: dict[str, Any]) -> dict[str, Any]:
@@ -165,6 +208,11 @@ class AttemptJournal:
         event: dict[str, Any] = {"attempt_id": attempt_id, "kind": current["kind"], "status": status}
         if reason:
             event["reason"] = reason
+        marker = self.root / "attempts" / f"{attempt_id}.{status}"
+        try:
+            marker.open("x").close()  # once per status, ever; written before the event (fail closed)
+        except FileExistsError as error:
+            raise JournalError(f"{attempt_id} already had status {status}") from error
         return self._append(event)
 
     def summary(self, planned_slots: list[str] | None = None) -> dict[str, Any]:
