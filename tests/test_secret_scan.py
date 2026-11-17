@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,8 +34,9 @@ class SecretScanTests(unittest.TestCase):
     def test_private_key_and_api_key_assignment_are_detected(self) -> None:
         findings = self._scan(
             {
-                "a.py": "-----BEGIN RSA PRIVATE KEY-----\n",
-                "b.py": 'api_key = "abcdefghijklmnopqrstuvwxyz123456"\n',
+                # Fixtures are assembled at runtime so this file itself stays clean.
+                "a.py": "-----BEGIN RSA " + "PRIVATE KEY-----\n",
+                "b.py": "api" + '_key = "' + "abcdefghijklm" + 'nopqrstuvwxyz123456"\n',
             }
         )
         self.assertEqual(len(findings), 2)
@@ -42,6 +44,19 @@ class SecretScanTests(unittest.TestCase):
     def test_database_files_are_rejected(self) -> None:
         findings = self._scan({"state/research.db": "x"})
         self.assertTrue(findings)
+
+    def test_untracked_files_are_included(self) -> None:
+        # Regression: the scan used only tracked files, so new files slipped through `make check`
+        # before `git add`. Untracked, non-ignored files must be scanned as well.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            (root / "new.py").write_text("x = 1\n", encoding="utf-8")
+            (root / ".gitignore").write_text("ignored.py\n", encoding="utf-8")
+            (root / "ignored.py").write_text("x = 2\n", encoding="utf-8")
+            files = secret_scan.tracked_files(root)
+        self.assertIn("new.py", files)
+        self.assertNotIn("ignored.py", files)
 
     def test_clean_source_passes(self) -> None:
         self.assertEqual(self._scan({"ok.py": "risk_per_trade = 0.002\n"}), [])

@@ -25,7 +25,13 @@ SKIP_SUFFIXES = {".csv", ".ipynb", ".png", ".svg"}
 
 
 def tracked_files(root: Path) -> list[str]:
-    output = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True)
+    """Tracked plus untracked, non-ignored files, so `make check` also covers files not yet added."""
+    output = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=root,
+        capture_output=True,
+        check=True,
+    )
     return [item for item in output.stdout.decode().split("\0") if item]
 
 

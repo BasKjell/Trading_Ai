@@ -17,9 +17,10 @@ Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
   Strategieversion statt als Stop-Preis übergaben.
 - Plan (`docs/PLAN.md`) und ADR 0001.
 
-**Tests:** neu `tests/test_secret_scan.py` (verbotene Dateien, Schlüsselmuster, saubere Dateien).
+**Tests:** neu `tests/test_secret_scan.py` (verbotene Dateien, Schlüsselmuster, saubere Dateien, Regressionstest:
+noch nicht hinzugefügte Dateien werden ebenfalls gescannt).
 
-**Ausgeführte Prüfungen:** `make check` lokal (Python 3.13): Format, Lint, mypy, 45 Tests,
+**Ausgeführte Prüfungen:** `make check` lokal (Python 3.13): Format, Lint, mypy, 46 Tests,
 Secret-Scan, Konfiguration – bestanden.
 
 **Einschränkungen:** Coverage läuft nur in CI (lokal nicht installiert). Fachliche Lücken siehe `docs/PLAN.md`.
