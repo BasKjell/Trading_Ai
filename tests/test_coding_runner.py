@@ -164,9 +164,13 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(set(state.data["paused"]), {"codex", "claude"})
 
     def test_process_lock_rejects_second_scheduler(self):
-        with tempfile.TemporaryDirectory() as temp, runner.lock(Path(temp)):
-            with self.assertRaises(runner.RunnerError), runner.lock(Path(temp)):
-                pass
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            runner.lock(Path(temp)),
+            self.assertRaises(runner.RunnerError),
+            runner.lock(Path(temp)),
+        ):
+            pass
 
     def test_dry_run_never_claims_or_invokes_worker(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -187,12 +191,15 @@ class PersistenceTests(unittest.TestCase):
                 if provider == "codex":
                     raise runner.RunnerError("not installed")
 
-            with patch.object(runner, "subscription_login", side_effect=login):
-                with patch.object(runner, "prepare", return_value=Path(temp)), patch.object(runner, "command"):
-                    with patch.object(runner, "worker_command", return_value=[]):
-                        with patch.object(runner, "run_worker", return_value="rate_limited"):
-                            with patch("sys.stdout", new_callable=io.StringIO):
-                                runner.cycle(config, Path(temp), state, gh, dry_run=False)
+            with (
+                patch.object(runner, "subscription_login", side_effect=login),
+                patch.object(runner, "prepare", return_value=Path(temp)),
+                patch.object(runner, "command"),
+                patch.object(runner, "worker_command", return_value=[]),
+                patch.object(runner, "run_worker", return_value="rate_limited"),
+                patch("sys.stdout", new_callable=io.StringIO),
+            ):
+                runner.cycle(config, Path(temp), state, gh, dry_run=False)
             self.assertIn("codex", state.data["paused"])
             self.assertEqual(next(iter(state.data["jobs"].values()))["provider"], "claude")
             self.assertGreater(state.data["cooldown"]["claude"], 0)
@@ -224,9 +231,11 @@ class VerificationTests(unittest.TestCase):
                 return original(endpoint, body)
 
             gh.api = api
-            with self.subTest(conclusion=conclusion):
-                with patch.object(runner, "command", side_effect=["", "checks passed", "a" * 40]):
-                    self.assertFalse(runner.verify(gh, job, Path("/tmp")))
+            with (
+                self.subTest(conclusion=conclusion),
+                patch.object(runner, "command", side_effect=["", "checks passed", "a" * 40]),
+            ):
+                self.assertFalse(runner.verify(gh, job, Path("/tmp")))
 
 
 class WorktreeTests(unittest.TestCase):
