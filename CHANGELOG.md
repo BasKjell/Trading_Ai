@@ -2,6 +2,26 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-17 – 15-Minuten-Datenimport und Qualitätsprüfung
+
+**Anlass/Ziel:** Intraday-Daten zeitlich korrekt und nachvollziehbar einlesen.
+
+**Änderungen**
+- `localtrader/intraday_data.py`: CSV-Import (MetaTrader- und ISO-Format) mit Quellzeitzone → UTC,
+  Verfügbarkeitszeit, Verwerfen ungültiger Zeilen, Lückenerkennung ohne Auffüllen, Sprungmeldung,
+  Datenmanifest mit Datenversion; `resample()` für 1 h/1 d ohne Look-ahead; Handelssitzungen;
+  klar gekennzeichnete synthetische Intraday-Daten.
+- `Market.INDEX` ergänzt.
+- `docs/DATA_FORMAT.md` mit Format, Qualitätsregeln und Beschreibung der DAX-Beispieldatei.
+
+**Tests:** neu `tests/test_intraday_data.py` (Zeitzonen inkl. Sommerzeit, Verfügbarkeit, alle
+Verwerfungsgründe, Lücken innerhalb/außerhalb der Sitzung, Sprünge, ISO-Format, Datenversion,
+DAX-Beispieldatei inkl. Plausibilisierung der Zeitzone, Resampling ohne Look-ahead).
+
+**Ausgeführte Prüfungen:** `make check` bestanden.
+
+**Einschränkungen:** Zeitzone der DAX-Datei ist eine belegte Annahme; kein Feiertagskalender; kein Parquet.
+
 ## 2026-11-17 – Kostenbuchung korrigiert, Risikolimits gemäß Vorgaben
 
 **Anlass/Ziel:** Kosten wurden doppelt belastet; Risikoparameter entsprachen nicht den Projektvorgaben.

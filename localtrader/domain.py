@@ -19,6 +19,7 @@ class Market(StrEnum):
     BOND = "bond"
     COMMODITY = "commodity"
     MULTI_ASSET = "multi_asset"
+    INDEX = "index"
 
 
 class Direction(StrEnum):
