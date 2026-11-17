@@ -53,3 +53,12 @@ Mit den verfügbaren Daten (DAX, 165 Handelstage) wurde **keine belastbare profi
 2. T-005 Orderzustandsautomat (kritisch, höhere Denkstufe, separates Review).
 3. T-008 Walk-forward/Champion-Challenger (parallel möglich; kritisch, separates Review).
 4. T-006 Paper-Betrieb, danach T-007 Dashboard, T-010 (#5) Abnahme.
+
+## T-008 – Forschungsdesign vorbereitet (nicht integriert)
+
+Benutzerauftrag vom 2026-11-17: Astra/high erstellt parallel zu Claudes Datenkorrekturen #21
+einen [Versuchsplan](research/EXP-T008-001.md) und ein
+[maschinenlesbares Protokoll](research/T-008-protocol.json). Stand: **geplant**, Design-Draft.
+Keine Optimierungsläufe; keine implementierte Walk-forward-/Holdout-Kontrolle.
+Freigabe des Protokolls, korrigierte Datenbasis, geprüfte Validierungsimplementierung und
+Daten-/Codebindung sind vor empirischen Läufen erforderlich. [Fortsetzung](handoffs/T-008.md).
