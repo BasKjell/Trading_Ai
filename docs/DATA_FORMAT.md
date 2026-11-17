@@ -21,8 +21,8 @@ Zwei Varianten, Spaltennamen ohne Groß-/Kleinschreibung:
 
 | Befund | Behandlung |
 |---|---|
-| Duplikat, nicht auf Raster liegender Zeitstempel, OHLC-Widerspruch, Preis ≤ 0, negatives Volumen, unlesbare Zeile | Zeile verworfen, gezählt |
-| Lücke innerhalb einer Handelssitzung | gemeldet, **nicht aufgefüllt**; erste Bar danach blockiert neue Einstiege |
+| Duplikat, nicht auf Raster liegender Zeitstempel, OHLC-Widerspruch, Preis ≤ 0, negatives Volumen, NaN/±Inf in einem OHLCV-Feld, unlesbare Zeile | Zeile verworfen, gezählt |
+| Lücke innerhalb einer Handelssitzung | gemeldet, **nicht aufgefüllt**; erste Bar danach blockiert neue Einstiege (auch bereits ausstehende) |
 | Lücke über Nacht/Wochenende | erwartet, nicht gemeldet |
 | Sprung Open/vorheriger Close > 3 % | gemeldet, nicht entfernt |
 
