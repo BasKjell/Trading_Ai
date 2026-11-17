@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
-import json
 
 
 class AlpacaCheckError(RuntimeError):
@@ -95,14 +95,22 @@ class AlpacaAccessChecker:
         if feed not in {"iex", "sip"}:
             raise ValueError("feed must be iex or sip")
         start, end = self._window()
-        query = urlencode({
-            "timeframe": "1Day", "start": start, "end": end,
-            "limit": 5, "adjustment": "all", "feed": feed,
-        })
+        query = urlencode(
+            {
+                "timeframe": "1Day",
+                "start": start,
+                "end": end,
+                "limit": 5,
+                "adjustment": "all",
+                "feed": feed,
+            }
+        )
         status, payload = self._get(f"https://data.alpaca.markets/v2/stocks/SPY/bars?{query}")
         bars = payload.get("bars", []) if status == 200 else []
         return {
-            "feed": feed, "http_status": status, "available": status == 200 and bool(bars),
+            "feed": feed,
+            "http_status": status,
+            "available": status == 200 and bool(bars),
             "bars_received": len(bars),
             "first_timestamp": bars[0].get("t") if bars else None,
             "last_timestamp": bars[-1].get("t") if bars else None,
@@ -116,21 +124,30 @@ class AlpacaAccessChecker:
         status, payload = self._get(f"https://data.alpaca.markets/v2/stocks/SPY/bars/latest?{query}")
         bar = payload.get("bar") if status == 200 else None
         return {
-            "feed": feed, "http_status": status, "available": status == 200 and bool(bar),
+            "feed": feed,
+            "http_status": status,
+            "available": status == 200 and bool(bar),
             "timestamp": bar.get("t") if bar else None,
             "error": self._safe_error(payload) if status != 200 else None,
         }
 
     def check_crypto(self) -> dict[str, Any]:
         start, end = self._window()
-        query = urlencode({
-            "symbols": "BTC/USD", "timeframe": "1Day", "start": start,
-            "end": end, "limit": 5, "sort": "asc",
-        })
+        query = urlencode(
+            {
+                "symbols": "BTC/USD",
+                "timeframe": "1Day",
+                "start": start,
+                "end": end,
+                "limit": 5,
+                "sort": "asc",
+            }
+        )
         status, payload = self._get(f"https://data.alpaca.markets/v1beta3/crypto/us/bars?{query}")
         bars = payload.get("bars", {}).get("BTC/USD", []) if status == 200 else []
         return {
-            "http_status": status, "available": status == 200 and bool(bars),
+            "http_status": status,
+            "available": status == 200 and bool(bars),
             "bars_received": len(bars),
             "first_timestamp": bars[0].get("t") if bars else None,
             "last_timestamp": bars[-1].get("t") if bars else None,

@@ -1,6 +1,6 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from localtrader.dashboard import _best_model, _read_dashboard, _spec_digest, serve_dashboard
 from localtrader.research_db import ResearchDB
@@ -33,12 +33,24 @@ class DashboardTests(unittest.TestCase):
             db.store_spec(candidate_id, spec, "test")
             db.store_llm_event("qwen-test", "proposal", {"iteration": 4, "spec": spec})
             result = {
-                "candidate_id": candidate_id, "name": "safe_test", "family": "etf_trend",
-                "status": "evaluated", "score": 0.2, "eligible": True, "paper_approved": False,
-                "evaluated_at": "2026-01-01T00:00:00+00:00", "folds": 2, "runs": 6,
-                "median_total_return": 0.03, "median_sharpe": 1.1, "worst_max_drawdown": 0.04,
-                "median_trades": 5, "cost_3x_total_return": 0.01, "reasons": [],
-                "spec": spec, "dataset": {"source": "alpaca", "bars": 500},
+                "candidate_id": candidate_id,
+                "name": "safe_test",
+                "family": "etf_trend",
+                "status": "evaluated",
+                "score": 0.2,
+                "eligible": True,
+                "paper_approved": False,
+                "evaluated_at": "2026-01-01T00:00:00+00:00",
+                "folds": 2,
+                "runs": 6,
+                "median_total_return": 0.03,
+                "median_sharpe": 1.1,
+                "worst_max_drawdown": 0.04,
+                "median_trades": 5,
+                "cost_3x_total_return": 0.01,
+                "reasons": [],
+                "spec": spec,
+                "dataset": {"source": "alpaca", "bars": 500},
             }
             db.store_evaluation(candidate_id, result)
             payload = _read_dashboard(root / "research.db", root / "research_champion.json")

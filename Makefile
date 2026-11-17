@@ -1,7 +1,33 @@
-.PHONY: test backtest lab-bootstrap lab-search lab-deep lab-continuous lab-status dashboard
+.PHONY: check format-check lint typecheck secret-scan config-check test test-cov backtest lab-bootstrap lab-search lab-deep lab-continuous lab-status dashboard
+
+PY ?= python3
+
+# Single entry point for all mandatory checks; exits non-zero on any failure.
+check: format-check lint typecheck test secret-scan config-check
+	@echo "make check: all checks passed"
+
+format-check:
+	ruff format --check localtrader tests scripts
+
+lint:
+	ruff check localtrader tests scripts
+
+typecheck:
+	mypy
 
 test:
-	.venv/bin/python -m pytest
+	$(PY) -m pytest
+
+test-cov:
+	$(PY) -m coverage run -m pytest --junitxml=reports/junit.xml
+	$(PY) -m coverage xml -o reports/coverage.xml
+	$(PY) -m coverage report
+
+secret-scan:
+	$(PY) scripts/secret_scan.py
+
+config-check:
+	$(PY) -c "from localtrader.config import load_config; c = load_config(); print('config ok', c.digest[:12])"
 
 backtest:
 	python3 -m localtrader backtest --days 1000 --output reports/baseline

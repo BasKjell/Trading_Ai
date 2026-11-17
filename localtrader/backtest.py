@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
 import hashlib
 import math
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from statistics import fmean, pstdev
 
 from .config import AppConfig
@@ -13,7 +13,6 @@ from .execution import FillModel, IdempotentPaperExecutor
 from .portfolio import Portfolio
 from .risk import RiskEngine
 from .strategies import CryptoTrendStrategy, ETFTrendStrategy, StockMomentumStrategy
-
 
 ETF_SYMBOLS = {"SPY", "QQQ"}
 STOCK_SYMBOLS = {"AAPL", "MSFT", "NVDA"}
@@ -40,28 +39,39 @@ def _order_id(signal: Signal) -> str:
 
 def _intent(signal: Signal, quantity: float, now: datetime) -> OrderIntent:
     return OrderIntent(
-        client_order_id=_order_id(signal), strategy=signal.strategy, symbol=signal.symbol,
-        market=signal.market, created_at=now, direction=signal.direction,
-        target_quantity=quantity, order_type="market", valid_until=now + timedelta(days=4),
-        stop_price=signal.stop_price, risk_metadata={"signal_strength": signal.strength},
+        client_order_id=_order_id(signal),
+        strategy=signal.strategy,
+        symbol=signal.symbol,
+        market=signal.market,
+        created_at=now,
+        direction=signal.direction,
+        target_quantity=quantity,
+        order_type="market",
+        valid_until=now + timedelta(days=4),
+        stop_price=signal.stop_price,
+        risk_metadata={"signal_strength": signal.strength},
     )
 
 
 def calculate_metrics(
-    snapshots: list[PortfolioSnapshot], fills: list[Fill], initial_cash: float,
+    snapshots: list[PortfolioSnapshot],
+    fills: list[Fill],
+    initial_cash: float,
     periods_per_year: float = 252.0,
 ) -> dict[str, float | int | None]:
     if len(snapshots) < 2:
         return {"total_return": 0.0, "cagr": 0.0, "max_drawdown": 0.0, "trades": 0}
     equities = [item.equity for item in snapshots]
-    daily = [b / a - 1 for a, b in zip(equities, equities[1:]) if a > 0]
+    daily = [b / a - 1 for a, b in zip(equities, equities[1:], strict=False) if a > 0]
     years = max((snapshots[-1].timestamp - snapshots[0].timestamp).days / 365.25, 1 / 365.25)
     total_return = equities[-1] / initial_cash - 1
     cagr = max(0.0, equities[-1] / initial_cash) ** (1 / years) - 1
     volatility = pstdev(daily) * math.sqrt(periods_per_year) if len(daily) > 1 else 0.0
     mean_daily = fmean(daily) if daily else 0.0
     downside = [min(0.0, value) for value in daily]
-    downside_dev = math.sqrt(fmean([value * value for value in downside])) * math.sqrt(periods_per_year) if downside else 0.0
+    downside_dev = (
+        math.sqrt(fmean([value * value for value in downside])) * math.sqrt(periods_per_year) if downside else 0.0
+    )
     sharpe = mean_daily * periods_per_year / volatility if volatility > 0 else None
     sortino = mean_daily * periods_per_year / downside_dev if downside_dev > 0 else None
     max_dd = max(item.drawdown for item in snapshots)
@@ -88,19 +98,35 @@ def calculate_metrics(
         elif fill.quantity < 0 and buys.get(fill.symbol):
             buy = buys[fill.symbol].pop(0)
             qty = min(buy.quantity, -fill.quantity)
-            trade_pnls.append(qty * (fill.price - buy.price) - buy.fee - fill.fee - buy.spread_cost - fill.spread_cost - buy.slippage_cost - fill.slippage_cost)
+            trade_pnls.append(
+                qty * (fill.price - buy.price)
+                - buy.fee
+                - fill.fee
+                - buy.spread_cost
+                - fill.spread_cost
+                - buy.slippage_cost
+                - fill.slippage_cost
+            )
     gains = sum(value for value in trade_pnls if value > 0)
     losses = -sum(value for value in trade_pnls if value < 0)
     exposure_values = [item.gross_exposure / item.equity for item in snapshots if item.equity > 0]
     costs = sum(fill.fee + fill.spread_cost + fill.slippage_cost for fill in fills)
     return {
-        "total_return": total_return, "cagr": cagr, "annualized_volatility": volatility,
-        "sharpe": sharpe, "sortino": sortino, "max_drawdown": max_dd,
-        "max_drawdown_duration_bars": drawdown_duration, "calmar": calmar,
-        "positive_month_ratio": positive_months, "profit_factor": gains / losses if losses > 0 else None,
+        "total_return": total_return,
+        "cagr": cagr,
+        "annualized_volatility": volatility,
+        "sharpe": sharpe,
+        "sortino": sortino,
+        "max_drawdown": max_dd,
+        "max_drawdown_duration_bars": drawdown_duration,
+        "calmar": calmar,
+        "positive_month_ratio": positive_months,
+        "profit_factor": gains / losses if losses > 0 else None,
         "win_rate": sum(value > 0 for value in trade_pnls) / len(trade_pnls) if trade_pnls else None,
         "average_trade_pnl": fmean(trade_pnls) if trade_pnls else None,
-        "trades": len(trade_pnls), "fills": len(fills), "costs": costs,
+        "trades": len(trade_pnls),
+        "fills": len(fills),
+        "costs": costs,
         "average_exposure": fmean(exposure_values) if exposure_values else 0.0,
         "max_exposure": max(exposure_values, default=0.0),
     }
@@ -147,7 +173,17 @@ class BacktestEngine:
                 position = portfolio.positions.get(symbol)
                 if position and position.stop_price and bar.low <= position.stop_price:
                     exit_price = min(bar.open, position.stop_price)
-                    stop_signal = Signal(position.strategy, symbol, bar.market, timestamp, timestamp, Direction.FLAT, 1.0, "protective stop", None)
+                    stop_signal = Signal(
+                        position.strategy,
+                        symbol,
+                        bar.market,
+                        timestamp,
+                        timestamp,
+                        Direction.FLAT,
+                        1.0,
+                        "protective stop",
+                        stop_price=None,
+                    )
                     intent = _intent(stop_signal, position.quantity, timestamp)
                     _, fill = executor.execute(intent, position.quantity, exit_price, timestamp)
                     if fill:
@@ -159,9 +195,10 @@ class BacktestEngine:
                         pending.pop(symbol, None)
 
             for symbol, signal in list(pending.items()):
-                bar = today.get(symbol)
-                if bar is None or timestamp < signal.earliest_execution:
+                maybe_bar = today.get(symbol)
+                if maybe_bar is None or timestamp < signal.earliest_execution:
                     continue
+                bar = maybe_bar
                 position = portfolio.positions.get(symbol)
                 if signal.direction == Direction.FLAT:
                     if position:
@@ -179,7 +216,15 @@ class BacktestEngine:
                     provisional = risk.size_for_stop(portfolio.equity(prices), bar.open, signal.stop_price or bar.open)
                     intent = _intent(signal, provisional, timestamp)
                     decision = risk.decide(intent, portfolio, prices, timestamp, day_start_equity)
-                    decisions.append({"time": timestamp.isoformat(), "symbol": symbol, "allowed": decision.allowed, "reason": decision.reason, "limits": list(decision.violated_limits)})
+                    decisions.append(
+                        {
+                            "time": timestamp.isoformat(),
+                            "symbol": symbol,
+                            "allowed": decision.allowed,
+                            "reason": decision.reason,
+                            "limits": list(decision.violated_limits),
+                        }
+                    )
                     if decision.allowed:
                         _, fill = executor.execute(intent, decision.approved_quantity, bar.open, timestamp)
                         if fill:
@@ -194,13 +239,13 @@ class BacktestEngine:
                 history[symbol].append(bar)
             if min((len(items) for items in history.values()), default=0) >= warmup:
                 for symbol in ETF_SYMBOLS & history.keys():
-                    signal = etf.evaluate(history[symbol])
-                    if signal:
-                        pending[symbol] = signal
+                    etf_signal = etf.evaluate(history[symbol])
+                    if etf_signal:
+                        pending[symbol] = etf_signal
                 for symbol in CRYPTO_SYMBOLS & history.keys():
-                    signal = crypto.evaluate(history[symbol])
-                    if signal:
-                        pending[symbol] = signal
+                    crypto_signal = crypto.evaluate(history[symbol])
+                    if crypto_signal:
+                        pending[symbol] = crypto_signal
                 equity_bar_count = min((len(history[s]) for s in STOCK_SYMBOLS & history.keys()), default=0)
                 if equity_bar_count and equity_bar_count % 5 == 0:
                     stock_histories = {s: history[s] for s in STOCK_SYMBOLS & history.keys()}
@@ -211,13 +256,33 @@ class BacktestEngine:
                     for symbol, position in list(portfolio.positions.items()):
                         if position.strategy == "stock_momentum" and symbol not in selected and symbol in today:
                             bar = history[symbol][-1]
-                            pending[symbol] = Signal("stock_momentum", symbol, Market.EQUITY, bar.end, bar.end + timedelta(microseconds=1), Direction.FLAT, 1.0, "left top-N", None)
+                            pending[symbol] = Signal(
+                                "stock_momentum",
+                                symbol,
+                                Market.EQUITY,
+                                bar.end,
+                                bar.end + timedelta(microseconds=1),
+                                Direction.FLAT,
+                                1.0,
+                                "left top-N",
+                                stop_price=None,
+                            )
             snapshots.append(portfolio.snapshot(timestamp, prices))
 
         if by_time:
             terminal_time = max(by_time) + timedelta(days=1)
             for symbol, position in list(portfolio.positions.items()):
-                signal = Signal(position.strategy, symbol, position.market, terminal_time, terminal_time, Direction.FLAT, 1.0, "terminal liquidation", None)
+                signal = Signal(
+                    position.strategy,
+                    symbol,
+                    position.market,
+                    terminal_time,
+                    terminal_time,
+                    Direction.FLAT,
+                    1.0,
+                    "terminal liquidation",
+                    stop_price=None,
+                )
                 intent = _intent(signal, position.quantity, terminal_time)
                 _, fill = executor.execute(intent, position.quantity, prices[symbol], terminal_time)
                 if fill:
@@ -238,11 +303,19 @@ class BacktestEngine:
             if len(items) > warmup:
                 static_return += weight * (items[-1].close / items[warmup].open - 1)
         return BacktestResult(
-            snapshots=snapshots, fills=fills, decisions=decisions, metrics=metrics,
-            strategy_pnl=strategy_pnl, benchmark={
+            snapshots=snapshots,
+            fills=fills,
+            decisions=decisions,
+            metrics=metrics,
+            strategy_pnl=strategy_pnl,
+            benchmark={
                 "SPY_buy_hold_total_return": benchmark_return,
                 "static_50_20_15_15_total_return": static_return,
             },
-            data_hash=data_hash, config_hash=self.config.digest,
-            warnings=["Synthetic fixtures are not evidence of real-world profitability.", "Current-stock universe creates survivorship bias; results are preliminary."],
+            data_hash=data_hash,
+            config_hash=self.config.digest,
+            warnings=[
+                "Synthetic fixtures are not evidence of real-world profitability.",
+                "Current-stock universe creates survivorship bias; results are preliminary.",
+            ],
         )

@@ -1,23 +1,34 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import asdict, dataclass
 from math import sqrt
 from statistics import fmean, pstdev
 from typing import Any
-import json
-import re
 
 from .domain import Bar, Market
 from .strategies import atr, sma
 
-
-ALLOWED_INDICATORS = frozenset({
-    "sma", "ema", "momentum", "atr", "rsi", "volatility",
-    "breakout_high", "breakout_low", "relative_volume",
-})
+ALLOWED_INDICATORS = frozenset(
+    {
+        "sma",
+        "ema",
+        "momentum",
+        "atr",
+        "rsi",
+        "volatility",
+        "breakout_high",
+        "breakout_low",
+        "relative_volume",
+    }
+)
 ALLOWED_OPERATORS = frozenset({">", ">=", "<", "<=", "crosses_above", "crosses_below"})
 SEARCHABLE_FAMILIES = (
-    "etf_trend", "stock_momentum", "crypto_trend", "multi_asset_trend",
+    "etf_trend",
+    "stock_momentum",
+    "crypto_trend",
+    "multi_asset_trend",
 )
 EVENT_FAMILIES = frozenset({"news_momentum", "news_underreaction", "shortseller_intelligence", "crisis_event"})
 STRATEGY_FAMILY_CATALOG: dict[str, dict[str, str]] = {
@@ -92,7 +103,8 @@ class StrategySpec:
 
 def strategy_json_schema() -> dict[str, Any]:
     indicator = {
-        "type": "object", "additionalProperties": False,
+        "type": "object",
+        "additionalProperties": False,
         "properties": {
             "alias": {"type": "string"},
             "kind": {"type": "string", "enum": sorted(ALLOWED_INDICATORS)},
@@ -102,7 +114,8 @@ def strategy_json_schema() -> dict[str, Any]:
         "required": ["alias", "kind", "window", "source"],
     }
     rule = {
-        "type": "object", "additionalProperties": False,
+        "type": "object",
+        "additionalProperties": False,
         "properties": {
             "left": {"type": "string"},
             "op": {"type": "string", "enum": sorted(ALLOWED_OPERATORS)},
@@ -111,7 +124,8 @@ def strategy_json_schema() -> dict[str, Any]:
         "required": ["left", "op", "right"],
     }
     return {
-        "type": "object", "additionalProperties": False,
+        "type": "object",
+        "additionalProperties": False,
         "properties": {
             "name": {"type": "string"},
             "family": {"type": "string", "enum": list(SEARCHABLE_FAMILIES)},
@@ -125,8 +139,10 @@ def strategy_json_schema() -> dict[str, Any]:
             "timeframe": {"type": "string", "enum": ["1Min", "5Min", "15Min", "30Min", "1Hour", "1Day"]},
             "stop_mode": {"type": "string", "enum": ["fixed", "trailing"]},
             "stop_expression": {
-                "type": "array", "minItems": 3, "maxItems": 32,
-                "items": {"anyOf": [{"type": "string"}, {"type": "number"}]}
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 32,
+                "items": {"anyOf": [{"type": "string"}, {"type": "number"}]},
             },
             "rank_by": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "max_positions": {"type": "integer", "minimum": 1, "maximum": 10},
@@ -136,19 +152,45 @@ def strategy_json_schema() -> dict[str, Any]:
             "version": {"type": "string"},
         },
         "required": [
-            "name", "family", "market", "universe", "indicators", "entry_all", "exit_any",
-            "stop_atr_alias", "stop_atr_multiple", "timeframe", "stop_mode", "stop_expression",
-            "rank_by", "max_positions",
-            "rebalance_every", "data_requirements", "rationale", "version",
+            "name",
+            "family",
+            "market",
+            "universe",
+            "indicators",
+            "entry_all",
+            "exit_any",
+            "stop_atr_alias",
+            "stop_atr_multiple",
+            "timeframe",
+            "stop_mode",
+            "stop_expression",
+            "rank_by",
+            "max_positions",
+            "rebalance_every",
+            "data_requirements",
+            "rationale",
+            "version",
         ],
     }
 
 
 def parse_strategy_spec(raw: dict[str, Any]) -> StrategySpec:
     required = {
-        "name", "family", "market", "universe", "indicators", "entry_all", "exit_any",
-        "stop_atr_alias", "stop_atr_multiple", "rank_by", "max_positions", "rebalance_every",
-        "data_requirements", "rationale", "version",
+        "name",
+        "family",
+        "market",
+        "universe",
+        "indicators",
+        "entry_all",
+        "exit_any",
+        "stop_atr_alias",
+        "stop_atr_multiple",
+        "rank_by",
+        "max_positions",
+        "rebalance_every",
+        "data_requirements",
+        "rationale",
+        "version",
     }
     optional = {"timeframe", "stop_mode", "stop_expression"}
     unknown = set(raw) - required - optional
@@ -228,13 +270,24 @@ def parse_strategy_spec(raw: dict[str, Any]) -> StrategySpec:
     if family not in EVENT_FAMILIES and requirements:
         raise StrategySpecError("P0 price strategies may not request undeclared external data")
     return StrategySpec(
-        name=name, family=family, market=market, universe=universe, indicators=indicators,
-        entry_all=entry_all, exit_any=exit_any, stop_atr_alias=stop_alias,
-        stop_atr_multiple=stop_multiple, timeframe=timeframe,
-        stop_mode=stop_mode, stop_expression=stop_expression,
-        rank_by=rank_by, max_positions=max_positions,
-        rebalance_every=rebalance_every, data_requirements=requirements,
-        rationale=str(raw["rationale"])[:1000], version=str(raw["version"])[:32],
+        name=name,
+        family=family,
+        market=market,
+        universe=universe,
+        indicators=indicators,
+        entry_all=entry_all,
+        exit_any=exit_any,
+        stop_atr_alias=stop_alias,
+        stop_atr_multiple=stop_multiple,
+        timeframe=timeframe,
+        stop_mode=stop_mode,
+        stop_expression=stop_expression,
+        rank_by=rank_by,
+        max_positions=max_positions,
+        rebalance_every=rebalance_every,
+        data_requirements=requirements,
+        rationale=str(raw["rationale"])[:1000],
+        version=str(raw["version"])[:32],
     )
 
 
@@ -251,7 +304,9 @@ def _series_value(bars: list[Bar], field: str, offset: int = 0) -> float | None:
 
 
 def indicator_value(
-    spec: IndicatorSpec, bars: list[Bar], offset: int = 0,
+    spec: IndicatorSpec,
+    bars: list[Bar],
+    offset: int = 0,
     periods_per_year: float = 252.0,
 ) -> float | None:
     usable = bars[: len(bars) - offset] if offset else bars
@@ -271,7 +326,9 @@ def indicator_value(
     if spec.kind == "atr":
         return atr(usable, spec.window)
     if spec.kind == "volatility":
-        returns = [b / a - 1 for a, b in zip(values[-spec.window - 1 : -1], values[-spec.window:]) if a > 0]
+        returns = [
+            b / a - 1 for a, b in zip(values[-spec.window - 1 : -1], values[-spec.window :], strict=False) if a > 0
+        ]
         return pstdev(returns) * sqrt(periods_per_year) if len(returns) > 1 else 0.0
     if spec.kind == "breakout_high":
         return max(values[-spec.window - 1 : -1])
@@ -281,7 +338,7 @@ def indicator_value(
         baseline = fmean(values[-spec.window - 1 : -1])
         return values[-1] / baseline if baseline > 0 else None
     if spec.kind == "rsi":
-        changes = [b - a for a, b in zip(values[-spec.window - 1 : -1], values[-spec.window:])]
+        changes = [b - a for a, b in zip(values[-spec.window - 1 : -1], values[-spec.window :], strict=False)]
         gains = fmean([max(0.0, value) for value in changes])
         losses = fmean([max(0.0, -value) for value in changes])
         return 100.0 if losses == 0 else 100 - 100 / (1 + gains / losses)
@@ -336,7 +393,11 @@ def rules_match(spec: StrategySpec, bars: list[Bar], rules: tuple[RuleSpec, ...]
         left = current[rule.left]
         right = current[rule.right] if isinstance(rule.right, str) else float(rule.right)
         previous_left = previous.get(rule.left) if previous else None
-        previous_right = previous.get(rule.right) if previous and isinstance(rule.right, str) else (float(rule.right) if not isinstance(rule.right, str) else None)
+        previous_right = (
+            previous.get(rule.right)
+            if previous and isinstance(rule.right, str)
+            else (float(rule.right) if not isinstance(rule.right, str) else None)
+        )
         outcomes.append(_compare(left, rule.op, right, previous_left, previous_right))
     return all(outcomes) if require_all else any(outcomes)
 

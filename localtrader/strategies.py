@@ -17,12 +17,14 @@ def atr(bars: list[Bar], window: int) -> float | None:
     if len(bars) < window + 1:
         return None
     ranges: list[float] = []
-    for previous, current in zip(bars[-window - 1 : -1], bars[-window:]):
-        ranges.append(max(
-            current.high - current.low,
-            abs(current.high - previous.close),
-            abs(current.low - previous.close),
-        ))
+    for previous, current in zip(bars[-window - 1 : -1], bars[-window:], strict=False):
+        ranges.append(
+            max(
+                current.high - current.low,
+                abs(current.high - previous.close),
+                abs(current.low - previous.close),
+            )
+        )
     return fmean(ranges)
 
 
@@ -56,7 +58,11 @@ class ETFTrendStrategy:
         if not bars or bars[-1].market != Market.EQUITY:
             return None
         closes = [bar.close for bar in bars]
-        fast, slow, volatility = sma(closes, self.fast_window), sma(closes, self.slow_window), atr(bars, self.atr_window)
+        fast, slow, volatility = (
+            sma(closes, self.fast_window),
+            sma(closes, self.slow_window),
+            atr(bars, self.atr_window),
+        )
         if fast is None or slow is None or volatility is None or len(closes) <= self.breakout_window:
             return None
         prior_high = max(closes[-self.breakout_window - 1 : -1])
@@ -64,7 +70,14 @@ class ETFTrendStrategy:
         long = latest > slow and fast > slow and latest >= prior_high
         if long:
             strength = (latest / slow - 1) / 0.20
-            return _signal(self.name, bars, Direction.LONG, strength, "trend and prior-high breakout", latest - self.stop_atr * volatility)
+            return _signal(
+                self.name,
+                bars,
+                Direction.LONG,
+                strength,
+                "trend and prior-high breakout",
+                latest - self.stop_atr * volatility,
+            )
         if latest < fast or fast < slow:
             return _signal(self.name, bars, Direction.FLAT, 1.0, "trend exit", None)
         return None
@@ -83,13 +96,24 @@ class CryptoTrendStrategy:
         if not bars or bars[-1].market != Market.CRYPTO:
             return None
         closes = [bar.close for bar in bars]
-        fast, slow, volatility = sma(closes, self.fast_window), sma(closes, self.slow_window), atr(bars, self.atr_window)
+        fast, slow, volatility = (
+            sma(closes, self.fast_window),
+            sma(closes, self.slow_window),
+            atr(bars, self.atr_window),
+        )
         if fast is None or slow is None or volatility is None or len(closes) <= self.breakout_window:
             return None
         latest = closes[-1]
         prior_high = max(closes[-self.breakout_window - 1 : -1])
         if latest > slow and fast > slow and latest >= prior_high:
-            return _signal(self.name, bars, Direction.LONG, (latest / slow - 1) / 0.30, "crypto trend breakout", latest - self.stop_atr * volatility)
+            return _signal(
+                self.name,
+                bars,
+                Direction.LONG,
+                (latest / slow - 1) / 0.30,
+                "crypto trend breakout",
+                latest - self.stop_atr * volatility,
+            )
         if latest < fast or fast < slow:
             return _signal(self.name, bars, Direction.FLAT, 1.0, "crypto trend exit", None)
         return None
@@ -108,7 +132,11 @@ class StockMomentumStrategy:
     def rank(self, histories: dict[str, list[Bar]]) -> list[Signal]:
         ranked: list[tuple[float, list[Bar], float]] = []
         for bars in histories.values():
-            if not bars or bars[-1].market != Market.EQUITY or len(bars) < max(self.trend_window, self.momentum_window + self.skip_recent) + 1:
+            if (
+                not bars
+                or bars[-1].market != Market.EQUITY
+                or len(bars) < max(self.trend_window, self.momentum_window + self.skip_recent) + 1
+            ):
                 continue
             closes = [bar.close for bar in bars]
             trend = sma(closes, self.trend_window)
@@ -125,8 +153,16 @@ class StockMomentumStrategy:
         signals: list[Signal] = []
         for score, bars, volatility in ranked:
             if bars[-1].symbol in selected:
-                signals.append(_signal(self.name, bars, Direction.LONG, score / 0.50, "cross-sectional momentum rank", bars[-1].close - self.stop_atr * volatility))
+                signals.append(
+                    _signal(
+                        self.name,
+                        bars,
+                        Direction.LONG,
+                        score / 0.50,
+                        "cross-sectional momentum rank",
+                        bars[-1].close - self.stop_atr * volatility,
+                    )
+                )
             else:
                 signals.append(_signal(self.name, bars, Direction.FLAT, 1.0, "outside top momentum rank", None))
         return signals
-

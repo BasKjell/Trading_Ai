@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import json
 
 from .config import AppConfig
 from .domain import Direction, Market, OrderIntent, Position, to_dict
@@ -14,7 +14,9 @@ from .risk import RiskEngine
 class PaperSession:
     """Offline-only deterministic simulator. It contains no network or broker code."""
 
-    def __init__(self, config: AppConfig, state_path: str | Path | None = None, audit_path: str | Path | None = None) -> None:
+    def __init__(
+        self, config: AppConfig, state_path: str | Path | None = None, audit_path: str | Path | None = None
+    ) -> None:
         paper = config.raw["paper"]
         self.config = config
         self.state_path = Path(state_path or paper["state_path"])
@@ -37,8 +39,11 @@ class PaperSession:
         self.risk.paused = bool(raw.get("paused", False))
         for item in raw.get("positions", []):
             position = Position(
-                symbol=item["symbol"], market=Market(item["market"]), strategy=item["strategy"],
-                quantity=float(item["quantity"]), average_entry=float(item["average_entry"]),
+                symbol=item["symbol"],
+                market=Market(item["market"]),
+                strategy=item["strategy"],
+                quantity=float(item["quantity"]),
+                average_entry=float(item["average_entry"]),
                 realized_pnl=float(item.get("realized_pnl", 0.0)),
                 unrealized_pnl=float(item.get("unrealized_pnl", 0.0)),
                 stop_price=float(item["stop_price"]) if item.get("stop_price") is not None else None,
@@ -48,15 +53,21 @@ class PaperSession:
     def _persist(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "cash": self.portfolio.cash, "peak_equity": self.portfolio.peak_equity,
+            "cash": self.portfolio.cash,
+            "peak_equity": self.portfolio.peak_equity,
             "processed_events": sorted(self.processed_events),
-            "kill_switch": self.risk.kill_switch, "paused": self.risk.paused,
+            "kill_switch": self.risk.kill_switch,
+            "paused": self.risk.paused,
             "mode": "offline-paper-only",
             "positions": [
                 {
-                    "symbol": p.symbol, "market": p.market.value, "strategy": p.strategy,
-                    "quantity": p.quantity, "average_entry": p.average_entry,
-                    "realized_pnl": p.realized_pnl, "unrealized_pnl": p.unrealized_pnl,
+                    "symbol": p.symbol,
+                    "market": p.market.value,
+                    "strategy": p.strategy,
+                    "quantity": p.quantity,
+                    "average_entry": p.average_entry,
+                    "realized_pnl": p.realized_pnl,
+                    "unrealized_pnl": p.unrealized_pnl,
                     "stop_price": p.stop_price,
                 }
                 for p in self.portfolio.positions.values()
@@ -69,14 +80,30 @@ class PaperSession:
         with self.audit_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, sort_keys=True) + "\n")
 
-    def process_demo_event(self, event_id: str, symbol: str, market: Market, price: float, stop: float, timestamp: datetime) -> bool:
+    def process_demo_event(
+        self, event_id: str, symbol: str, market: Market, price: float, stop: float, timestamp: datetime
+    ) -> bool:
         if event_id in self.processed_events:
             self.audit({"event_id": event_id, "result": "duplicate_ignored", "time": timestamp.isoformat()})
             return False
         self.processed_events.add(event_id)
         quantity = self.risk.size_for_stop(self.portfolio.equity({symbol: price}), price, stop)
-        intent = OrderIntent(event_id, "offline_demo", symbol, market, timestamp, Direction.LONG, quantity, "market", timestamp + timedelta(minutes=5), stop, {})
-        decision = self.risk.decide(intent, self.portfolio, {symbol: price}, timestamp, self.portfolio.equity({symbol: price}))
+        intent = OrderIntent(
+            event_id,
+            "offline_demo",
+            symbol,
+            market,
+            timestamp,
+            Direction.LONG,
+            quantity,
+            "market",
+            timestamp + timedelta(minutes=5),
+            stop,
+            {},
+        )
+        decision = self.risk.decide(
+            intent, self.portfolio, {symbol: price}, timestamp, self.portfolio.equity({symbol: price})
+        )
         record: dict[str, object] = {"event_id": event_id, "decision": to_dict(decision), "mode": "offline-paper-only"}
         if decision.allowed:
             order, fill = self.executor.execute(intent, decision.approved_quantity, price, timestamp)

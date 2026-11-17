@@ -1,9 +1,8 @@
-from datetime import timedelta
 import unittest
 
 from localtrader.data import group_by_symbol, synthetic_fixture
 from localtrader.domain import Direction
-from localtrader.strategies import CryptoTrendStrategy, ETFTrendStrategy, StockMomentumStrategy, atr, sma
+from localtrader.strategies import ETFTrendStrategy, StockMomentumStrategy, atr, sma
 
 
 class StrategyTests(unittest.TestCase):
@@ -32,4 +31,3 @@ class StrategyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

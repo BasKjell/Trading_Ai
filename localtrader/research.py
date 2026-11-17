@@ -31,11 +31,14 @@ def walk_forward_splits(
         validation_start = train_end + purge_size
         validation_end = validation_start + validation_size
         embargo_end = min(length, validation_end + embargo_size)
-        splits.append(TimeSplit(
-            train=slice(0, train_end), purge=slice(train_end, validation_start),
-            validation=slice(validation_start, validation_end),
-            embargo=slice(validation_end, embargo_end),
-        ))
+        splits.append(
+            TimeSplit(
+                train=slice(0, train_end),
+                purge=slice(train_end, validation_start),
+                validation=slice(validation_start, validation_end),
+                embargo=slice(validation_end, embargo_end),
+            )
+        )
         train_end += step
     return splits
 
@@ -45,4 +48,3 @@ def development_validation_holdout(length: int, holdout_fraction: float = 0.20) 
         raise ValueError("invalid holdout request")
     boundary = int(length * (1 - holdout_fraction))
     return slice(0, boundary), slice(boundary, length)
-

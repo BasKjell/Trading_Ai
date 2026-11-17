@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Any, Callable
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-from collections import deque
+import contextlib
 import hashlib
 import json
 import time
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from .alpaca_check import load_local_env
 from .data import available_data_catalog, bars_hash, validate_bars
 from .domain import Bar, Market, to_dict
 from .research_db import ResearchDB
 from .strategy_dsl import StrategySpec
-
 
 ALLOWED_TIMEFRAMES = frozenset({"1Min", "5Min", "15Min", "30Min", "1Hour", "1Day"})
 
@@ -53,23 +54,29 @@ class DataRequestSpec:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "provider": self.provider, "endpoint_type": self.endpoint_type,
-            "symbols": list(self.symbols), "timeframe": self.timeframe,
-            "start": self.start.isoformat(), "end": self.end.isoformat(),
-            "feed": self.feed, "purpose": self.purpose,
+            "provider": self.provider,
+            "endpoint_type": self.endpoint_type,
+            "symbols": list(self.symbols),
+            "timeframe": self.timeframe,
+            "start": self.start.isoformat(),
+            "end": self.end.isoformat(),
+            "feed": self.feed,
+            "purpose": self.purpose,
             "strategy_name": self.strategy_name,
         }
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> DataRequestSpec:
         return cls(
-            provider=str(raw["provider"]), endpoint_type=str(raw["endpoint_type"]),
+            provider=str(raw["provider"]),
+            endpoint_type=str(raw["endpoint_type"]),
             symbols=tuple(str(item) for item in raw["symbols"]),
             timeframe=str(raw["timeframe"]),
             start=datetime.fromisoformat(str(raw["start"]).replace("Z", "+00:00")),
             end=datetime.fromisoformat(str(raw["end"]).replace("Z", "+00:00")),
             feed=str(raw["feed"]) if raw.get("feed") else None,
-            purpose=str(raw["purpose"]), strategy_name=str(raw["strategy_name"]),
+            purpose=str(raw["purpose"]),
+            strategy_name=str(raw["strategy_name"]),
         )
 
 
@@ -96,7 +103,9 @@ class DataRequestPolicy:
             if request.feed is not None or any(catalog[symbol]["market"] != "crypto" for symbol in request.symbols):
                 raise DataRequestError("crypto requests may contain only crypto symbols and no stock feed")
         else:
-            if request.feed not in {"iex", "sip"} or any(catalog[symbol]["market"] in {"crypto", "fx"} for symbol in request.symbols):
+            if request.feed not in {"iex", "sip"} or any(
+                catalog[symbol]["market"] in {"crypto", "fx"} for symbol in request.symbols
+            ):
                 raise DataRequestError("stock requests require iex/sip and Alpaca-tradable stock/ETF proxies")
         estimated = self._estimate_bars(request)
         if estimated > self.max_estimated_bars:
@@ -116,7 +125,8 @@ class DataRequestPolicy:
 
 class MinuteRateLimiter:
     def __init__(
-        self, requests_per_minute: int = 180,
+        self,
+        requests_per_minute: int = 180,
         clock: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -147,16 +157,22 @@ class MinuteRateLimiter:
 
 class AlpacaDatasetDownloader:
     def __init__(
-        self, api_key: str, api_secret: str, root: str | Path = "data",
-        requests_per_minute: int = 180, max_attempts: int = 6,
+        self,
+        api_key: str,
+        api_secret: str,
+        root: str | Path = "data",
+        requests_per_minute: int = 180,
+        max_attempts: int = 6,
         sleeper: Callable[[float], None] = time.sleep,
         wall_clock: Callable[[], float] = time.time,
     ) -> None:
         if not api_key or not api_secret:
             raise DataRequestError("Alpaca data credentials are missing")
         self.headers = {
-            "APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret,
-            "Accept": "application/json", "User-Agent": "local-paper-trader/0.1",
+            "APCA-API-KEY-ID": api_key,
+            "APCA-API-SECRET-KEY": api_secret,
+            "Accept": "application/json",
+            "User-Agent": "local-paper-trader/0.1",
         }
         self.root = Path(root)
         self.max_attempts = max_attempts
@@ -194,23 +210,19 @@ class AlpacaDatasetDownloader:
                 raise DataRequestError(f"Alpaca rejected data request ({error.code}): {last_error[:300]}") from error
             except (URLError, TimeoutError) as error:
                 last_error = str(error)
-                self._sleep_chunked(min(300.0, 2.0 ** attempt))
+                self._sleep_chunked(min(300.0, 2.0**attempt))
         raise RetryExhausted(f"Alpaca request failed after {self.max_attempts} attempts: {last_error[:300]}")
 
     def _cooldown(self, headers: dict[str, str], attempt: int) -> None:
-        delay = min(300.0, 2.0 ** attempt)
+        delay = min(300.0, 2.0**attempt)
         retry_after = headers.get("retry-after")
         reset = headers.get("x-ratelimit-reset")
         if retry_after:
-            try:
+            with contextlib.suppress(ValueError):
                 delay = max(delay, float(retry_after))
-            except ValueError:
-                pass
         if reset:
-            try:
+            with contextlib.suppress(ValueError):
                 delay = max(delay, float(reset) - self.wall_clock() + 1.0)
-            except ValueError:
-                pass
         self._sleep_chunked(max(0.05, min(delay, 900.0)))
 
     def _sleep_chunked(self, seconds: float) -> None:
@@ -226,12 +238,18 @@ class AlpacaDatasetDownloader:
         return "https://data.alpaca.markets/v2/stocks/bars"
 
     def _params(self, request: DataRequestSpec, page_token: str | None = None) -> dict[str, Any]:
-        symbols = [symbol.replace("-", "/") for symbol in request.symbols] if request.endpoint_type == "crypto" else list(request.symbols)
+        symbols = (
+            [symbol.replace("-", "/") for symbol in request.symbols]
+            if request.endpoint_type == "crypto"
+            else list(request.symbols)
+        )
         params: dict[str, Any] = {
-            "symbols": ",".join(symbols), "timeframe": request.timeframe,
+            "symbols": ",".join(symbols),
+            "timeframe": request.timeframe,
             "start": request.start.isoformat().replace("+00:00", "Z"),
             "end": request.end.isoformat().replace("+00:00", "Z"),
-            "limit": 10000, "sort": "asc",
+            "limit": 10000,
+            "sort": "asc",
         }
         if request.endpoint_type == "stocks":
             params.update({"feed": request.feed, "adjustment": "all"})
@@ -240,7 +258,8 @@ class AlpacaDatasetDownloader:
         return params
 
     def download(
-        self, request: DataRequestSpec,
+        self,
+        request: DataRequestSpec,
         progress: Callable[[str], None] | None = None,
     ) -> tuple[list[Bar], dict[str, Any], Path]:
         DataRequestPolicy().validate(request)
@@ -258,9 +277,7 @@ class AlpacaDatasetDownloader:
             payload, _ = self._request_page(url)
             pages.append(payload)
             (raw_dir / f"page_{page_number:05d}.json").write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-            downloaded_bars = sum(
-                len(items) for page in pages for items in page.get("bars", {}).values()
-            )
+            downloaded_bars = sum(len(items) for page in pages for items in page.get("bars", {}).values())
             if progress:
                 formatted = f"{downloaded_bars:,}".replace(",", ".")
                 progress(f"Seite {page_number} – {formatted} Bars")
@@ -278,10 +295,16 @@ class AlpacaDatasetDownloader:
                 handle.write(json.dumps(to_dict(bar), sort_keys=True) + "\n")
         digest = bars_hash(bars)
         manifest = {
-            "dataset_id": digest, "request_id": request.request_id, "provider": "alpaca",
-            "request": request.to_dict(), "downloaded_at": datetime.now(UTC).isoformat(),
-            "bars": len(bars), "pages": page_number, "hash_sha256": digest,
-            "raw_directory": str(raw_dir), "normalized_path": str(normalized_path),
+            "dataset_id": digest,
+            "request_id": request.request_id,
+            "provider": "alpaca",
+            "request": request.to_dict(),
+            "downloaded_at": datetime.now(UTC).isoformat(),
+            "bars": len(bars),
+            "pages": page_number,
+            "hash_sha256": digest,
+            "raw_directory": str(raw_dir),
+            "normalized_path": str(normalized_path),
             "symbols": sorted({bar.symbol for bar in bars}),
             "first_timestamp": min(bar.start for bar in bars).isoformat() if bars else None,
             "last_timestamp": max(bar.start for bar in bars).isoformat() if bars else None,
@@ -292,9 +315,12 @@ class AlpacaDatasetDownloader:
     @staticmethod
     def _duration(timeframe: str) -> timedelta:
         return {
-            "1Min": timedelta(minutes=1), "5Min": timedelta(minutes=5),
-            "15Min": timedelta(minutes=15), "30Min": timedelta(minutes=30),
-            "1Hour": timedelta(hours=1), "1Day": timedelta(days=1),
+            "1Min": timedelta(minutes=1),
+            "5Min": timedelta(minutes=5),
+            "15Min": timedelta(minutes=15),
+            "30Min": timedelta(minutes=30),
+            "1Hour": timedelta(hours=1),
+            "1Day": timedelta(days=1),
         }[timeframe]
 
     def _normalize(self, request: DataRequestSpec, pages: list[dict[str, Any]]) -> list[Bar]:
@@ -308,12 +334,22 @@ class AlpacaDatasetDownloader:
                 for item in items:
                     start = datetime.fromisoformat(str(item["t"]).replace("Z", "+00:00"))
                     end = start + self._duration(request.timeframe)
-                    output.append(Bar(
-                        symbol=symbol, market=market, timeframe=request.timeframe,
-                        start=start, end=end, open=float(item["o"]), high=float(item["h"]),
-                        low=float(item["l"]), close=float(item["c"]), volume=float(item.get("v", 0.0)),
-                        source=f"alpaca_{request.feed or 'crypto_us'}", received_at=max(received, end),
-                    ))
+                    output.append(
+                        Bar(
+                            symbol=symbol,
+                            market=market,
+                            timeframe=request.timeframe,
+                            start=start,
+                            end=end,
+                            open=float(item["o"]),
+                            high=float(item["h"]),
+                            low=float(item["l"]),
+                            close=float(item["c"]),
+                            volume=float(item.get("v", 0.0)),
+                            source=f"alpaca_{request.feed or 'crypto_us'}",
+                            received_at=max(received, end),
+                        )
+                    )
         output.sort(key=lambda bar: (bar.symbol, bar.start))
         if not output:
             raise DataRequestError("Alpaca returned no bars for the approved request")
@@ -331,7 +367,8 @@ class DataWorker:
         return validated.request_id
 
     def process(
-        self, request_id: str,
+        self,
+        request_id: str,
         progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         record = self.db.data_request(request_id)
@@ -374,7 +411,10 @@ class DataWorker:
 
 
 def requests_for_strategy(
-    spec: StrategySpec, lookback_days: int, *, feed: str = "sip",
+    spec: StrategySpec,
+    lookback_days: int,
+    *,
+    feed: str = "sip",
     now: datetime | None = None,
 ) -> list[DataRequestSpec]:
     """Translate a validated strategy into narrowly scoped Alpaca data requests."""
@@ -382,12 +422,17 @@ def requests_for_strategy(
         raise DataRequestError("lookback_days must be in [30, 3650]")
     candidate_end = (now or datetime.now(UTC)) - timedelta(minutes=20)
     timeframe_minutes = {
-        "1Min": 1, "5Min": 5, "15Min": 15, "30Min": 30,
-        "1Hour": 60, "1Day": 1440,
+        "1Min": 1,
+        "5Min": 5,
+        "15Min": 15,
+        "30Min": 30,
+        "1Hour": 60,
+        "1Day": 1440,
     }[spec.timeframe]
     epoch = int(candidate_end.timestamp())
     end = datetime.fromtimestamp(
-        epoch - epoch % (timeframe_minutes * 60), tz=UTC,
+        epoch - epoch % (timeframe_minutes * 60),
+        tz=UTC,
     )
     start = max(datetime(2016, 1, 1, tzinfo=UTC), end - timedelta(days=lookback_days))
     catalog = available_data_catalog()
@@ -405,10 +450,15 @@ def requests_for_strategy(
         if not symbols:
             continue
         request = DataRequestSpec(
-            provider="alpaca", endpoint_type=endpoint_type, symbols=symbols,
-            timeframe=spec.timeframe, start=start, end=end,
+            provider="alpaca",
+            endpoint_type=endpoint_type,
+            symbols=symbols,
+            timeframe=spec.timeframe,
+            start=start,
+            end=end,
             feed=None if endpoint_type == "crypto" else feed,
-            purpose=f"strategy:{spec.name}", strategy_name=spec.name,
+            purpose=f"strategy:{spec.name}",
+            strategy_name=spec.name,
         )
         output.append(DataRequestPolicy().validate(request))
     return output
@@ -423,7 +473,8 @@ def load_datasets(records: list[dict[str, Any]]) -> tuple[list[Bar], dict[str, A
     bars.sort(key=lambda bar: (bar.symbol, bar.start))
     validate_bars(bars)
     return bars, {
-        "source": "alpaca", "dataset_ids": [item["dataset_id"] for item in manifests],
+        "source": "alpaca",
+        "dataset_ids": [item["dataset_id"] for item in manifests],
         "requests": [item["request"] for item in manifests],
         "downloaded_at": max(item["downloaded_at"] for item in manifests),
     }
@@ -433,12 +484,21 @@ def load_normalized_bars(path: str | Path) -> list[Bar]:
     output: list[Bar] = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         item = json.loads(line)
-        output.append(Bar(
-            symbol=item["symbol"], market=Market(item["market"]), timeframe=item["timeframe"],
-            start=datetime.fromisoformat(item["start"]), end=datetime.fromisoformat(item["end"]),
-            open=float(item["open"]), high=float(item["high"]), low=float(item["low"]),
-            close=float(item["close"]), volume=float(item["volume"]), source=item["source"],
-            received_at=datetime.fromisoformat(item["received_at"]),
-        ))
+        output.append(
+            Bar(
+                symbol=item["symbol"],
+                market=Market(item["market"]),
+                timeframe=item["timeframe"],
+                start=datetime.fromisoformat(item["start"]),
+                end=datetime.fromisoformat(item["end"]),
+                open=float(item["open"]),
+                high=float(item["high"]),
+                low=float(item["low"]),
+                close=float(item["close"]),
+                volume=float(item["volume"]),
+                source=item["source"],
+                received_at=datetime.fromisoformat(item["received_at"]),
+            )
+        )
     validate_bars(output)
     return output

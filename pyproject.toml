@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-paper-trader"
-version = "0.1.0"
+version = "0.2.0"
 description = "Offline-first research and paper-trading platform"
 requires-python = ">=3.12"
+# The runtime deliberately uses only the Python standard library.
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3,<9"]
+# Exact pins; keep in sync with requirements-dev.txt
+dev = ["pytest==9.1.1", "ruff==0.16.9", "mypy==2.3.1", "coverage==7.13.0", "pyyaml==6.0.3"]
 
 [project.scripts]
 trader = "localtrader.cli:main"
@@ -22,3 +24,23 @@ include = ["localtrader*"]
 testpaths = ["tests"]
 addopts = "-q"
 
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["legacy"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "DTZ"]
+# Long string literals are allowed; the formatter enforces code layout.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["DTZ"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["localtrader"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+no_implicit_optional = true

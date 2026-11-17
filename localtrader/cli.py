@@ -1,26 +1,29 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
-from pathlib import Path
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
+from .alpaca_check import AlpacaCheckError, checker_from_env
 from .backtest import BacktestEngine
 from .config import load_config
+from .dashboard import serve_dashboard
 from .data import bars_hash, synthetic_fixture
+from .data_requests import (
+    AlpacaDatasetDownloader,
+    DataRequestError,
+    DataRequestSpec,
+    DataWorker,
+)
 from .domain import Market
+from .ollama_lab import OllamaClient, OllamaStrategySearch
 from .paper import PaperSession
 from .reporting import write_report
-from .strategy_lab import StrategyLab, load_builtin_specs
-from .ollama_lab import OllamaClient, OllamaStrategySearch
-from .alpaca_check import AlpacaCheckError, checker_from_env
-from .data_requests import (
-    AlpacaDatasetDownloader, DataRequestError, DataRequestSpec, DataWorker,
-)
 from .research_db import ResearchDB
-from .dashboard import serve_dashboard
 from .strategy_dsl import SEARCHABLE_FAMILIES
+from .strategy_lab import StrategyLab, load_builtin_specs
 
 
 def run_backtest(args: argparse.Namespace) -> int:
@@ -29,11 +32,30 @@ def run_backtest(args: argparse.Namespace) -> int:
     result = BacktestEngine(config, args.cost_multiplier).run(bars, bars_hash(bars))
     output = write_report(result, args.output)
     Path(output, "config_snapshot.toml").write_text(Path(args.config).read_text(encoding="utf-8"), encoding="utf-8")
-    Path(output, "dataset_manifest.json").write_text(json.dumps({
-        "source": "synthetic_fixture", "retrieved_at": None, "bars": len(bars),
-        "hash_sha256": bars_hash(bars), "purpose": "offline smoke test only",
-    }, indent=2), encoding="utf-8")
-    print(json.dumps({"report": str(output), "metrics": result.metrics, "benchmark": result.benchmark, "warnings": result.warnings}, indent=2))
+    Path(output, "dataset_manifest.json").write_text(
+        json.dumps(
+            {
+                "source": "synthetic_fixture",
+                "retrieved_at": None,
+                "bars": len(bars),
+                "hash_sha256": bars_hash(bars),
+                "purpose": "offline smoke test only",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(
+        json.dumps(
+            {
+                "report": str(output),
+                "metrics": result.metrics,
+                "benchmark": result.benchmark,
+                "warnings": result.warnings,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -43,7 +65,18 @@ def run_paper(args: argparse.Namespace) -> int:
     now = datetime(2026, 1, 5, 15, 0, tzinfo=UTC)
     accepted = session.process_demo_event("offline-demo-001", "SPY", Market.EQUITY, 500.0, 485.0, now)
     duplicate = session.process_demo_event("offline-demo-001", "SPY", Market.EQUITY, 500.0, 485.0, now)
-    print(json.dumps({"mode": "offline-paper-only", "first_event_accepted": accepted, "duplicate_accepted": duplicate, "state": str(session.state_path), "audit": str(session.audit_path)}, indent=2))
+    print(
+        json.dumps(
+            {
+                "mode": "offline-paper-only",
+                "first_event_accepted": accepted,
+                "duplicate_accepted": duplicate,
+                "state": str(session.state_path),
+                "audit": str(session.audit_path),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -68,37 +101,62 @@ def lab_search(args: argparse.Namespace) -> int:
     worker = None
     if args.auto_data:
         data_config = config.raw.get("data", {}).get("alpaca", {})
-        worker = DataWorker(lab.db, AlpacaDatasetDownloader.from_env(
-            args.env_file, root=args.data_root,
-            requests_per_minute=int(data_config.get("requests_per_minute", 180)),
-            max_attempts=int(data_config.get("max_attempts", 6)),
-        ))
+        worker = DataWorker(
+            lab.db,
+            AlpacaDatasetDownloader.from_env(
+                args.env_file,
+                root=args.data_root,
+                requests_per_minute=int(data_config.get("requests_per_minute", 180)),
+                max_attempts=int(data_config.get("max_attempts", 6)),
+            ),
+        )
     try:
         families = tuple(item.strip() for item in args.families.split(",") if item.strip())
         unknown = set(families) - set(SEARCHABLE_FAMILIES)
         if not families or unknown:
             raise ValueError(f"invalid families: {sorted(unknown)}; allowed={list(SEARCHABLE_FAMILIES)}")
         results = OllamaStrategySearch(lab, client, worker).run(
-            args.model, args.iterations, args.days, auto_data=args.auto_data,
-            lookback_days=args.lookback_days, feed=args.feed,
+            args.model,
+            args.iterations,
+            args.days,
+            auto_data=args.auto_data,
+            lookback_days=args.lookback_days,
+            feed=args.feed,
             progress=lambda message: print(message, file=sys.stderr, flush=True),
-            continuous=args.continuous, pause_seconds=args.pause_seconds,
+            continuous=args.continuous,
+            pause_seconds=args.pause_seconds,
             families=families,
         )
     except KeyboardInterrupt:
-        print("\nSuche kontrolliert beendet; abgeschlossene Iterationen bleiben gespeichert.", file=sys.stderr, flush=True)
-        print(json.dumps({
-            "model": args.model, "status": "stopped_by_user",
-            "research_champion": lab.champion(), "paper_promotion": "manual-only",
-        }, indent=2))
+        print(
+            "\nSuche kontrolliert beendet; abgeschlossene Iterationen bleiben gespeichert.", file=sys.stderr, flush=True
+        )
+        print(
+            json.dumps(
+                {
+                    "model": args.model,
+                    "status": "stopped_by_user",
+                    "research_champion": lab.champion(),
+                    "paper_promotion": "manual-only",
+                },
+                indent=2,
+            )
+        )
         return 130
     except ValueError as error:
         print(json.dumps({"status": "rejected", "error": str(error)}, indent=2))
         return 2
-    print(json.dumps({
-        "model": args.model, "evaluated": [item.to_dict() for item in results],
-        "research_champion": lab.champion(), "paper_promotion": "manual-only",
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "model": args.model,
+                "evaluated": [item.to_dict() for item in results],
+                "research_champion": lab.champion(),
+                "paper_promotion": "manual-only",
+            },
+            indent=2,
+        )
+    )
     return 0 if args.continuous or len(results) == args.iterations else 2
 
 
@@ -108,7 +166,8 @@ def _data_worker(args: argparse.Namespace) -> DataWorker:
     return DataWorker(
         ResearchDB(Path(args.registry) / "research.db"),
         AlpacaDatasetDownloader.from_env(
-            args.env_file, root=args.data_root,
+            args.env_file,
+            root=args.data_root,
             requests_per_minute=int(raw.get("requests_per_minute", 180)),
             max_attempts=int(raw.get("max_attempts", 6)),
         ),
@@ -118,13 +177,15 @@ def _data_worker(args: argparse.Namespace) -> DataWorker:
 def data_request(args: argparse.Namespace) -> int:
     try:
         request = DataRequestSpec(
-            provider="alpaca", endpoint_type=args.endpoint_type,
+            provider="alpaca",
+            endpoint_type=args.endpoint_type,
             symbols=tuple(item.strip().upper() for item in args.symbols.split(",") if item.strip()),
             timeframe=args.timeframe,
             start=datetime.fromisoformat(args.start.replace("Z", "+00:00")),
             end=datetime.fromisoformat(args.end.replace("Z", "+00:00")),
             feed=None if args.endpoint_type == "crypto" else args.feed,
-            purpose=args.purpose, strategy_name=args.strategy_name,
+            purpose=args.purpose,
+            strategy_name=args.strategy_name,
         )
         request_id = _data_worker(args).enqueue(request)
     except (DataRequestError, ValueError) as error:
@@ -136,9 +197,16 @@ def data_request(args: argparse.Namespace) -> int:
 
 def data_worker(args: argparse.Namespace) -> int:
     worker = _data_worker(args)
-    progress = lambda message: print(message, file=sys.stderr, flush=True)
+
+    def progress(message: str) -> None:
+        print(message, file=sys.stderr, flush=True)
+
     try:
-        result = worker.process(args.request_id, progress=progress) if args.request_id else worker.process_next(progress=progress)
+        result = (
+            worker.process(args.request_id, progress=progress)
+            if args.request_id
+            else worker.process_next(progress=progress)
+        )
     except DataRequestError as error:
         print(json.dumps({"status": "cooldown_or_failed", "error": str(error)}, indent=2))
         return 2
@@ -152,11 +220,19 @@ def data_worker(args: argparse.Namespace) -> int:
 def lab_status(args: argparse.Namespace) -> int:
     lab = StrategyLab(load_config(args.config), args.registry)
     client = OllamaClient(args.ollama_url, args.timeout)
-    print(json.dumps({
-        "ollama_models": client.models(), "research_champion": lab.champion(),
-        "history": str(lab.history_path), "database": str(lab.db.path),
-        "database_counts": lab.db.status(), "paper_promotion": "manual-only",
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "ollama_models": client.models(),
+                "research_champion": lab.champion(),
+                "history": str(lab.history_path),
+                "database": str(lab.db.path),
+                "database_counts": lab.db.status(),
+                "paper_promotion": "manual-only",
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -178,8 +254,7 @@ def alpaca_check(args: argparse.Namespace) -> int:
     print(json.dumps(result, indent=2))
     account = result["paper_account"]
     data_available = (
-        result["stock_data"]["historical"]["iex"]["available"]
-        or result["stock_data"]["historical"]["sip"]["available"]
+        result["stock_data"]["historical"]["iex"]["available"] or result["stock_data"]["historical"]["sip"]["available"]
     )
     account_ok = account.get("authenticated", account.get("status") == "not_applicable")
     return 0 if account_ok and data_available else 2
@@ -214,7 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--continuous", action="store_true", help="search indefinitely until Ctrl+C")
     search.add_argument("--pause-seconds", type=float, default=0.0, help="optional pause between continuous iterations")
     search.add_argument(
-        "--families", default=",".join(SEARCHABLE_FAMILIES),
+        "--families",
+        default=",".join(SEARCHABLE_FAMILIES),
         help="comma-separated price strategy families; default covers all P0/P1 families",
     )
     search.add_argument("--days", type=int, default=900)

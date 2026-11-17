@@ -16,7 +16,10 @@ class Portfolio:
         self.realized_costs = 0.0
 
     def market_value(self, prices: dict[str, float]) -> float:
-        return sum(position.quantity * prices.get(symbol, position.average_entry) for symbol, position in self.positions.items())
+        return sum(
+            position.quantity * prices.get(symbol, position.average_entry)
+            for symbol, position in self.positions.items()
+        )
 
     def equity(self, prices: dict[str, float]) -> float:
         return self.cash + self.market_value(prices)
@@ -74,4 +77,3 @@ class Portfolio:
             drawdown=drawdown,
             peak_equity=self.peak_equity,
         )
-

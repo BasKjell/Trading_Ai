@@ -1,7 +1,7 @@
+import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from datetime import UTC, datetime
-import unittest
 
 from localtrader.backtest import BacktestEngine
 from localtrader.broker_guard import PaperEndpointGuard, UnsafeBrokerEndpoint
@@ -41,7 +41,9 @@ class PaperBacktestTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             session = PaperSession(self.config, Path(directory) / "s.json", Path(directory) / "a.jsonl")
             session.set_kill_switch(True)
-            allowed = session.process_demo_event("blocked", "SPY", Market.EQUITY, 500, 485, datetime(2026, 1, 5, 15, 0, tzinfo=UTC))
+            allowed = session.process_demo_event(
+                "blocked", "SPY", Market.EQUITY, 500, 485, datetime(2026, 1, 5, 15, 0, tzinfo=UTC)
+            )
             self.assertFalse(allowed)
 
     def test_live_broker_endpoint_is_rejected(self) -> None:
@@ -49,9 +51,10 @@ class PaperBacktestTests(unittest.TestCase):
             PaperEndpointGuard.verify("https://api.alpaca.markets", True)
         with self.assertRaises(UnsafeBrokerEndpoint):
             PaperEndpointGuard.verify("https://paper-api.alpaca.markets", False)
-        self.assertEqual(PaperEndpointGuard.verify("https://paper-api.alpaca.markets/", True), "https://paper-api.alpaca.markets")
+        self.assertEqual(
+            PaperEndpointGuard.verify("https://paper-api.alpaca.markets/", True), "https://paper-api.alpaca.markets"
+        )
 
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import sqlite3
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -7,15 +10,11 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 from urllib.parse import urlparse
-import hashlib
-import json
-import sqlite3
 
-from .research_db import ResearchDB
 from .config import AppConfig, load_config
-from .strategy_lab import robustness_reasons
+from .research_db import ResearchDB
 from .strategy_dsl import STRATEGY_FAMILY_CATALOG
-
+from .strategy_lab import robustness_reasons
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -31,7 +30,8 @@ def _median(values: list[float | None]) -> float | None:
 
 
 def _best_model(
-    model_stats: list[dict[str, Any]], by_model: dict[str, list[dict[str, Any]]],
+    model_stats: list[dict[str, Any]],
+    by_model: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any] | None:
     """Select the leading LLM without presenting a rejected result as trade-ready."""
     ranked: list[tuple[tuple[float, ...], dict[str, Any]]] = []
@@ -43,8 +43,10 @@ def _best_model(
         if robust:
             candidate = max(robust, key=lambda item: float(item["score"]))
             rank = (
-                1.0, float(candidate["score"]),
-                float(stats_by_name[model]["eligible_rate"] or 0.0), float(len(items)),
+                1.0,
+                float(candidate["score"]),
+                float(stats_by_name[model]["eligible_rate"] or 0.0),
+                float(len(items)),
             )
             status = "robust"
         else:
@@ -60,25 +62,38 @@ def _best_model(
             )
             # First compare proximity to the gates, then the amount of evidence.
             rank = (
-                0.0, -float(len(candidate["reasons"])),
-                float(min(len(items), 20)) / 20.0, float(candidate["score"]),
+                0.0,
+                -float(len(candidate["reasons"])),
+                float(min(len(items), 20)) / 20.0,
+                float(candidate["score"]),
             )
             status = "provisional"
-        ranked.append((rank, {
-            "model": model, "status": status, "trade_ready": status == "robust",
-            "evaluations": len(items), "eligible": stats_by_name[model]["eligible"],
-            "eligible_rate": stats_by_name[model]["eligible_rate"],
-            "candidate": candidate,
-            "ranking_basis": (
-                "best robust candidate" if status == "robust"
-                else "fewest failed robustness gates, then evidence and score"
-            ),
-        }))
+        ranked.append(
+            (
+                rank,
+                {
+                    "model": model,
+                    "status": status,
+                    "trade_ready": status == "robust",
+                    "evaluations": len(items),
+                    "eligible": stats_by_name[model]["eligible"],
+                    "eligible_rate": stats_by_name[model]["eligible_rate"],
+                    "candidate": candidate,
+                    "ranking_basis": (
+                        "best robust candidate"
+                        if status == "robust"
+                        else "fewest failed robustness gates, then evidence and score"
+                    ),
+                },
+            )
+        )
     return max(ranked, key=lambda item: item[0])[1] if ranked else None
 
 
 def _read_dashboard(
-    db_path: Path, champion_path: Path, config: AppConfig | None = None,
+    db_path: Path,
+    champion_path: Path,
+    config: AppConfig | None = None,
 ) -> dict[str, Any]:
     config = config or load_config()
     if not db_path.exists():
@@ -98,7 +113,8 @@ def _read_dashboard(
             if row["event_type"] == "proposal" and isinstance(payload.get("spec"), dict):
                 proposal_counts[model] += 1
                 fallback_generators[_spec_digest(payload["spec"])] = {
-                    "model": model, "iteration": payload.get("iteration"),
+                    "model": model,
+                    "iteration": payload.get("iteration"),
                 }
             elif row["event_type"] == "rejection":
                 rejection_events[model] += 1
@@ -114,26 +130,35 @@ def _read_dashboard(
             result = json.loads(row["result_json"])
             fallback = fallback_generators.get(str(row["candidate_id"]), {})
             model = str(row["generator_model"] or fallback.get("model") or "baseline/manual")
-            reasons = list(dict.fromkeys(
-                [str(reason) for reason in result.get("reasons", [])]
-                + robustness_reasons(config, result)
-            ))
+            reasons = list(
+                dict.fromkeys(
+                    [str(reason) for reason in result.get("reasons", [])] + robustness_reasons(config, result)
+                )
+            )
             reason_counts.update(reasons)
             spec = result.get("spec", {})
             dataset = result.get("dataset", {})
             candidate = {
-                "id": int(row["id"]), "candidate_id": str(row["candidate_id"]),
+                "id": int(row["id"]),
+                "candidate_id": str(row["candidate_id"]),
                 "model": model,
                 "iteration": row["generator_iteration"] or fallback.get("iteration"),
-                "name": result.get("name"), "family": result.get("family"),
+                "name": result.get("name"),
+                "family": result.get("family"),
                 "timeframe": spec.get("timeframe", "1Day"),
-                "universe": spec.get("universe", []), "status": result.get("status"),
-                "eligible": result.get("status") == "evaluated" and not reasons, "score": result.get("score"),
-                "return": result.get("median_total_return"), "sharpe": result.get("median_sharpe"),
-                "drawdown": result.get("worst_max_drawdown"), "trades": result.get("median_trades"),
-                "cost_3x_return": result.get("cost_3x_total_return"), "reasons": reasons,
+                "universe": spec.get("universe", []),
+                "status": result.get("status"),
+                "eligible": result.get("status") == "evaluated" and not reasons,
+                "score": result.get("score"),
+                "return": result.get("median_total_return"),
+                "sharpe": result.get("median_sharpe"),
+                "drawdown": result.get("worst_max_drawdown"),
+                "trades": result.get("median_trades"),
+                "cost_3x_return": result.get("cost_3x_total_return"),
+                "reasons": reasons,
                 "positive_fold_ratio": result.get("positive_fold_ratio"),
-                "dataset_source": dataset.get("source"), "bars": dataset.get("bars"),
+                "dataset_source": dataset.get("source"),
+                "bars": dataset.get("bars"),
                 "evaluated_at": result.get("evaluated_at") or row["evaluated_at"],
             }
             candidates.append(candidate)
@@ -146,18 +171,22 @@ def _read_dashboard(
             eligible_count = sum(bool(item["eligible"]) for item in items)
             scored = [item for item in items if item["score"] is not None]
             best = max(scored, key=lambda item: float(item["score"]), default=None)
-            model_stats.append({
-                "model": model, "proposals": proposal_counts[model], "evaluations": len(items),
-                "eligible": eligible_count,
-                "eligible_rate": eligible_count / len(items) if items else None,
-                "median_score": _median([item["score"] for item in items]),
-                "median_return": _median([item["return"] for item in items]),
-                "median_sharpe": _median([item["sharpe"] for item in items]),
-                "median_drawdown": _median([item["drawdown"] for item in items]),
-                "best_score": best["score"] if best else None,
-                "best_candidate": best["name"] if best else None,
-                "generation_rejections": rejection_events[model],
-            })
+            model_stats.append(
+                {
+                    "model": model,
+                    "proposals": proposal_counts[model],
+                    "evaluations": len(items),
+                    "eligible": eligible_count,
+                    "eligible_rate": eligible_count / len(items) if items else None,
+                    "median_score": _median([item["score"] for item in items]),
+                    "median_return": _median([item["return"] for item in items]),
+                    "median_sharpe": _median([item["sharpe"] for item in items]),
+                    "median_drawdown": _median([item["drawdown"] for item in items]),
+                    "best_score": best["score"] if best else None,
+                    "best_candidate": best["name"] if best else None,
+                    "generation_rejections": rejection_events[model],
+                }
+            )
 
         best_model = _best_model(model_stats, by_model)
         if best_model is not None:
@@ -171,13 +200,19 @@ def _read_dashboard(
         requests = []
         for row in request_rows:
             request = json.loads(row["request_json"])
-            requests.append({
-                "request_id": str(row["request_id"]), "status": str(row["status"]),
-                "symbols": request.get("symbols", []), "timeframe": request.get("timeframe"),
-                "strategy": request.get("strategy_name"), "attempts": int(row["attempt_count"]),
-                "cooldown_until": row["cooldown_until"], "error": row["error"],
-                "updated_at": row["updated_at"],
-            })
+            requests.append(
+                {
+                    "request_id": str(row["request_id"]),
+                    "status": str(row["status"]),
+                    "symbols": request.get("symbols", []),
+                    "timeframe": request.get("timeframe"),
+                    "strategy": request.get("strategy_name"),
+                    "attempts": int(row["attempt_count"]),
+                    "cooldown_until": row["cooldown_until"],
+                    "error": row["error"],
+                    "updated_at": row["updated_at"],
+                }
+            )
         request_status = dict(Counter(item["status"] for item in requests))
     finally:
         connection.close()
@@ -193,16 +228,17 @@ def _read_dashboard(
     strategy_coverage = []
     for family, metadata in STRATEGY_FAMILY_CATALOG.items():
         items = [item for item in candidates if item["family"] == family]
-        missing = sorted({
-            reason.removeprefix("missing:") for item in items for reason in item["reasons"]
-            if reason.startswith("missing:")
-        })
+        missing = sorted(
+            {
+                reason.removeprefix("missing:")
+                for item in items
+                for reason in item["reasons"]
+                if reason.startswith("missing:")
+            }
+        )
         evaluated = sum(item["status"] == "evaluated" for item in items)
         eligible = sum(bool(item["eligible"]) for item in items)
-        real_eligible = sum(
-            bool(item["eligible"]) and item["dataset_source"] != "synthetic_fixture"
-            for item in items
-        )
+        real_eligible = sum(bool(item["eligible"]) and item["dataset_source"] != "synthetic_fixture" for item in items)
         if real_eligible:
             status = "robust_candidate"
         elif eligible:
@@ -213,12 +249,18 @@ def _read_dashboard(
             status = "shadow_missing_data"
         else:
             status = "not_evaluated"
-        strategy_coverage.append({
-            "family": family, **metadata, "status": status,
-            "evaluations": len(items), "completed": evaluated, "eligible": eligible,
-            "real_eligible": real_eligible,
-            "missing_requirements": missing,
-        })
+        strategy_coverage.append(
+            {
+                "family": family,
+                **metadata,
+                "status": status,
+                "evaluations": len(items),
+                "completed": evaluated,
+                "eligible": eligible,
+                "real_eligible": real_eligible,
+                "missing_requirements": missing,
+            }
+        )
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "overview": {
@@ -234,9 +276,7 @@ def _read_dashboard(
         "strategy_coverage": strategy_coverage,
         "candidates": list(reversed(candidates[-500:])),
         "timeline": candidates[-500:],
-        "rejection_reasons": [
-            {"reason": reason, "count": count} for reason, count in reason_counts.most_common()
-        ],
+        "rejection_reasons": [{"reason": reason, "count": count} for reason, count in reason_counts.most_common()],
         "data_requests": requests,
         "request_status": request_status,
     }
@@ -246,8 +286,12 @@ class DashboardServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(
-        self, address: tuple[str, int], db_path: Path, champion_path: Path,
-        html_path: Path, config: AppConfig,
+        self,
+        address: tuple[str, int],
+        db_path: Path,
+        champion_path: Path,
+        html_path: Path,
+        config: AppConfig,
     ) -> None:
         super().__init__(address, DashboardHandler)
         self.db_path = db_path
@@ -265,7 +309,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'",
+        )
         self.end_headers()
         self.wfile.write(payload)
 
@@ -275,7 +322,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/dashboard":
                 payload = json.dumps(
                     _read_dashboard(self.server.db_path, self.server.champion_path, self.server.config),
-                    separators=(",", ":"), allow_nan=False,
+                    separators=(",", ":"),
+                    allow_nan=False,
                 ).encode()
                 self._send(200, "application/json; charset=utf-8", payload)
                 return
@@ -295,7 +343,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def serve_dashboard(
-    registry_dir: str | Path = "research_registry", host: str = "127.0.0.1", port: int = 8501,
+    registry_dir: str | Path = "research_registry",
+    host: str = "127.0.0.1",
+    port: int = 8501,
     config_path: str | Path = "config/default.toml",
 ) -> None:
     if host not in LOOPBACK_HOSTS:
@@ -306,8 +356,11 @@ def serve_dashboard(
     ResearchDB(registry / "research.db")  # Apply safe additive migrations before read-only serving.
     html_path = Path(__file__).with_name("dashboard.html")
     server = DashboardServer(
-        (host, port), registry / "research.db", registry / "research_champion.json",
-        html_path, load_config(config_path),
+        (host, port),
+        registry / "research.db",
+        registry / "research_champion.json",
+        html_path,
+        load_config(config_path),
     )
     print(f"Dashboard: http://{host}:{port}", flush=True)
     print("Beenden mit Ctrl+C", flush=True)

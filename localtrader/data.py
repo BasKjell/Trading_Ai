@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import UTC, datetime, time, timedelta
 import hashlib
 import json
 import math
 import random
+from collections import defaultdict
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from .domain import Bar, Market
-
 
 SYNTHETIC_CATALOG: dict[str, dict[str, str]] = {
     "SPY": {"market": "equity", "asset_class": "us_index_etf"},
@@ -55,10 +54,7 @@ def validate_bars(bars: list[Bar]) -> None:
 
 
 def bars_hash(bars: list[Bar]) -> str:
-    payload = [
-        [b.symbol, b.start.isoformat(), b.open, b.high, b.low, b.close, b.volume, b.source]
-        for b in bars
-    ]
+    payload = [[b.symbol, b.start.isoformat(), b.open, b.high, b.low, b.close, b.volume, b.source] for b in bars]
     return hashlib.sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -113,12 +109,22 @@ def synthetic_fixture(seed: int = 20261106, days: int = 1000) -> list[Bar]:
             low = min(open_price, close) * max(0.01, 1 - width)
             start = cursor
             end = cursor + timedelta(hours=23, minutes=59)
-            output.append(Bar(
-                symbol=symbol, market=market, timeframe="1d", start=start, end=end,
-                open=round(open_price, 6), high=round(high, 6), low=round(low, 6),
-                close=round(close, 6), volume=float(rng.randint(1_000_000, 10_000_000)),
-                source="synthetic_fixture", received_at=end + timedelta(minutes=1),
-            ))
+            output.append(
+                Bar(
+                    symbol=symbol,
+                    market=market,
+                    timeframe="1d",
+                    start=start,
+                    end=end,
+                    open=round(open_price, 6),
+                    high=round(high, 6),
+                    low=round(low, 6),
+                    close=round(close, 6),
+                    volume=float(rng.randint(1_000_000, 10_000_000)),
+                    source="synthetic_fixture",
+                    received_at=end + timedelta(minutes=1),
+                )
+            )
             prices[symbol] = close
             produced[symbol] += 1
         cursor += timedelta(days=1)

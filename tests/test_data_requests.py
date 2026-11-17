@@ -1,12 +1,17 @@
+import unittest
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from localtrader.data_requests import (
-    DataRequestError, DataRequestPolicy, DataRequestSpec, DataWorker,
-    MinuteRateLimiter, RetryExhausted, requests_for_strategy,
+    DataRequestError,
+    DataRequestPolicy,
+    DataRequestSpec,
+    DataWorker,
+    MinuteRateLimiter,
+    RetryExhausted,
+    requests_for_strategy,
 )
 from localtrader.research_db import ResearchDB
 from localtrader.strategy_dsl import load_strategy_spec
@@ -14,11 +19,15 @@ from localtrader.strategy_dsl import load_strategy_spec
 
 def valid_request(**changes):
     values = {
-        "provider": "alpaca", "endpoint_type": "stocks", "symbols": ("SPY",),
+        "provider": "alpaca",
+        "endpoint_type": "stocks",
+        "symbols": ("SPY",),
         "timeframe": "5Min",
         "start": datetime(2026, 1, 1, tzinfo=UTC),
         "end": datetime(2026, 2, 1, tzinfo=UTC),
-        "feed": "sip", "purpose": "research:test", "strategy_name": "test",
+        "feed": "sip",
+        "purpose": "research:test",
+        "strategy_name": "test",
     }
     values.update(changes)
     return DataRequestSpec(**values)
@@ -31,7 +40,6 @@ class DataRequestTests(unittest.TestCase):
             policy.validate(valid_request())
         with self.assertRaisesRegex(DataRequestError, "at least 15 minutes"):
             DataRequestPolicy().validate(valid_request(end=datetime.now(UTC)))
-
 
     def test_rate_limiter_waits_until_window_opens(self):
         state = {"now": 0.0, "slept": 0.0}
@@ -46,16 +54,16 @@ class DataRequestTests(unittest.TestCase):
         limiter.acquire()
         self.assertGreaterEqual(state["slept"], 60.0)
 
-
     def test_strategy_requests_are_split_by_alpaca_endpoint(self):
         spec = load_strategy_spec("strategy_specs/multi_asset_trend.json")
         spec = replace(spec, universe=tuple(symbol for symbol in spec.universe if symbol != "EUR-USD"))
         requests = requests_for_strategy(
-            spec, 365, now=datetime(2026, 6, 1, tzinfo=UTC),
+            spec,
+            365,
+            now=datetime(2026, 6, 1, tzinfo=UTC),
         )
         self.assertEqual({item.endpoint_type for item in requests}, {"stocks", "crypto"})
         self.assertTrue(all(item.end == datetime(2026, 5, 31, tzinfo=UTC) for item in requests))
-
 
     def test_worker_persists_cooldown_and_does_not_retry_early(self):
         class ExhaustedDownloader:

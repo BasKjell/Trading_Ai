@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from pathlib import Path
-from contextlib import contextmanager
-from typing import Any, Iterator
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 
 class ResearchDB:
@@ -98,20 +99,36 @@ class ResearchDB:
         with self.connect() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO strategy_specs(candidate_id,name,family,source,spec_json,created_at) VALUES(?,?,?,?,?,?)",
-                (candidate_id, spec["name"], spec["family"], source, json.dumps(spec, sort_keys=True), datetime.now(UTC).isoformat()),
+                (
+                    candidate_id,
+                    spec["name"],
+                    spec["family"],
+                    source,
+                    json.dumps(spec, sort_keys=True),
+                    datetime.now(UTC).isoformat(),
+                ),
             )
 
     def store_evaluation(
-        self, candidate_id: str, result: dict[str, Any],
-        generator_model: str | None = None, generator_iteration: int | None = None,
+        self,
+        candidate_id: str,
+        result: dict[str, Any],
+        generator_model: str | None = None,
+        generator_iteration: int | None = None,
     ) -> None:
         with self.connect() as connection:
             connection.execute(
                 "INSERT INTO evaluations(candidate_id,status,score,eligible,result_json,evaluated_at,generator_model,generator_iteration) "
                 "VALUES(?,?,?,?,?,?,?,?)",
                 (
-                    candidate_id, result["status"], result.get("score"), int(bool(result["eligible"])),
-                    json.dumps(result, sort_keys=True), result["evaluated_at"], generator_model, generator_iteration,
+                    candidate_id,
+                    result["status"],
+                    result.get("score"),
+                    int(bool(result["eligible"])),
+                    json.dumps(result, sort_keys=True),
+                    result["evaluated_at"],
+                    generator_model,
+                    generator_iteration,
                 ),
             )
 
@@ -138,7 +155,14 @@ class ResearchDB:
         with self.connect() as connection:
             return {
                 table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-                for table in ("strategy_specs", "evaluations", "llm_events", "data_catalog", "data_requests", "datasets")
+                for table in (
+                    "strategy_specs",
+                    "evaluations",
+                    "llm_events",
+                    "data_catalog",
+                    "data_requests",
+                    "datasets",
+                )
             }
 
     def enqueue_data_request(self, request_id: str, payload: dict[str, Any]) -> None:
@@ -172,8 +196,13 @@ class ResearchDB:
             return result
 
     def mark_data_request(
-        self, request_id: str, status: str, *, error: str | None = None,
-        cooldown_until: str | None = None, dataset_id: str | None = None,
+        self,
+        request_id: str,
+        status: str,
+        *,
+        error: str | None = None,
+        cooldown_until: str | None = None,
+        dataset_id: str | None = None,
         increment_attempt: bool = False,
     ) -> None:
         if status not in {"pending", "running", "cooldown", "complete", "failed"}:
@@ -183,27 +212,42 @@ class ResearchDB:
                 "UPDATE data_requests SET status=?,error=?,cooldown_until=?,dataset_id=COALESCE(?,dataset_id),"
                 "attempt_count=attempt_count+?,updated_at=? WHERE request_id=?",
                 (
-                    status, error[:500] if error else None, cooldown_until, dataset_id,
-                    1 if increment_attempt else 0, datetime.now(UTC).isoformat(), request_id,
+                    status,
+                    error[:500] if error else None,
+                    cooldown_until,
+                    dataset_id,
+                    1 if increment_attempt else 0,
+                    datetime.now(UTC).isoformat(),
+                    request_id,
                 ),
             )
 
     def store_dataset(
-        self, dataset_id: str, request_id: str, provider: str,
-        normalized_path: str, manifest: dict[str, Any],
+        self,
+        dataset_id: str,
+        request_id: str,
+        provider: str,
+        normalized_path: str,
+        manifest: dict[str, Any],
     ) -> None:
         with self.connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO datasets(dataset_id,request_id,provider,normalized_path,manifest_json,created_at) VALUES(?,?,?,?,?,?)",
                 (
-                    dataset_id, request_id, provider, normalized_path,
-                    json.dumps(manifest, sort_keys=True), datetime.now(UTC).isoformat(),
+                    dataset_id,
+                    request_id,
+                    provider,
+                    normalized_path,
+                    json.dumps(manifest, sort_keys=True),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
 
     def dataset_for_request(self, request_id: str) -> dict[str, Any] | None:
         with self.connect() as connection:
-            row = connection.execute("SELECT * FROM datasets WHERE request_id=? ORDER BY created_at DESC LIMIT 1", (request_id,)).fetchone()
+            row = connection.execute(
+                "SELECT * FROM datasets WHERE request_id=? ORDER BY created_at DESC LIMIT 1", (request_id,)
+            ).fetchone()
             if row is None:
                 return None
             result = dict(row)
@@ -223,8 +267,8 @@ class ResearchDB:
             raise ValueError("limit must be in [1, 1000]")
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT result_json,generator_model,generator_iteration FROM evaluations "
-                "ORDER BY id DESC LIMIT ?", (limit,),
+                "SELECT result_json,generator_model,generator_iteration FROM evaluations ORDER BY id DESC LIMIT ?",
+                (limit,),
             ).fetchall()
             return [
                 {

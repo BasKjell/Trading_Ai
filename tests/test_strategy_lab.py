@@ -1,16 +1,21 @@
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from dataclasses import replace
 import json
 import unittest
+from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from localtrader.config import load_config
-from localtrader.data import available_data_catalog, bars_hash, synthetic_fixture
+from localtrader.data import available_data_catalog, bars_hash, group_by_symbol, synthetic_fixture
 from localtrader.ollama_lab import OllamaClient, OllamaError, OllamaStrategySearch
 from localtrader.research_db import ResearchDB
 from localtrader.spec_backtest import DeclarativeBacktestEngine
-from localtrader.strategy_dsl import StrategySpecError, evaluate_stop_expression, load_strategy_spec, parse_strategy_spec, values_for_bar
-from localtrader.data import group_by_symbol
+from localtrader.strategy_dsl import (
+    StrategySpecError,
+    evaluate_stop_expression,
+    load_strategy_spec,
+    parse_strategy_spec,
+    values_for_bar,
+)
 from localtrader.strategy_lab import StrategyLab, behavior_digest, robustness_reasons, spec_digest
 
 
@@ -65,11 +70,17 @@ class StrategyLabTests(unittest.TestCase):
         self.assertNotEqual(behavior_digest(spec), behavior_digest(changed))
 
     def test_robustness_gates_reject_negative_or_sparse_results(self) -> None:
-        reasons = robustness_reasons(load_config(), {
-            "worst_max_drawdown": 0.01, "median_trades": 2,
-            "median_total_return": -0.01, "median_sharpe": -0.5,
-            "cost_3x_total_return": -0.02, "positive_fold_ratio": 0.4,
-        })
+        reasons = robustness_reasons(
+            load_config(),
+            {
+                "worst_max_drawdown": 0.01,
+                "median_trades": 2,
+                "median_total_return": -0.01,
+                "median_sharpe": -0.5,
+                "cost_3x_total_return": -0.02,
+                "positive_fold_ratio": 0.4,
+            },
+        )
         self.assertIn("non_positive_median_return", reasons)
         self.assertIn("non_positive_median_sharpe", reasons)
         self.assertIn("fails_3x_cost_stress", reasons)
@@ -81,10 +92,15 @@ class StrategyLabTests(unittest.TestCase):
             spec = load_strategy_spec("strategy_specs/crypto_trend.json")
             candidate_id = spec_digest(spec)
             lab.db.store_spec(candidate_id, spec.to_dict(), "test")
-            lab.db.store_evaluation(candidate_id, {
-                "status": "evaluated", "score": 0.1, "eligible": True,
-                "evaluated_at": "2026-01-01T00:00:00+00:00",
-            })
+            lab.db.store_evaluation(
+                candidate_id,
+                {
+                    "status": "evaluated",
+                    "score": 0.1,
+                    "eligible": True,
+                    "evaluated_at": "2026-01-01T00:00:00+00:00",
+                },
+            )
             self.assertTrue(lab.is_duplicate(replace(spec, name="renamed_strategy")))
 
     def test_search_balances_underrepresented_strategy_families(self) -> None:
@@ -93,12 +109,21 @@ class StrategyLabTests(unittest.TestCase):
             spec = load_strategy_spec("strategy_specs/crypto_trend.json")
             candidate_id = spec_digest(spec)
             lab.db.store_spec(candidate_id, spec.to_dict(), "test")
-            lab.db.store_evaluation(candidate_id, {
-                "status": "evaluated", "score": -0.1, "eligible": False,
-                "evaluated_at": "2026-01-01T00:00:00+00:00",
-            }, "qwen-test", 1)
+            lab.db.store_evaluation(
+                candidate_id,
+                {
+                    "status": "evaluated",
+                    "score": -0.1,
+                    "eligible": False,
+                    "evaluated_at": "2026-01-01T00:00:00+00:00",
+                },
+                "qwen-test",
+                1,
+            )
             selected = lab.next_search_family(
-                "qwen-test", 1, ("crypto_trend", "stock_momentum"),
+                "qwen-test",
+                1,
+                ("crypto_trend", "stock_momentum"),
             )
             self.assertEqual(selected, "stock_momentum")
 

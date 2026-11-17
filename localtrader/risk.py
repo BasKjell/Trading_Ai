@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
 import math
+from datetime import datetime
 
 from .config import RiskConfig
 from .domain import Market, OrderIntent, RiskDecision
@@ -56,13 +56,15 @@ class RiskEngine:
             violations.append("non_positive_quantity")
         if intent.stop_price is None or intent.stop_price <= 0 or intent.stop_price >= price:
             violations.append("invalid_stop")
-        if violations:
+        if violations or intent.stop_price is None:
             return RiskDecision(False, 0.0, tuple(violations), "fail-closed rejection", now)
 
         raw = min(intent.target_quantity, self.size_for_stop(snapshot.equity, price, intent.stop_price))
         weight_cap = (
-            self.config.max_crypto_weight if intent.market == Market.CRYPTO
-            else self.config.max_etf_weight if intent.strategy == "etf_trend"
+            self.config.max_crypto_weight
+            if intent.market == Market.CRYPTO
+            else self.config.max_etf_weight
+            if intent.strategy == "etf_trend"
             else self.config.max_stock_weight
         )
         if snapshot.drawdown >= self.config.drawdown_reduce:
@@ -73,10 +75,12 @@ class RiskEngine:
         total_room = max(0.0, snapshot.equity * self.config.max_total_exposure - snapshot.gross_exposure) / price
         crypto_room = float("inf")
         if intent.market == Market.CRYPTO:
-            crypto_room = max(0.0, snapshot.equity * self.config.max_crypto_exposure - portfolio.exposure(prices, Market.CRYPTO)) / price
+            crypto_room = (
+                max(0.0, snapshot.equity * self.config.max_crypto_exposure - portfolio.exposure(prices, Market.CRYPTO))
+                / price
+            )
         approved = max(0.0, min(raw, cash_cap, symbol_cap, total_room, crypto_room))
         approved = math.floor(approved * 1_000_000) / 1_000_000
         if approved <= 0:
             return RiskDecision(False, 0.0, ("exposure_or_cash_limit",), "no capacity", now)
         return RiskDecision(True, approved, (), "approved within deterministic limits", now)
-

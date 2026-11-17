@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import hashlib
+from datetime import datetime, timedelta
 
 from .backtest import BacktestResult, calculate_metrics
 from .config import AppConfig
@@ -28,19 +28,31 @@ def _id(spec: StrategySpec, symbol: str, timestamp: datetime, direction: Directi
 def _signal(spec: StrategySpec, bars: list[Bar], direction: Direction, stop: float | None, reason: str) -> Signal:
     latest = bars[-1]
     return Signal(
-        strategy=spec.family, symbol=latest.symbol, market=latest.market,
-        signal_time=latest.end, earliest_execution=latest.end + timedelta(microseconds=1),
-        direction=direction, strength=1.0, reason=f"{spec.name}: {reason}",
-        version=spec.version, stop_price=stop,
+        strategy=spec.family,
+        symbol=latest.symbol,
+        market=latest.market,
+        signal_time=latest.end,
+        earliest_execution=latest.end + timedelta(microseconds=1),
+        direction=direction,
+        strength=1.0,
+        reason=f"{spec.name}: {reason}",
+        version=spec.version,
+        stop_price=stop,
     )
 
 
 def _intent(spec: StrategySpec, signal: Signal, quantity: float, now: datetime) -> OrderIntent:
     return OrderIntent(
         client_order_id=_id(spec, signal.symbol, signal.signal_time, signal.direction),
-        strategy=spec.family, symbol=signal.symbol, market=signal.market, created_at=now,
-        direction=signal.direction, target_quantity=quantity, order_type="market",
-        valid_until=now + timedelta(days=4), stop_price=signal.stop_price,
+        strategy=spec.family,
+        symbol=signal.symbol,
+        market=signal.market,
+        created_at=now,
+        direction=signal.direction,
+        target_quantity=quantity,
+        order_type="market",
+        valid_until=now + timedelta(days=4),
+        stop_price=signal.stop_price,
         risk_metadata={"dsl_spec": 1.0},
     )
 
@@ -57,7 +69,8 @@ class DeclarativeBacktestEngine:
             raise ValueError("shadow/event specs require event datasets and cannot trade price-only bars")
         validate_bars(bars)
         selected_bars = [
-            bar for bar in bars
+            bar
+            for bar in bars
             if bar.symbol in spec.universe and (bar.market == spec.market or spec.market.value == "multi_asset")
         ]
         if not selected_bars:
@@ -68,7 +81,8 @@ class DeclarativeBacktestEngine:
             raise ValueError(f"missing symbols: {sorted(missing)}")
         aliases = {"1d": "1Day", "1day": "1Day", "1h": "1Hour", "1hour": "1Hour"}
         wrong_timeframes = {
-            bar.timeframe for bar in selected_bars
+            bar.timeframe
+            for bar in selected_bars
             if aliases.get(bar.timeframe.lower(), bar.timeframe) != spec.timeframe
         }
         if wrong_timeframes:
@@ -112,9 +126,10 @@ class DeclarativeBacktestEngine:
                         pending.pop(symbol, None)
 
             for symbol, signal in list(pending.items()):
-                bar = current.get(symbol)
-                if bar is None or timestamp < signal.earliest_execution:
+                maybe_bar = current.get(symbol)
+                if maybe_bar is None or timestamp < signal.earliest_execution:
                     continue
+                bar = maybe_bar
                 position = portfolio.positions.get(symbol)
                 if signal.direction == Direction.FLAT:
                     if position:
@@ -132,10 +147,15 @@ class DeclarativeBacktestEngine:
                     provisional = risk.size_for_stop(portfolio.equity(prices), bar.open, signal.stop_price or bar.open)
                     intent = _intent(spec, signal, provisional, timestamp)
                     decision = risk.decide(intent, portfolio, prices, timestamp, day_start_equity)
-                    decisions.append({
-                        "time": timestamp.isoformat(), "symbol": symbol, "allowed": decision.allowed,
-                        "reason": decision.reason, "limits": list(decision.violated_limits),
-                    })
+                    decisions.append(
+                        {
+                            "time": timestamp.isoformat(),
+                            "symbol": symbol,
+                            "allowed": decision.allowed,
+                            "reason": decision.reason,
+                            "limits": list(decision.violated_limits),
+                        }
+                    )
                     if decision.allowed:
                         _, fill = executor.execute(intent, decision.approved_quantity, bar.open, timestamp)
                         if fill:
@@ -158,7 +178,7 @@ class DeclarativeBacktestEngine:
 
             if all(len(items) >= spec.warmup for items in histories.values()):
                 rebalance_counter += 1
-                for symbol, position in list(portfolio.positions.items()):
+                for symbol in list(portfolio.positions):
                     if symbol in histories and rules_match(spec, histories[symbol], spec.exit_any, require_all=False):
                         pending[symbol] = _signal(spec, histories[symbol], Direction.FLAT, None, "exit rule")
                 if rebalance_counter % spec.rebalance_every == 0:
@@ -176,7 +196,9 @@ class DeclarativeBacktestEngine:
                     if spec.rank_by:
                         for symbol, position in list(portfolio.positions.items()):
                             if position.strategy == spec.family and symbol not in selected and symbol in histories:
-                                pending[symbol] = _signal(spec, histories[symbol], Direction.FLAT, None, "left rank selection")
+                                pending[symbol] = _signal(
+                                    spec, histories[symbol], Direction.FLAT, None, "left rank selection"
+                                )
                     for _, symbol, stop in candidates[: spec.max_positions]:
                         if symbol not in portfolio.positions:
                             pending[symbol] = _signal(spec, histories[symbol], Direction.LONG, stop, "entry rules")
@@ -198,9 +220,13 @@ class DeclarativeBacktestEngine:
         first_symbol = grouped[spec.universe[0]]
         benchmark = first_symbol[-1].close / first_symbol[0].open - 1
         return BacktestResult(
-            snapshots=snapshots, fills=fills, decisions=decisions, metrics=metrics,
+            snapshots=snapshots,
+            fills=fills,
+            decisions=decisions,
+            metrics=metrics,
             strategy_pnl={spec.name: realized},
             benchmark={f"{spec.universe[0]}_buy_hold_total_return": benchmark},
-            data_hash=data_hash, config_hash=self.config.digest,
+            data_hash=data_hash,
+            config_hash=self.config.digest,
             warnings=["Research result only; paper/live promotion requires explicit approval."],
         )

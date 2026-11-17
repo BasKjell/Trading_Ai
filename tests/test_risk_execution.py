@@ -1,5 +1,5 @@
-from datetime import UTC, datetime, timedelta
 import unittest
+from datetime import UTC, datetime, timedelta
 
 from localtrader.config import load_config
 from localtrader.domain import Direction, Market, OrderIntent
@@ -7,12 +7,23 @@ from localtrader.execution import FillModel, IdempotentPaperExecutor
 from localtrader.portfolio import Portfolio
 from localtrader.risk import RiskEngine
 
-
 NOW = datetime(2026, 1, 5, 15, 0, tzinfo=UTC)
 
 
 def intent(quantity: float = 1000, stop: float = 95) -> OrderIntent:
-    return OrderIntent("id-1", "stock_momentum", "AAPL", Market.EQUITY, NOW, Direction.LONG, quantity, "market", NOW + timedelta(minutes=5), stop, {})
+    return OrderIntent(
+        "id-1",
+        "stock_momentum",
+        "AAPL",
+        Market.EQUITY,
+        NOW,
+        Direction.LONG,
+        quantity,
+        "market",
+        NOW + timedelta(minutes=5),
+        stop,
+        {},
+    )
 
 
 class RiskExecutionTests(unittest.TestCase):
@@ -55,7 +66,25 @@ class RiskExecutionTests(unittest.TestCase):
     def test_eight_percent_reduces_size(self) -> None:
         base = self.risk.decide(intent(), self.portfolio, {"AAPL": 100}, NOW, 100_000)
         self.portfolio.peak_equity = 110_000
-        reduced = self.risk.decide(OrderIntent("id-2", "stock_momentum", "AAPL", Market.EQUITY, NOW, Direction.LONG, 1000, "market", NOW + timedelta(minutes=5), 95, {}), self.portfolio, {"AAPL": 100}, NOW, 100_000)
+        reduced = self.risk.decide(
+            OrderIntent(
+                "id-2",
+                "stock_momentum",
+                "AAPL",
+                Market.EQUITY,
+                NOW,
+                Direction.LONG,
+                1000,
+                "market",
+                NOW + timedelta(minutes=5),
+                95,
+                {},
+            ),
+            self.portfolio,
+            {"AAPL": 100},
+            NOW,
+            100_000,
+        )
         self.assertLess(reduced.approved_quantity, base.approved_quantity)
 
     def test_concentration_cap(self) -> None:

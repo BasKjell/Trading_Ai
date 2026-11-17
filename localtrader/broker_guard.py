@@ -18,4 +18,3 @@ class PaperEndpointGuard:
         if parsed.scheme != "https" or parsed.hostname not in cls.ALLOWED_HOSTS or not explicit_paper_confirmation:
             raise UnsafeBrokerEndpoint("broker endpoint is not explicitly verified as paper/sandbox")
         return endpoint.rstrip("/")
-
