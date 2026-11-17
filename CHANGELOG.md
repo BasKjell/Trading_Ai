@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17 – Benutzerentscheidung zu T-020 (noch nicht integriert)
+
+PROJECT_SPEC §19.1/§22 und AGENTS §7 erlauben jetzt den begrenzten lokalen Medium-Coding-Runner.
+Forschung bleibt manuell; automatische Läufe dürfen keine PRs mergen. Implementierung: changelog.d/T-020.md.
+
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
 ## 2026-11-17 – Intraday-Engine, Trendfolge und Mean Reversion

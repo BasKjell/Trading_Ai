@@ -144,3 +144,18 @@ scripts/start_task.sh T-005 order-state     # Worktree + Branch für eine Aufgab
 make intraday && make intraday-stress       # Backtests auf DAX-Beispieldaten
 python3 -m localtrader experiments          # Experimentregister und Gesamtzahl der Versuche
 ```
+
+## 7. Automatische lokale Coding-Läufe (Benutzerentscheidung 2026-11-17)
+
+Der Benutzer hat T-020 ausdrücklich beauftragt. Der lokale Coding-Runner darf vorab freigegebene
+Medium-Aufgaben ohne erneute Einzelbestätigung starten (Details: [CODING_RUNNER](docs/CODING_RUNNER.md)).
+Diese Entscheidung ersetzt für diese Läufe die bisherige Pflicht zum manuellen Start und zur
+Bestätigung jeder nächsten Aufgabe; sie erlaubt keine neue Forschung.
+
+- Nur Benutzer setzen `auto-ready` und `effort:medium`; Coding-Issues zusätzlich `work:coding`.
+- Reihenfolge: eigene aktuelle Review-Befunde, fremde Reviews, freie freigegebene Coding-Aufgaben.
+- Kritische Aufgaben/hohe Denkstufen bleiben manuell; keine automatische Herabstufung oder Modellwechsel.
+- Ein Worker je Runner, persistente Claims, isolierte Worktrees. Kein Übernehmen aktiver manueller Arbeit.
+- Für automatische Läufe gilt abweichend von §0.4: niemals mergen; PRs bleiben für unabhängige Integration.
+- Keine Forschung, neuen Strategieexperimente, Liveorders oder bezahlten API-Fallbacks in diesen Läufen.
+- Die Regeln zu Prüfungen, Handoffs und Geheimnissen bleiben bestehen. Bei Blockaden anhalten.

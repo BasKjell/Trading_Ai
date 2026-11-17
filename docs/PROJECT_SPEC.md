@@ -791,9 +791,9 @@ Keine automatische Kapitalerhöhung und keine automatische Ausweitung von Instru
 
 ### 19.1 Arbeitsmodell
 
-Der Benutzer startet und wechselt die Agenten manuell, beispielsweise abhängig von verfügbaren Nutzungskontingenten.
+Der Benutzer kann Agenten manuell starten und wechseln. Zusätzlich erlaubt die Benutzerentscheidung vom 2026-11-17 den begrenzten lokalen Coding-Runner gemäß §22.
 
-Implementiere keinen automatischen Agenten-Orchestrator.
+Ein lokaler Coding-Runner gemäß §22 ist ausdrücklich erlaubt. Automatische Forschungs-/Reasoning-Orchestrierung bleibt außerhalb des freigegebenen Umfangs.
 
 Alle Projektinformationen müssen im Repository oder in zugehörigen GitHub Issues und Pull Requests verfügbar sein. Chatverläufe und das Gedächtnis einzelner Agenten sind keine verbindliche Projektquelle.
 
@@ -1064,3 +1064,19 @@ Forschungscode darf den laufenden Produktionsdienst nicht verändern. Experiment
 - Eigene PRs werden nie selbst gemergt.
 - Integration in main ist keine Livefreigabe; §18 bleibt unverändert.
 - Die Einzelheiten stehen in AGENTS.md §0 und §2a.
+
+## 22. Lokaler Coding-Runner (Benutzerentscheidung 2026-11-17, T-020)
+
+- Ein lokales Skript darf Codex und Claude Code für ausdrücklich mit `auto-ready` und `effort:medium`
+  freigegebene Aufgaben starten; neue Coding-Issues benötigen außerdem `work:coding`.
+- Die Freigabe ersetzt für diese Aufgaben die manuelle Start-/Einzelbestätigungspflicht.
+- Forschungsideen und komplexe oder risikorelevante Aufgaben bleiben manuell; keine automatische
+  höhere Denkstufe oder Herabstufung kritischer Aufgaben auf Medium.
+- Erst eigene Befunde, dann unabhängige Reviews, danach freie Coding-Aufgaben.
+- Dauerhafte Claims, isolierte Worktrees, Prozesssperren und Fortsetzung nach Nutzungslimits.
+- Unklare Abbrüche benötigen Prüfung, keine blinde Wiederholung. Kein automatischer Anbieterwechsel
+  innerhalb derselben aktiven Aufgabe und keine Aufgabe-Übernahme wegen bloßen Zeitablaufs.
+- Automatische Läufe dürfen niemals mergen, Liveorders senden oder neue Experimente starten.
+- Kein vom Runner implementierter Wechsel auf API-Key-Abrechnung oder teurere Modelle.
+  Zusätzliche Konto-Credits müssen separat deaktiviert sein; der Runner kann diese nicht garantieren.
+- Betriebsanleitung und tatsächliche Grenzen: [CODING_RUNNER.md](CODING_RUNNER.md).

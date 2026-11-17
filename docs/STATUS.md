@@ -53,3 +53,9 @@ Mit den verfügbaren Daten (DAX, 165 Handelstage) wurde **keine belastbare profi
 2. T-005 Orderzustandsautomat (kritisch, höhere Denkstufe, separates Review).
 3. T-008 Walk-forward/Champion-Challenger (parallel möglich; kritisch, separates Review).
 4. T-006 Paper-Betrieb, danach T-007 Dashboard, T-010 (#5) Abnahme.
+
+## T-020 – Lokaler Coding-Runner
+
+Implementiert und offline getestet auf `agent/T-020-local-coding-runner` (Issue #19), nicht integriert.
+Abhängig von #17/#18; echte CLI-/Abo-Integration und vollständiger lokaler make-check-Lauf blockiert.
+Siehe [Betrieb und Grenzen](CODING_RUNNER.md). Keine Worker gestartet.

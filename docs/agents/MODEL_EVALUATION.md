@@ -11,3 +11,5 @@ gefunden werden, werden beim verursachenden Eintrag nachgetragen.
 | T-003 | Claude Code / claude-opus-5-5 / unbekannt | ja | – | – | 1 Commit | |
 | T-004 | Claude Code / claude-opus-5-5 / unbekannt | ja, Review ausstehend | 1-µs-Ausführungsverzögerung im eigenen Code durch Tests gefunden | – | 1 Commit | kritisch: separates Review nötig |
 | T-009 | Claude Code / claude-opus-5-5 / unbekannt | siehe Issue | – | – | – | |
+
+| T-020 | Codex / konfigurierte Sitzung | Offline-Prüfung, Review ausstehend | eigene Tests: doppelte Anbieter-Claims und Fortsetzung nach claimed-Label vor Commit korrigiert | in Entwicklung | siehe PR | echte CLI-Integration noch ungetestet |
