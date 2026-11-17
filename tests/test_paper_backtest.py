@@ -37,6 +37,21 @@ class PaperBacktestTests(unittest.TestCase):
             self.assertFalse(restarted.process_demo_event("same", "SPY", Market.EQUITY, 500, 485, now))
             self.assertIn("SPY", restarted.portfolio.positions)
 
+    def test_kill_switch_survives_restart_and_needs_manual_reset(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            audit = Path(directory) / "audit.jsonl"
+            now = datetime(2026, 1, 5, 15, 0, tzinfo=UTC)
+            session = PaperSession(self.config, state, audit)
+            session.risk.deleveraging_required = True
+            session.set_kill_switch(True)
+            restarted = PaperSession(self.config, state, audit)
+            self.assertTrue(restarted.risk.kill_switch)
+            self.assertTrue(restarted.risk.deleveraging_required)
+            self.assertFalse(restarted.process_demo_event("e1", "SPY", Market.EQUITY, 500, 485, now))
+            restarted.set_kill_switch(False)
+            self.assertTrue(restarted.process_demo_event("e2", "SPY", Market.EQUITY, 500, 485, now))
+
     def test_kill_switch(self) -> None:
         with TemporaryDirectory() as directory:
             session = PaperSession(self.config, Path(directory) / "s.json", Path(directory) / "a.jsonl")

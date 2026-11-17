@@ -146,6 +146,7 @@ class Position:
     realized_pnl: float = 0.0
     unrealized_pnl: float = 0.0
     stop_price: float | None = None
+    entry_fees: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

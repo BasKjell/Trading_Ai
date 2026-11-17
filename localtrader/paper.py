@@ -22,7 +22,7 @@ class PaperSession:
         self.state_path = Path(state_path or paper["state_path"])
         self.audit_path = Path(audit_path or paper["audit_path"])
         self.portfolio = Portfolio(config.initial_cash)
-        self.risk = RiskEngine(config.risk)
+        self.risk = RiskEngine(config.risk, config.correlation_groups)
         self.risk.paused = bool(paper.get("paused", False))
         self.executor = IdempotentPaperExecutor(FillModel(config.costs))
         self.processed_events: set[str] = set()
@@ -36,6 +36,7 @@ class PaperSession:
         self.portfolio.peak_equity = float(raw["peak_equity"])
         self.processed_events = set(raw.get("processed_events", []))
         self.risk.kill_switch = bool(raw.get("kill_switch", False))
+        self.risk.deleveraging_required = bool(raw.get("deleveraging_required", False))
         self.risk.paused = bool(raw.get("paused", False))
         for item in raw.get("positions", []):
             position = Position(
@@ -47,6 +48,7 @@ class PaperSession:
                 realized_pnl=float(item.get("realized_pnl", 0.0)),
                 unrealized_pnl=float(item.get("unrealized_pnl", 0.0)),
                 stop_price=float(item["stop_price"]) if item.get("stop_price") is not None else None,
+                entry_fees=float(item.get("entry_fees", 0.0)),
             )
             self.portfolio.positions[position.symbol] = position
 
@@ -57,6 +59,7 @@ class PaperSession:
             "peak_equity": self.portfolio.peak_equity,
             "processed_events": sorted(self.processed_events),
             "kill_switch": self.risk.kill_switch,
+            "deleveraging_required": self.risk.deleveraging_required,
             "paused": self.risk.paused,
             "mode": "offline-paper-only",
             "positions": [
@@ -69,6 +72,7 @@ class PaperSession:
                     "realized_pnl": p.realized_pnl,
                     "unrealized_pnl": p.unrealized_pnl,
                     "stop_price": p.stop_price,
+                    "entry_fees": p.entry_fees,
                 }
                 for p in self.portfolio.positions.values()
             ],
@@ -116,6 +120,9 @@ class PaperSession:
         return decision.allowed
 
     def set_kill_switch(self, enabled: bool) -> None:
+        """Manual switch. Turning it off is the only way to re-enable trading after a drawdown latch."""
         self.risk.kill_switch = enabled
+        if not enabled:
+            self.risk.deleveraging_required = False
         self.audit({"action": "kill_switch", "enabled": enabled, "time": datetime.now(UTC).isoformat()})
         self._persist()

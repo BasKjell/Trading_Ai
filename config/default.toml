@@ -1,28 +1,47 @@
 [system]
 seed = 20261106
-initial_cash = 100000.0
+initial_cash = 10000.0
+currency = "EUR"
 mode = "offline"
 
 [risk]
-risk_per_trade = 0.0025
-max_risk_per_trade = 0.005
+# Provisional paper-trading protection values (project spec section 10), not proven optimal.
+risk_per_trade = 0.002          # planned stop risk per trade: 0.20 % of current equity
+max_risk_per_trade = 0.002
+max_open_risk = 0.01            # sum of planned stop risk of open positions: 1 %
 daily_loss_limit = 0.015
-drawdown_reduce = 0.08
-drawdown_block_experimental = 0.12
-drawdown_kill = 0.15
-max_total_exposure = 0.80
-max_etf_weight = 0.40
+drawdown_reduce = 0.05          # >= 5 %: halve risk budget
+drawdown_block_new = 0.08       # >= 8 %: no new positions
+drawdown_kill = 0.10            # >= 10 %: kill switch, controlled de-risking, manual review
+max_total_exposure = 1.0        # no leverage
+max_instrument_weight = 0.20
+max_etf_weight = 0.20
 max_stock_weight = 0.10
 max_crypto_weight = 0.05
 max_crypto_exposure = 0.10
+max_group_weight = 0.40         # correlated instruments (see [correlation_groups])
+min_order_value = 50.0          # in account currency
+max_volume_participation = 0.05 # of the execution bar's volume
+
+[correlation_groups]
+SPY = "us_equity_index"
+QQQ = "us_equity_index"
+AAPL = "us_large_cap_tech"
+MSFT = "us_large_cap_tech"
+NVDA = "us_large_cap_tech"
+BTC-USD = "crypto"
+ETH-USD = "crypto"
+DAX = "de_equity_index"
 
 [costs]
 equity_fee_bps = 0.10
 equity_spread_bps = 2.0
 equity_slippage_bps = 1.0
+equity_min_fee = 0.0
 crypto_fee_bps = 10.0
 crypto_spread_bps = 8.0
 crypto_slippage_bps = 4.0
+crypto_min_fee = 0.0
 
 [strategies.etf_trend]
 enabled = true

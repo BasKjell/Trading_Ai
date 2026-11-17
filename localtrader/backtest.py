@@ -37,7 +37,7 @@ def _order_id(signal: Signal) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
 
-def _intent(signal: Signal, quantity: float, now: datetime) -> OrderIntent:
+def _intent(signal: Signal, quantity: float, now: datetime, cost_per_unit: float = 0.0) -> OrderIntent:
     return OrderIntent(
         client_order_id=_order_id(signal),
         strategy=signal.strategy,
@@ -49,7 +49,7 @@ def _intent(signal: Signal, quantity: float, now: datetime) -> OrderIntent:
         order_type="market",
         valid_until=now + timedelta(days=4),
         stop_price=signal.stop_price,
-        risk_metadata={"signal_strength": signal.strength},
+        risk_metadata={**{"signal_strength": signal.strength}, "cost_per_unit": cost_per_unit},
     )
 
 
@@ -99,13 +99,7 @@ def calculate_metrics(
             buy = buys[fill.symbol].pop(0)
             qty = min(buy.quantity, -fill.quantity)
             trade_pnls.append(
-                qty * (fill.price - buy.price)
-                - buy.fee
-                - fill.fee
-                - buy.spread_cost
-                - fill.spread_cost
-                - buy.slippage_cost
-                - fill.slippage_cost
+                qty * (fill.price - buy.price) - buy.fee * qty / buy.quantity - fill.fee * qty / -fill.quantity
             )
     gains = sum(value for value in trade_pnls if value > 0)
     losses = -sum(value for value in trade_pnls if value < 0)
@@ -145,7 +139,7 @@ class BacktestEngine:
             for bar in items:
                 by_time.setdefault(bar.start, {})[symbol] = bar
         portfolio = Portfolio(self.config.initial_cash)
-        risk = RiskEngine(self.config.risk)
+        risk = RiskEngine(self.config.risk, self.config.correlation_groups)
         executor = IdempotentPaperExecutor(FillModel(self.config.costs, self.cost_multiplier))
         etf_cfg = self.config.raw["strategies"]["etf_trend"]
         stock_cfg = self.config.raw["strategies"]["stock_momentum"]
@@ -213,9 +207,12 @@ class BacktestEngine:
                     pending.pop(symbol, None)
                     continue
                 if position is None:
-                    provisional = risk.size_for_stop(portfolio.equity(prices), bar.open, signal.stop_price or bar.open)
-                    intent = _intent(signal, provisional, timestamp)
-                    decision = risk.decide(intent, portfolio, prices, timestamp, day_start_equity)
+                    cost_per_unit = executor.fill_model.round_trip_cost_per_unit(signal.market, bar.open)
+                    provisional = risk.size_for_stop(
+                        portfolio.equity(prices), bar.open, signal.stop_price or bar.open, cost_per_unit
+                    )
+                    intent = _intent(signal, provisional, timestamp, cost_per_unit)
+                    decision = risk.decide(intent, portfolio, prices, timestamp, day_start_equity, bar.volume)
                     decisions.append(
                         {
                             "time": timestamp.isoformat(),

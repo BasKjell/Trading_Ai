@@ -12,6 +12,18 @@ class FillModel:
         self.costs = costs
         self.multiplier = multiplier
 
+    def round_trip_cost_per_unit(self, market: Market, price: float) -> float:
+        """Estimated entry+exit cost per unit (fees, half spread, slippage) used for position sizing.
+
+        Minimum fees are ignored here because they depend on the final quantity; the risk gate's
+        minimum order value keeps tiny orders, where minimum fees dominate, out.
+        """
+        crypto = market == Market.CRYPTO
+        fee_bps = self.costs.crypto_fee_bps if crypto else self.costs.equity_fee_bps
+        spread_bps = self.costs.crypto_spread_bps if crypto else self.costs.equity_spread_bps
+        slippage_bps = self.costs.crypto_slippage_bps if crypto else self.costs.equity_slippage_bps
+        return 2 * price * (fee_bps + spread_bps / 2 + slippage_bps) * self.multiplier / 10_000
+
     def fill(
         self,
         intent: OrderIntent,
@@ -31,7 +43,8 @@ class FillModel:
         side = 1 if signed_quantity > 0 else -1
         fill_price = reference_price * (1 + side * (spread_bps / 2 + slippage_bps) * self.multiplier / 10_000)
         notional = abs(signed_quantity * reference_price)
-        fee = notional * fee_bps * self.multiplier / 10_000
+        min_fee = self.costs.crypto_min_fee if crypto else self.costs.equity_min_fee
+        fee = max(notional * fee_bps, min_fee * 10_000) * self.multiplier / 10_000
         spread = notional * (spread_bps / 2) * self.multiplier / 10_000
         slippage = notional * slippage_bps * self.multiplier / 10_000
         order_id = hashlib.sha256(intent.client_order_id.encode()).hexdigest()[:20]

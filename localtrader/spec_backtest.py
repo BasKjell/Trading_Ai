@@ -41,7 +41,9 @@ def _signal(spec: StrategySpec, bars: list[Bar], direction: Direction, stop: flo
     )
 
 
-def _intent(spec: StrategySpec, signal: Signal, quantity: float, now: datetime) -> OrderIntent:
+def _intent(
+    spec: StrategySpec, signal: Signal, quantity: float, now: datetime, cost_per_unit: float = 0.0
+) -> OrderIntent:
     return OrderIntent(
         client_order_id=_id(spec, signal.symbol, signal.signal_time, signal.direction),
         strategy=spec.family,
@@ -53,7 +55,7 @@ def _intent(spec: StrategySpec, signal: Signal, quantity: float, now: datetime) 
         order_type="market",
         valid_until=now + timedelta(days=4),
         stop_price=signal.stop_price,
-        risk_metadata={"dsl_spec": 1.0},
+        risk_metadata={**{"dsl_spec": 1.0}, "cost_per_unit": cost_per_unit},
     )
 
 
@@ -93,7 +95,7 @@ class DeclarativeBacktestEngine:
                 by_time.setdefault(bar.start, {})[symbol] = bar
 
         portfolio = Portfolio(self.config.initial_cash)
-        risk = RiskEngine(self.config.risk)
+        risk = RiskEngine(self.config.risk, self.config.correlation_groups)
         executor = IdempotentPaperExecutor(FillModel(self.config.costs, self.cost_multiplier))
         histories: dict[str, list[Bar]] = {symbol: [] for symbol in spec.universe}
         pending: dict[str, Signal] = {}
@@ -144,9 +146,12 @@ class DeclarativeBacktestEngine:
                     pending.pop(symbol, None)
                     continue
                 if position is None:
-                    provisional = risk.size_for_stop(portfolio.equity(prices), bar.open, signal.stop_price or bar.open)
-                    intent = _intent(spec, signal, provisional, timestamp)
-                    decision = risk.decide(intent, portfolio, prices, timestamp, day_start_equity)
+                    cost_per_unit = executor.fill_model.round_trip_cost_per_unit(signal.market, bar.open)
+                    provisional = risk.size_for_stop(
+                        portfolio.equity(prices), bar.open, signal.stop_price or bar.open, cost_per_unit
+                    )
+                    intent = _intent(spec, signal, provisional, timestamp, cost_per_unit)
+                    decision = risk.decide(intent, portfolio, prices, timestamp, day_start_equity, bar.volume)
                     decisions.append(
                         {
                             "time": timestamp.isoformat(),
