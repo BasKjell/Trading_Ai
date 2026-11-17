@@ -307,7 +307,12 @@ def outcome(text: str, returncode: int) -> str:
         error = event.get("error")
         if event.get("type") == "error" or event.get("is_error") or error:
             encoded = json.dumps(error or event).lower()
-            if any(code in encoded for code in LIMIT_CODES) or "usage limit" in encoded or "rate limit" in encoded:
+            if (
+                any(code in encoded for code in LIMIT_CODES)
+                or "usage limit" in encoded
+                or "rate limit" in encoded
+                or "you've hit your limit" in encoded
+            ):
                 return "rate_limited"
         if event.get("type") == "result" and not event.get("is_error"):
             terminal.append(str(event.get("result", "")))

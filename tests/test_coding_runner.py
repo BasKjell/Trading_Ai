@@ -87,8 +87,7 @@ class PlanningTests(unittest.TestCase):
     def test_old_findings_quoted_in_approval_do_not_trigger_new_fix(self):
         approval = {
             "commit_id": "a" * 40,
-            "body": "Codex: unabhängiges Review\n"
-            "Früher: Empfehlung: ÄNDERUNGEN NÖTIG\nEmpfehlung: FREIGEBEN",
+            "body": "Codex: unabhängiges Review\nFrüher: Empfehlung: ÄNDERUNGEN NÖTIG\nEmpfehlung: FREIGEBEN",
         }
         self.assertEqual(runner.plan(FakeGitHub([pr()], reviews=[approval]), ["claude"]), [])
 
@@ -290,6 +289,8 @@ class WorkerTests(unittest.TestCase):
     def test_quota_error_even_with_zero_exit_code_and_not_generic_errors(self):
         event = {"type": "result", "is_error": True, "error": {"code": "rate_limit_error"}}
         self.assertEqual(runner.outcome(json.dumps(event), 0), "rate_limited")
+        claude = {"type": "result", "is_error": True, "result": "You've hit your limit · resets later"}
+        self.assertEqual(runner.outcome(json.dumps(claude), 0), "rate_limited")
         self.assertEqual(runner.outcome('{"type":"error","message":"missing authentication"}', 1), "blocked")
         self.assertEqual(runner.outcome('{"type":"result","result":"test rate limit handling"}', 0), "blocked")
 
