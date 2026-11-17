@@ -1,6 +1,6 @@
 # Implementierungsplan
 
-Stand: 2026-11-17. Grundlage sind die Projektvorgaben (Abschnitte 1–17) und der übernommene `localtrader`-MVP.
+Stand: 2026-11-17 (Etappen 1–4 umgesetzt). Grundlage sind die Projektvorgaben (Abschnitte 1–17) und der übernommene `localtrader`-MVP.
 
 ## Ausgangslage
 
@@ -29,7 +29,7 @@ Walk-forward-Splits mit Purge/Embargo, ein SQLite-Research-Register und ein loka
 1. Übernahme, Tooling, CI, Dokumentation (`make check`). ✅
 2. Kostenmodell korrigieren, Risikolimits gemäß Vorgaben. ✅
 3. 15-Minuten-CSV-Import (DAX-Beispieldaten), Qualitätsprüfung, Handelszeiten. ✅
-4. Intraday-Trendfolge und Mean Reversion, Benchmarks, Kostenstress.
+4. Intraday-Trendfolge und Mean Reversion, Benchmarks, Kostenstress. ✅
 5. Persistenter Order-Zustandsautomat und Brokerabgleich.
 6. Paper-Betrieb im 15-Minuten-Takt mit Wiederanlauf; Modi und Live-Sperre.
 7. Dashboard und Reports erweitern.

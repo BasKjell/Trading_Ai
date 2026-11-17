@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .alpaca_check import AlpacaCheckError, checker_from_env
 from .backtest import BacktestEngine
-from .config import load_config
+from .config import AppConfig, load_config
 from .dashboard import serve_dashboard
 from .data import bars_hash, synthetic_fixture
 from .data_requests import (
@@ -18,6 +18,9 @@ from .data_requests import (
     DataWorker,
 )
 from .domain import Market
+from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, synthetic_intraday
+from .intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics, instruments_from_config
+from .intraday_report import run_scenarios, strategies_from_config, write_intraday_report
 from .ollama_lab import OllamaClient, OllamaStrategySearch
 from .paper import PaperSession
 from .reporting import write_report
@@ -56,6 +59,69 @@ def run_backtest(args: argparse.Namespace) -> int:
             indent=2,
         )
     )
+    return 0
+
+
+def _load_intraday(
+    config_path: str, data_file: str | None, synthetic_days: int | None
+) -> tuple[AppConfig, dict[str, InstrumentSpec], dict[str, ImportedDataset]]:
+
+    config = load_config(config_path)
+    instruments = instruments_from_config(config)
+    settings = config.raw["intraday"]
+    symbol = str(settings["data_symbol"])
+    spec = instruments[symbol]
+    if synthetic_days:
+        data = synthetic_intraday(symbol, synthetic_days, config.seed, 15000.0, spec.session)
+    else:
+        data = import_csv(
+            CsvImportSpec(
+                data_file or str(settings["data_file"]),
+                symbol,
+                spec.market,
+                spec.venue,
+                str(settings["data_source"]),
+                str(settings["data_timezone"]),
+                int(settings["signal_interval_minutes"]),
+            ),
+            spec.session,
+        )
+    return config, instruments, {symbol: data}
+
+
+def _strategy_names(value: str) -> list[str]:
+    names = [item.strip() for item in value.split(",") if item.strip()]
+    if not names:
+        raise SystemExit("at least one strategy is required")
+    return names
+
+
+def run_intraday_backtest(args: argparse.Namespace) -> int:
+    config, instruments, datasets = _load_intraday(args.config, args.data, args.synthetic_days)
+    strategies = strategies_from_config(config, _strategy_names(args.strategies))
+    engine = IntradayEngine(
+        config,
+        instruments,
+        strategies,
+        cost_multiplier=args.cost_multiplier,
+        spread_multiplier=args.spread_multiplier,
+        extra_delay_bars=args.delay_bars,
+    )
+    result = engine.run(datasets)
+    benchmark = buy_and_hold(datasets, instruments, config, args.cost_multiplier)
+    output = write_intraday_report(result, args.output, benchmark, {"config_digest": config.digest})
+    metrics = compute_metrics(result)
+    print(json.dumps({"report": str(output), "metrics": metrics, "benchmark": benchmark}, indent=2, default=str))
+    return 0
+
+
+def run_intraday_stress(args: argparse.Namespace) -> int:
+    config, instruments, datasets = _load_intraday(args.config, args.data, args.synthetic_days)
+    output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets)
+    path = Path(args.output)
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "scenarios.json").write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
+    print(json.dumps(output, indent=2, default=str))
     return 0
 
 
@@ -269,6 +335,20 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--cost-multiplier", type=float, default=1.0)
     backtest.add_argument("--output", default="reports/baseline")
     backtest.set_defaults(func=run_backtest)
+    for name, func, default_out in (
+        ("intraday-backtest", run_intraday_backtest, "reports/intraday"),
+        ("intraday-stress", run_intraday_stress, "reports/intraday_stress"),
+    ):
+        command = sub.add_parser(name, help="15-minute backtest of the base strategies")
+        command.add_argument("--strategies", default="intraday_trend,mean_reversion")
+        command.add_argument("--data", default=None, help="CSV file; default from [intraday] in the config")
+        command.add_argument("--synthetic-days", type=int, default=None, help="use labelled synthetic data")
+        command.add_argument("--output", default=default_out)
+        if name == "intraday-backtest":
+            command.add_argument("--cost-multiplier", type=float, default=1.0)
+            command.add_argument("--spread-multiplier", type=float, default=1.0)
+            command.add_argument("--delay-bars", type=int, default=0)
+        command.set_defaults(func=func)
     paper = sub.add_parser("paper-demo")
     paper.add_argument("--state", default="state/paper_state.json")
     paper.add_argument("--audit", default="state/audit.jsonl")

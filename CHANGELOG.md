@@ -2,6 +2,41 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-17 – Intraday-Engine, Trendfolge und Mean Reversion
+
+**Anlass/Ziel:** Zwei nachvollziehbare Basisstrategien auf 15-Minuten-Daten zeitlich korrekt und
+kostenbewusst backtesten; Benchmarks und Robustheitsprüfungen.
+
+**Änderungen**
+- `localtrader/intraday_strategies.py`: Trendfolge (1-h-Trendfilter, Ausbruch, ATR-Stop, Donchian-Exit,
+  optionaler Zeitstopp) und Mean Reversion (z-Score zum gleitenden Mittel, Efficiency-Ratio-Filter,
+  Rückkehr zum Mittel, Stop, max. Haltedauer) mit begründeten Hypothesen.
+- `localtrader/intraday_engine.py`: ereignisbasierter Engine (siehe ADR 0003), Kennzahlen inkl.
+  geometrischer Monatsrendite, Block-Bootstrap-Intervall, Drawdown-Dauer, Haltedauer, Turnover,
+  Kosten nach Art, Exposure; Buy-and-hold- und Cash-Benchmark.
+- `localtrader/intraday_report.py`: Reports (JSON, CSV, JSONL, SVG) und Szenarien: doppelte Kosten,
+  dreifacher Spread, verzögerte Ausführung, Parameter ±20 %, drei Marktphasen.
+- `FillModel` mit instrumentbezogenen Kostenprofilen und Spread-Stress; `Portfolio.charge()`.
+- CLI `intraday-backtest`, `intraday-stress`; Make-Ziele `intraday`, `intraday-stress`.
+- Konfiguration `[instruments.DAX]`, `[intraday]`, `[strategies.intraday_trend]`, `[strategies.mean_reversion]`.
+- Beispielreport `docs/reports/2026-11-17_dax_baseline.md`, ADR 0003.
+
+**Tests:** neu `tests/test_intraday_engine.py`: Ausführung an der nächsten Eröffnung, nur abgeschlossene
+Bars sichtbar, Verzögerung, Stop bei Kurslücke/innerhalb der Bar/in der Einstiegsbar, Slippage am Stop,
+Teilausführung, Finanzierung, Kosten, Sprung nach Datenlücke, Kill-Switch-Abbau, Strategielogik,
+Bootstrap, deterministischer End-to-End-Test (Import → Signal → Risiko → Order → Fill → Portfolio → Report)
+mit Buchhaltungsidentität, Szenarioabdeckung.
+Fehler beim Entwickeln gefunden und durch die Tests abgesichert: Orders wurden durch einen
+1-µs-Vergleich eine Bar zu spät ausgeführt.
+
+**Ausgeführte Prüfungen:** `make check` (97 Tests + 6 Subtests) bestanden; `make intraday`,
+`make intraday-stress` auf den DAX-Daten ausgeführt.
+
+**Ergebnis:** keine belastbare profitable Strategie (siehe Beispielreport).
+
+**Einschränkungen:** Kostenparameter sind Annahmen; Stops füllen vollständig; < 1 Jahr Daten;
+noch kein Walk-forward-Training.
+
 ## 2026-11-17 – 15-Minuten-Datenimport und Qualitätsprüfung
 
 **Anlass/Ziel:** Intraday-Daten zeitlich korrekt und nachvollziehbar einlesen.

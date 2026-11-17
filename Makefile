@@ -1,4 +1,4 @@
-.PHONY: check format-check lint typecheck secret-scan config-check test test-cov backtest lab-bootstrap lab-search lab-deep lab-continuous lab-status dashboard
+.PHONY: intraday intraday-stress check format-check lint typecheck secret-scan config-check test test-cov backtest lab-bootstrap lab-search lab-deep lab-continuous lab-status dashboard
 
 PY ?= python3
 
@@ -28,6 +28,14 @@ secret-scan:
 
 config-check:
 	$(PY) -c "from localtrader.config import load_config; c = load_config(); print('config ok', c.digest[:12])"
+
+intraday:
+	$(PY) -m localtrader intraday-backtest --strategies intraday_trend --output reports/intraday_trend
+	$(PY) -m localtrader intraday-backtest --strategies mean_reversion --output reports/mean_reversion
+
+intraday-stress:
+	$(PY) -m localtrader intraday-stress --strategies intraday_trend --output reports/stress_trend
+	$(PY) -m localtrader intraday-stress --strategies mean_reversion --output reports/stress_mean_reversion
 
 backtest:
 	python3 -m localtrader backtest --days 1000 --output reports/baseline

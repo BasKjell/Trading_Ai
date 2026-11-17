@@ -2,12 +2,27 @@
 
 Eine lokale, reproduzierbare Research- und Paper-Trading-Plattform gemäß [`CODEX_MASTER_PROMPT.md`](CODEX_MASTER_PROMPT.md). Der MVP enthält bewusst **keinen Live-Trading-Transport** und startet ausschließlich offline. Er ist Forschungssoftware, keine Anlageberatung und kein Renditeversprechen.
 
+## Schnellstart (15-Minuten-System)
+
+```bash
+make check             # Format, Lint, Typen, Tests, Secret-Scan, Konfiguration
+make intraday          # Backtest Trendfolge und Mean Reversion auf data/DAX3015.csv
+make intraday-stress   # doppelte Kosten, 3x Spread, Verzögerung, Parameter ±20 %, Marktphasen
+python3 -m localtrader intraday-backtest --synthetic-days 60   # Offline-Demo mit synthetischen Daten
+```
+
+Startkapital 10.000 EUR (simuliert), Paper-Modus. Plan und Stand: [`docs/PLAN.md`](docs/PLAN.md),
+Änderungen: [`CHANGELOG.md`](CHANGELOG.md), Datenformat: [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md),
+Beispielreport: [`docs/reports/2026-11-17_dax_baseline.md`](docs/reports/2026-11-17_dax_baseline.md),
+Entscheidungen: [`docs/decisions/`](docs/decisions/). Lokale Zugangsdaten gehören in `.env`
+(Vorlage: `.env.example`), niemals ins Repository.
+
 ## Sicherheitsprofil
 
 - kein Echtgeldmodus, keine Auszahlungen, kein Margin und keine Shorts;
 - Strategien erzeugen nur Signale; die zentrale Risiko-Engine genehmigt Größen deterministisch;
-- 0,25 % Standardrisiko pro Trade, hart auf 0,5 % begrenzt;
-- Drawdown-Leiter bei 8 %, 12 % und 15 %, Tagesverlustlimit 1,5 %;
+- 0,20 % geplantes Risiko pro Trade (harte Obergrenze 0,5 %), höchstens 1 % offenes Stop-Risiko, 20 % je Instrument, keine Hebelung;
+- Drawdown-Leiter: ab 5 % halbes Risiko, ab 8 % keine neuen Positionen, ab 10 % Kill-Switch mit kontrolliertem Abbau; Tagesverlustlimit 1,5 %;
 - unbekannte Modi, schlechte Daten und Positionsabweichungen führen zu einer Ablehnung;
 - ein Broker-Endpunktwächter akzeptiert ausschließlich explizit bestätigte Paper-/Sandbox-Hosts; es existiert kein Netzwerktransport.
 

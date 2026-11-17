@@ -89,3 +89,44 @@ historical_feed = "sip"
 state_path = "state/paper_state.json"
 audit_path = "state/audit.jsonl"
 paused = false
+
+# Intraday instruments. Costs are modelled assumptions, not measured broker costs.
+[instruments.DAX]
+market = "index"
+venue = "CFD on DAX 40 (broker-quoted)"
+currency = "EUR"
+session_timezone = "Europe/Berlin"
+session_start = "09:00"
+session_end = "17:30"
+fee_bps = 0.0                   # typical CFD: no commission, cost is in the spread
+spread_bps = 1.0                # ~1.5 index points at 15,000 during Xetra hours (assumption)
+slippage_bps = 0.5
+min_fee = 0.0
+qty_step = 0.1                  # 0.1 contract of 1 EUR/point
+financing_rate_annual = 0.05    # long overnight financing (reference rate + markup, assumption)
+
+[intraday]
+signal_interval_minutes = 15
+data_file = "data/DAX3015.csv"
+data_symbol = "DAX"
+data_source = "dax3015_csv"
+data_timezone = "Europe/Athens"
+
+[strategies.intraday_trend]
+enabled = true
+trend_window_hours = 50
+breakout_bars = 16
+exit_bars = 8
+atr_bars = 14
+stop_atr = 2.5
+max_hold_bars = 0
+
+[strategies.mean_reversion]
+enabled = true
+reference_bars = 20
+entry_z = 2.0
+trend_filter_bars = 32
+max_efficiency = 0.30
+atr_bars = 14
+stop_atr = 2.0
+max_hold_bars = 16

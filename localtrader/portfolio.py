@@ -78,6 +78,14 @@ class Portfolio:
             return position.quantity * price
         return max(0.0, (price - position.stop_price) * position.quantity)
 
+    def charge(self, amount: float) -> None:
+        """Non-trade cost (e.g. overnight financing). Counted as cost, may reduce cash below zero only
+        through costs, never through purchases."""
+        if amount < 0:
+            raise ValueError("charge must be non-negative")
+        self.cash -= amount
+        self.realized_costs += amount
+
     def deposit(self, amount: float) -> None:
         """External cash flow in. The high-water mark moves by the same amount, so flows are not P&L."""
         if amount <= 0:
