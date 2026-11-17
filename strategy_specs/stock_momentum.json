@@ -1,0 +1,28 @@
+{
+  "name": "stock_momentum_baseline",
+  "family": "stock_momentum",
+  "market": "equity",
+  "universe": ["AAPL", "MSFT", "NVDA"],
+  "indicators": [
+    {"alias": "trend", "kind": "sma", "window": 200, "source": "close"},
+    {"alias": "mom126", "kind": "momentum", "window": 126, "source": "close"},
+    {"alias": "atr20", "kind": "atr", "window": 20, "source": "close"},
+    {"alias": "vol20", "kind": "volatility", "window": 20, "source": "close"}
+  ],
+  "entry_all": [
+    {"left": "close", "op": ">", "right": "trend"},
+    {"left": "mom126", "op": ">", "right": 0.0}
+  ],
+  "exit_any": [
+    {"left": "close", "op": "<", "right": "trend"},
+    {"left": "mom126", "op": "<", "right": 0.0}
+  ],
+  "stop_atr_alias": "atr20",
+  "stop_atr_multiple": 3.0,
+  "rank_by": "mom126",
+  "max_positions": 2,
+  "rebalance_every": 5,
+  "data_requirements": [],
+  "rationale": "Long-only cross-sectional large-cap momentum baseline.",
+  "version": "1.0"
+}

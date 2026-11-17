@@ -1,0 +1,20 @@
+{
+  "name": "shortseller_intelligence_shadow",
+  "family": "shortseller_intelligence",
+  "market": "equity",
+  "universe": ["AAPL", "MSFT", "NVDA"],
+  "indicators": [
+    {"alias": "trend", "kind": "sma", "window": 50, "source": "close"},
+    {"alias": "atr20", "kind": "atr", "window": 20, "source": "close"}
+  ],
+  "entry_all": [{"left": "close", "op": ">", "right": "trend"}],
+  "exit_any": [{"left": "close", "op": "<", "right": "trend"}],
+  "stop_atr_alias": "atr20",
+  "stop_atr_multiple": 3.0,
+  "rank_by": null,
+  "max_positions": 1,
+  "rebalance_every": 5,
+  "data_requirements": ["shortseller_reports", "primary_source_checks", "publication_timestamp"],
+  "rationale": "Intelligence and alert shadow module only; no automatic copy trading or shorts.",
+  "version": "0.1-shadow"
+}

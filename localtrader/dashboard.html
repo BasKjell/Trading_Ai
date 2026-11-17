@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Trading Research Dashboard</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#121a2d; --panel2:#182239; --text:#edf2ff; --muted:#93a4c4; --line:#273654; --blue:#6ea8fe; --cyan:#50d5d0; --green:#57d38c; --red:#ff7a90; --amber:#f8c66b; --shadow:0 18px 45px rgba(0,0,0,.22); }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:radial-gradient(circle at 85% -10%,#1a3157 0,transparent 34%),var(--bg); color:var(--text); }
+    button,select { font:inherit; }
+    .shell { width:min(1500px,calc(100% - 32px)); margin:0 auto; padding:30px 0 56px; }
+    header { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:24px; }
+    h1 { margin:0 0 6px; font-size:clamp(1.65rem,3vw,2.45rem); letter-spacing:-.035em; font-weight:650; }
+    h2 { margin:0; font-size:1rem; font-weight:650; }
+    .eyebrow { color:var(--cyan); text-transform:uppercase; letter-spacing:.14em; font-size:.72rem; font-weight:700; }
+    .sub,.muted { color:var(--muted); }
+    .sub { margin:0; }
+    .live { display:flex; align-items:center; gap:9px; padding:9px 13px; border:1px solid var(--line); background:rgba(18,26,45,.84); border-radius:999px; color:var(--muted); white-space:nowrap; }
+    .dot { width:9px; height:9px; border-radius:50%; background:var(--green); box-shadow:0 0 0 5px rgba(87,211,140,.12); }
+    .dot.error { background:var(--red); box-shadow:0 0 0 5px rgba(255,122,144,.12); }
+    .grid { display:grid; gap:16px; }
+    .stats { grid-template-columns:repeat(4,minmax(0,1fr)); margin-bottom:16px; }
+    .two { grid-template-columns:minmax(0,1.45fr) minmax(320px,.75fr); margin-bottom:16px; }
+    .card { background:linear-gradient(145deg,rgba(24,34,57,.96),rgba(18,26,45,.96)); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); padding:18px; min-width:0; }
+    .stat-label { color:var(--muted); font-size:.8rem; margin-bottom:8px; }
+    .stat-value { font-size:1.7rem; font-weight:680; letter-spacing:-.035em; }
+    .stat-note { color:var(--muted); font-size:.75rem; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .card-head { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:16px; }
+    .best-model { display:grid; grid-template-columns:minmax(220px,1.3fr) minmax(0,2.7fr); gap:20px; align-items:center; margin-bottom:16px; border-color:rgba(80,213,208,.34); }
+    .best-model-title { font-size:1.55rem; font-weight:680; letter-spacing:-.03em; margin:7px 0 4px; }
+    .best-model-metrics { display:grid; grid-template-columns:repeat(5,minmax(90px,1fr)); gap:9px; }
+    .best-model-note { color:var(--muted); font-size:.78rem; margin-top:10px; }
+    .controls { display:flex; gap:10px; flex-wrap:wrap; }
+    select { color:var(--text); background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:8px 30px 8px 10px; outline:none; }
+    select:focus { border-color:var(--blue); box-shadow:0 0 0 3px rgba(110,168,254,.15); }
+    .model-list { display:grid; gap:13px; }
+    .model-row { display:grid; grid-template-columns:minmax(150px,1.3fr) minmax(150px,2.3fr) repeat(3,minmax(64px,.6fr)); align-items:center; gap:12px; padding:12px 0; border-top:1px solid var(--line); }
+    .model-row:first-child { border-top:0; }
+    .model-name { font-weight:620; overflow:hidden; text-overflow:ellipsis; }
+    .bar-track { height:9px; border-radius:99px; background:#24314b; overflow:hidden; margin-top:7px; }
+    .bar-fill { height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--blue),var(--cyan)); min-width:2px; }
+    .metric { text-align:right; }
+    .metric strong { display:block; font-size:.93rem; }
+    .metric span { color:var(--muted); font-size:.69rem; }
+    .champion { display:grid; gap:12px; }
+    .champion-name { font-size:1.28rem; font-weight:660; letter-spacing:-.02em; }
+    .badge { display:inline-flex; width:max-content; padding:5px 9px; border-radius:999px; font-size:.7rem; border:1px solid var(--line); color:var(--muted); }
+    .badge.good { color:var(--green); border-color:rgba(87,211,140,.35); background:rgba(87,211,140,.08); }
+    .badge.bad { color:var(--red); border-color:rgba(255,122,144,.35); background:rgba(255,122,144,.08); }
+    .champion-metrics { display:grid; grid-template-columns:repeat(2,1fr); gap:9px; }
+    .mini { background:rgba(11,16,32,.36); padding:10px; border-radius:10px; }
+    .mini span { color:var(--muted); display:block; font-size:.68rem; margin-bottom:3px; }
+    .chart { width:100%; min-height:240px; position:relative; }
+    .chart svg { width:100%; height:250px; display:block; overflow:visible; }
+    .axis { stroke:var(--line); stroke-width:1; }
+    .gridline { stroke:var(--line); stroke-width:1; opacity:.65; }
+    .chart-label { fill:var(--muted); font-size:11px; }
+    .score-line { fill:none; stroke:var(--blue); stroke-width:2.2; }
+    .score-dot { stroke:var(--panel); stroke-width:2; }
+    .empty { display:grid; place-items:center; min-height:180px; color:var(--muted); text-align:center; }
+    .reasons { display:grid; gap:12px; }
+    .reason-row { display:grid; grid-template-columns:minmax(130px,1fr) 2fr 34px; align-items:center; gap:10px; }
+    .reason-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+    .reason-bar { height:8px; background:#24314b; border-radius:99px; overflow:hidden; }
+    .reason-bar i { display:block; height:100%; background:var(--amber); border-radius:inherit; }
+    .activity { display:grid; gap:9px; }
+    .coverage { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+    .coverage-item { background:rgba(11,16,32,.36); border:1px solid var(--line); border-radius:11px; padding:12px; min-width:0; }
+    .coverage-name { font-weight:620; margin:7px 0 3px; }
+    .activity-row { display:grid; grid-template-columns:84px 1fr auto; gap:10px; align-items:center; padding:10px 0; border-top:1px solid var(--line); }
+    .activity-row:first-child { border-top:0; }
+    .activity-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .status { font-size:.7rem; padding:4px 7px; border-radius:999px; background:rgba(110,168,254,.1); color:var(--blue); text-align:center; }
+    .status.complete { color:var(--green); background:rgba(87,211,140,.08); }
+    .status.failed,.status.cooldown { color:var(--red); background:rgba(255,122,144,.08); }
+    .table-wrap { overflow:auto; }
+    table { width:100%; border-collapse:collapse; min-width:1080px; }
+    th { color:var(--muted); text-align:left; font-size:.7rem; font-weight:600; padding:0 10px 10px; }
+    td { padding:12px 10px; border-top:1px solid var(--line); font-size:.79rem; vertical-align:middle; }
+    td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
+    .candidate-name { font-weight:600; }
+    .symbols { color:var(--muted); max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    footer { color:var(--muted); font-size:.72rem; margin-top:18px; text-align:right; }
+    @media (max-width:980px) { .stats { grid-template-columns:repeat(2,1fr); } .two { grid-template-columns:1fr; } .model-row { grid-template-columns:minmax(130px,1fr) 1.5fr repeat(3,60px); } .best-model { grid-template-columns:1fr; } .coverage { grid-template-columns:1fr 1fr; } }
+    @media (max-width:650px) { .shell { width:min(100% - 20px,1500px); padding-top:20px; } header { align-items:flex-start; flex-direction:column; } .stats { grid-template-columns:1fr 1fr; } .card { padding:14px; border-radius:13px; } .model-row { grid-template-columns:1fr 1fr; } .model-row .metric:nth-last-child(-n+3) { text-align:left; } .best-model-metrics,.coverage { grid-template-columns:1fr 1fr; } .controls { width:100%; } select { flex:1; min-width:130px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div><div class="eyebrow">Lokales Research-Labor</div><h1>Modell- und Strategieperformance</h1><p class="sub">Ollama-Vorschläge, Alpaca-Daten und Walk-forward-Ergebnisse</p></div>
+      <div class="live"><span class="dot" id="liveDot"></span><span id="liveText">Verbinde …</span></div>
+    </header>
+
+    <section class="grid stats" aria-label="Übersicht">
+      <article class="card"><div class="stat-label">Evaluierungen</div><div class="stat-value" id="evaluationCount">–</div><div class="stat-note" id="latestCandidate">Noch keine Daten</div></article>
+      <article class="card"><div class="stat-label">Geeignete Kandidaten</div><div class="stat-value" id="eligibleCount">–</div><div class="stat-note">Research-Gate bestanden</div></article>
+      <article class="card"><div class="stat-label">Ollama-Modelle</div><div class="stat-value" id="modelCount">–</div><div class="stat-note">mit gespeicherten Vorschlägen</div></article>
+      <article class="card"><div class="stat-label">Aktive Downloads</div><div class="stat-value" id="downloadCount">–</div><div class="stat-note">Alpaca-Datenwarteschlange</div></article>
+    </section>
+
+    <section class="card best-model" aria-label="Aktuell bestes Ollama-Modell">
+      <div id="bestModelIdentity"><div class="empty">Bestes Modell wird ermittelt …</div></div>
+      <div id="bestModelDetails"></div>
+    </section>
+
+    <section class="card" style="margin-bottom:16px">
+      <div class="card-head"><div><h2>Strategien aus dem Hauptanforderungsdokument</h2><div class="muted">P0/P1 werden mit Marktdaten getestet; P2 bleibt bis zu echten Point-in-time-Events im Shadow-Modus</div></div></div>
+      <div id="strategyCoverage" class="coverage"><div class="empty">Lade Strategieabdeckung …</div></div>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-head"><div><h2>Ollama-Modellvergleich</h2><div class="muted">Bewertete Varianten und robuste Erfolgsquote</div></div></div>
+        <div id="modelList" class="model-list"><div class="empty">Lade Modellstatistik …</div></div>
+      </article>
+      <article class="card">
+        <div class="card-head"><h2>Research-Champion</h2><span class="badge">nicht paper-approved</span></div>
+        <div id="champion" class="champion"><div class="empty">Noch kein Champion</div></div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-head"><div><h2>Score-Verlauf</h2><div class="muted">Neueste 500 Evaluationen</div></div></div>
+        <div id="scoreChart" class="chart"><div class="empty">Lade Verlauf …</div></div>
+      </article>
+      <article class="card">
+        <div class="card-head"><div><h2>Ablehnungsgründe</h2><div class="muted">Strategie-Gates</div></div></div>
+        <div id="reasonList" class="reasons"><div class="empty">Keine Ablehnungen</div></div>
+      </article>
+    </section>
+
+    <section class="card" style="margin-bottom:16px">
+      <div class="card-head"><div><h2>Aktuelle Datenaktivität</h2><div class="muted">Downloads, Cache und Cooldowns</div></div></div>
+      <div id="activity" class="activity"><div class="empty">Keine Datenanforderungen</div></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Strategievarianten</h2><div class="muted" id="tableCount">Alle Evaluationen</div></div>
+        <div class="controls">
+          <select id="modelFilter" aria-label="Modell filtern"><option value="">Alle Modelle</option></select>
+          <select id="familyFilter" aria-label="Strategiefamilie filtern"><option value="">Alle Familien</option></select>
+          <select id="statusFilter" aria-label="Status filtern"><option value="">Alle Ergebnisse</option><option value="eligible">Geeignet</option><option value="rejected">Abgelehnt</option></select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Variante</th><th>Modell</th><th>Markt / Zeitrahmen</th><th>Universum</th><th class="num">Score</th><th class="num">Rendite</th><th class="num">Sharpe</th><th class="num">Drawdown</th><th class="num">Trades</th><th>Gate</th></tr></thead>
+          <tbody id="candidateRows"></tbody>
+        </table>
+      </div>
+    </section>
+    <footer id="updatedAt">Noch nicht aktualisiert</footer>
+  </main>
+
+  <script>
+    const state = { data:null, model:'', family:'', status:'' };
+    const $ = id => document.getElementById(id);
+    const esc = value => String(value ?? '–').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    const number = (value, digits=2) => value == null ? '–' : Number(value).toLocaleString('de-DE',{maximumFractionDigits:digits,minimumFractionDigits:digits});
+    const percent = value => value == null ? '–' : `${number(Number(value)*100,2)} %`;
+    const date = value => value ? new Date(value).toLocaleString('de-DE') : '–';
+    const reasonLabel = value => ({insufficient_independent_trades:'Zu wenige unabhängige Trades',drawdown_kill_threshold_breached:'Drawdown-Limit überschritten',fails_3x_cost_stress:'3×-Kostenstress nicht bestanden',non_positive_median_return:'Median-Rendite nicht positiv',non_positive_median_sharpe:'Median-Sharpe nicht positiv',insufficient_positive_fold_ratio:'Zu wenige positive Walk-forward-Folds'}[value] || value);
+
+    function renderOverview(data) {
+      $('evaluationCount').textContent = data.overview.evaluations.toLocaleString('de-DE');
+      $('eligibleCount').textContent = data.overview.eligible.toLocaleString('de-DE');
+      $('modelCount').textContent = data.overview.models.toLocaleString('de-DE');
+      $('downloadCount').textContent = data.overview.running_downloads.toLocaleString('de-DE');
+      $('latestCandidate').textContent = data.overview.latest_candidate || 'Noch keine Evaluation';
+    }
+
+    function renderModels(models) {
+      if (!models.length) { $('modelList').innerHTML='<div class="empty">Noch keine Modellvorschläge</div>'; return; }
+      const maxEval = Math.max(...models.map(m => m.evaluations),1);
+      $('modelList').innerHTML = models.map(m => `
+        <div class="model-row">
+          <div><div class="model-name">${esc(m.model)} ${m.is_best?'<span class="badge good">führend</span>':''}</div><div class="muted">${m.proposals} Vorschläge · ${m.generation_rejections} Generatorfehler</div></div>
+          <div><div class="muted">${m.evaluations} bewertet</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(2,m.evaluations/maxEval*100)}%"></div></div></div>
+          <div class="metric"><strong>${m.eligible_rate == null ? '–' : percent(m.eligible_rate)}</strong><span>geeignet</span></div>
+          <div class="metric"><strong>${number(m.median_score,4)}</strong><span>Median-Score</span></div>
+          <div class="metric"><strong>${percent(m.median_drawdown)}</strong><span>Drawdown</span></div>
+        </div>`).join('');
+    }
+
+    function renderBestModel(best) {
+      if (!best) {
+        $('bestModelIdentity').innerHTML='<div class="eyebrow">Aktuell bestes Ollama-Modell</div><div class="best-model-title">Noch keine Modelldaten</div>';
+        $('bestModelDetails').innerHTML='<div class="muted">Sobald ein Ollama-Kandidat ausgewertet wurde, erscheint hier der Forschungsführer.</div>';
+        return;
+      }
+      const c=best.candidate||{}, robust=Boolean(best.trade_ready), open=(c.reasons||[]).length;
+      $('bestModelIdentity').innerHTML=`<div class="eyebrow">Aktuell bestes Ollama-Modell</div><div class="best-model-title">${esc(best.model)}</div><span class="badge ${robust?'good':'bad'}">${robust?'robust · Research-Gates bestanden':'Forschungsführer · nicht freigegeben'}</span>`;
+      $('bestModelDetails').innerHTML=`<div class="best-model-metrics"><div class="mini"><span>Auswertungen</span>${Number(best.evaluations||0).toLocaleString('de-DE')}</div><div class="mini"><span>Robust bestanden</span>${Number(best.eligible||0).toLocaleString('de-DE')}</div><div class="mini"><span>Führender Score</span>${number(c.score,4)}</div><div class="mini"><span>Median-Rendite</span>${percent(c.return)}</div><div class="mini"><span>Offene Gates</span>${open}</div></div><div class="best-model-note">Führende Variante: ${esc(c.name)} · ${esc(c.timeframe)} · ${esc((c.universe||[]).join(', '))}${open?` · offen: ${esc((c.reasons||[]).map(reasonLabel).join(', '))}`:''}</div>`;
+    }
+
+    function renderCoverage(items) {
+      const labels={robust_candidate:'robust auf Marktdaten',fixture_candidate:'nur Fixture-Kandidat',research_active:'Research aktiv',shadow_missing_data:'Shadow · Daten fehlen',not_evaluated:'noch nicht bewertet'};
+      $('strategyCoverage').innerHTML=(items||[]).map(x=>`<div class="coverage-item"><span class="badge ${x.status==='robust_candidate'?'good':x.status==='shadow_missing_data'?'bad':''}">${esc(x.stage)} · ${esc(labels[x.status]||x.status)}</span><div class="coverage-name">${esc(x.label)}</div><div class="muted">${x.completed} getestet · ${x.real_eligible} robust auf echten Daten${x.missing_requirements.length?`<br>Fehlt: ${esc(x.missing_requirements.join(', '))}`:''}</div></div>`).join('') || '<div class="empty">Kein Strategiekatalog vorhanden</div>';
+    }
+
+    function renderChampion(champion) {
+      if (!champion) { $('champion').innerHTML='<div class="empty">Noch kein geeigneter Kandidat</div>'; return; }
+      const spec=champion.spec||{}, ds=champion.dataset||{};
+      const stale=Boolean(champion.stale);
+      $('champion').innerHTML=`<div><span class="badge ${stale?'bad':'good'}">${stale?'nach neuen Gates veraltet':'Research-Champion'}</span></div><div class="champion-name">${esc(champion.name)}</div><div class="muted">${esc(champion.family)} · ${esc(spec.timeframe||'1Day')} · ${esc((spec.universe||[]).join(', '))}</div><div class="champion-metrics"><div class="mini"><span>Score</span>${number(champion.score,4)}</div><div class="mini"><span>Median-Rendite</span>${percent(champion.median_total_return)}</div><div class="mini"><span>Sharpe</span>${number(champion.median_sharpe,2)}</div><div class="mini"><span>Max. Drawdown</span>${percent(champion.worst_max_drawdown)}</div></div>${stale?`<div class="muted">Nicht mehr qualifiziert: ${esc((champion.reasons||[]).map(reasonLabel).join(', '))}</div>`:''}<div class="muted">${esc(ds.source||'unbekannte Quelle')} · ${ds.bars ? Number(ds.bars).toLocaleString('de-DE')+' Bars' : 'Datenmenge nicht hinterlegt'}</div>`;
+    }
+
+    function renderTimeline(items) {
+      const scored=items.filter(x => x.score != null);
+      if (!scored.length) { $('scoreChart').innerHTML='<div class="empty">Noch keine Scores</div>'; return; }
+      const width=760,height=250,p={l:56,r:18,t:18,b:34};
+      let min=Math.min(...scored.map(x=>Number(x.score))), max=Math.max(...scored.map(x=>Number(x.score)));
+      if (min===max) { min-=.01; max+=.01; }
+      const x=i=>p.l+i/Math.max(scored.length-1,1)*(width-p.l-p.r);
+      const y=v=>p.t+(max-v)/(max-min)*(height-p.t-p.b);
+      const ticks=[0,.25,.5,.75,1].map(t=>max-(max-min)*t);
+      const line=scored.map((d,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(Number(d.score)).toFixed(1)}`).join(' ');
+      $('scoreChart').innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Score-Verlauf der Strategieevaluationen"><title>Score-Verlauf</title>${ticks.map(v=>`<line class="gridline" x1="${p.l}" x2="${width-p.r}" y1="${y(v)}" y2="${y(v)}"/><text class="chart-label" x="${p.l-9}" y="${y(v)+4}" text-anchor="end">${number(v,3)}</text>`).join('')}<line class="axis" x1="${p.l}" x2="${width-p.r}" y1="${height-p.b}" y2="${height-p.b}"/><path class="score-line" d="${line}"/>${scored.map((d,i)=>`<circle class="score-dot" cx="${x(i)}" cy="${y(Number(d.score))}" r="${d.eligible?4.5:3.5}" fill="${d.eligible?'var(--green)':'var(--red)'}"><title>${esc(d.name)} · ${number(d.score,4)} · ${esc(d.model)}</title></circle>`).join('')}<text class="chart-label" x="${p.l}" y="${height-8}">älter</text><text class="chart-label" x="${width-p.r}" y="${height-8}" text-anchor="end">neuer</text></svg>`;
+    }
+
+    function renderReasons(items) {
+      if (!items.length) { $('reasonList').innerHTML='<div class="empty">Keine Gate-Ablehnungen</div>'; return; }
+      const max=Math.max(...items.map(x=>x.count),1);
+      $('reasonList').innerHTML=items.map(x=>`<div class="reason-row"><div class="reason-name" title="${esc(reasonLabel(x.reason))}">${esc(reasonLabel(x.reason))}</div><div class="reason-bar"><i style="width:${x.count/max*100}%"></i></div><strong>${x.count}</strong></div>`).join('');
+    }
+
+    function renderActivity(items) {
+      if (!items.length) { $('activity').innerHTML='<div class="empty">Noch keine Datenanforderungen</div>'; return; }
+      $('activity').innerHTML=items.slice(0,8).map(x=>`<div class="activity-row"><span class="status ${esc(x.status)}">${esc(x.status)}</span><div><div class="activity-title">${esc(x.strategy)} · ${esc(x.timeframe)} · ${esc(x.symbols.join(', '))}</div><div class="muted">Versuch ${x.attempts}${x.cooldown_until?' · Cooldown bis '+date(x.cooldown_until):''}</div></div><div class="muted">${date(x.updated_at)}</div></div>`).join('');
+    }
+
+    function refreshFilterOptions(data) {
+      const model=$('modelFilter'), family=$('familyFilter');
+      const currentModel=model.value,currentFamily=family.value;
+      model.innerHTML='<option value="">Alle Modelle</option>'+[...new Set(data.candidates.map(x=>x.model))].sort().map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+      family.innerHTML='<option value="">Alle Familien</option>'+[...new Set(data.candidates.map(x=>x.family))].sort().map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+      model.value=currentModel; family.value=currentFamily;
+    }
+
+    function renderCandidates() {
+      const items=(state.data?.candidates||[]).filter(x=>(!state.model||x.model===state.model)&&(!state.family||x.family===state.family)&&(!state.status||(state.status==='eligible'?x.eligible:!x.eligible)));
+      $('tableCount').textContent=`${items.length} von ${state.data?.candidates.length||0} Evaluationen`;
+      $('candidateRows').innerHTML=items.length ? items.map(x=>`<tr><td><div class="candidate-name">${esc(x.name)}</div><div class="muted">${date(x.evaluated_at)}</div></td><td>${esc(x.model)}${x.iteration?`<div class="muted">Iteration ${x.iteration}</div>`:''}</td><td>${esc(x.family)}<div class="muted">${esc(x.timeframe)} · ${esc(x.dataset_source)}</div></td><td><div class="symbols" title="${esc(x.universe.join(', '))}">${esc(x.universe.join(', '))}</div></td><td class="num">${number(x.score,4)}</td><td class="num">${percent(x.return)}</td><td class="num">${number(x.sharpe,2)}</td><td class="num">${percent(x.drawdown)}</td><td class="num">${number(x.trades,0)}</td><td><span class="badge ${x.eligible?'good':'bad'}">${x.eligible?'geeignet':'abgelehnt'}</span>${x.reasons.length?`<div class="muted" title="${esc(x.reasons.map(reasonLabel).join(', '))}">${esc(reasonLabel(x.reasons[0]))}</div>`:''}</td></tr>`).join('') : '<tr><td colspan="10"><div class="empty">Keine Treffer für diese Filter</div></td></tr>';
+    }
+
+    async function load() {
+      try {
+        const response=await fetch('/api/dashboard',{cache:'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data=await response.json(); state.data=data;
+        renderOverview(data); renderBestModel(data.best_model); renderCoverage(data.strategy_coverage); renderModels(data.models); renderChampion(data.champion); renderTimeline(data.timeline); renderReasons(data.rejection_reasons); renderActivity(data.data_requests); refreshFilterOptions(data); renderCandidates();
+        $('liveDot').classList.remove('error'); $('liveText').textContent='Live · Aktualisierung alle 5 s'; $('updatedAt').textContent=`Stand: ${date(data.generated_at)}`;
+      } catch (error) {
+        $('liveDot').classList.add('error'); $('liveText').textContent='Verbindung unterbrochen'; $('updatedAt').textContent=String(error);
+      }
+    }
+    $('modelFilter').addEventListener('change',e=>{state.model=e.target.value;renderCandidates();});
+    $('familyFilter').addEventListener('change',e=>{state.family=e.target.value;renderCandidates();});
+    $('statusFilter').addEventListener('change',e=>{state.status=e.target.value;renderCandidates();});
+    load(); setInterval(load,5000);
+  </script>
+</body>
+</html>

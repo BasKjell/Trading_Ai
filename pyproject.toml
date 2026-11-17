@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=75,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-paper-trader"
+version = "0.1.0"
+description = "Offline-first research and paper-trading platform"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9"]
+
+[project.scripts]
+trader = "localtrader.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["localtrader*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+

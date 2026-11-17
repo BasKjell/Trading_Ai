@@ -1,7 +1,42 @@
-
-data/.DS_Store
-.DS_Store
-.ipynb_checkpoints/ai-checkpoint.ipynb
-
 # Local secrets – never commit
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# macOS / Jupyter
+.DS_Store
+.ipynb_checkpoints/
+
+# Local runtime output (never versioned)
+reports/*
+!reports/.gitkeep
+state/*
+!state/.gitkeep
+research_registry/*
+!research_registry/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.log
+
+# Downloaded market data stays local; the small DAX sample is versioned on purpose
+data/*
+!data/.gitkeep
+!data/DAX3015.csv

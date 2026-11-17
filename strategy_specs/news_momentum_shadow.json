@@ -1,0 +1,20 @@
+{
+  "name": "news_momentum_shadow",
+  "family": "news_momentum",
+  "market": "equity",
+  "universe": ["AAPL", "MSFT", "NVDA"],
+  "indicators": [
+    {"alias": "trend", "kind": "sma", "window": 50, "source": "close"},
+    {"alias": "atr20", "kind": "atr", "window": 20, "source": "close"}
+  ],
+  "entry_all": [{"left": "close", "op": ">", "right": "trend"}],
+  "exit_any": [{"left": "close", "op": "<", "right": "trend"}],
+  "stop_atr_alias": "atr20",
+  "stop_atr_multiple": 3.0,
+  "rank_by": null,
+  "max_positions": 2,
+  "rebalance_every": 1,
+  "data_requirements": ["point_in_time_news", "publication_timestamp", "event_schema"],
+  "rationale": "Shadow-only news momentum; cannot run without point-in-time event data.",
+  "version": "0.1-shadow"
+}
