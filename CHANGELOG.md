@@ -96,7 +96,7 @@ Rücknahme: Revert dieses Commits stellt die alten Limits wieder her (nicht empf
   GitHub-Actions-Workflow mit JUnit- und Coverage-Artefakten.
 - Lint-/Typfehler behoben, u. a. ein Fehler, bei dem Stop-/Exit-Signale positional `None` als
   Strategieversion statt als Stop-Preis übergaben.
-- Plan (`docs/PLAN.md`) und ADR 0001.
+- Plan (`docs/PLAN.md`, inzwischen durch `docs/STATUS.md` ersetzt) und ADR 0001.
 
 **Tests:** neu `tests/test_secret_scan.py` (verbotene Dateien, Schlüsselmuster, saubere Dateien, Regressionstest:
 noch nicht hinzugefügte Dateien werden ebenfalls gescannt).
@@ -104,4 +104,4 @@ noch nicht hinzugefügte Dateien werden ebenfalls gescannt).
 **Ausgeführte Prüfungen:** `make check` lokal (Python 3.13): Format, Lint, mypy, 46 Tests,
 Secret-Scan, Konfiguration – bestanden.
 
-**Einschränkungen:** Coverage läuft nur in CI (lokal nicht installiert). Fachliche Lücken siehe `docs/PLAN.md`.
+**Einschränkungen:** Coverage läuft nur in CI (lokal nicht installiert). Fachliche Lücken siehe `docs/STATUS.md`.
