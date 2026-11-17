@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,9 +23,14 @@ def tags(*extra: str) -> list[dict[str, str]]:
 
 
 def pr(number: int = 1, owner: str = "Claude Code", task: str = "T-007") -> dict:
-    return {"number": number, "title": f"{task}: example", "body": f"Agent: {owner}", "labels": tags(),
-            "head": {"sha": "a" * 40, "ref": "agent/example", "repo": {"full_name": "BasKjell/Trading_Ai"}},
-            "base": {"ref": "main"}}
+    return {
+        "number": number,
+        "title": f"{task}: example",
+        "body": f"Agent: {owner}",
+        "labels": tags(),
+        "head": {"sha": "a" * 40, "ref": "agent/example", "repo": {"full_name": "BasKjell/Trading_Ai"}},
+        "base": {"ref": "main"},
+    }
 
 
 def issue(number: int = 2) -> dict:
@@ -60,7 +66,11 @@ class PlanningTests(unittest.TestCase):
     def test_priority_fix_review_implementation_and_provenance(self):
         fix = pr(owner="Codex")
         review = pr(3)
-        change = {"id": 42, "commit_id": "a" * 40, "body": "Claude Code: unabhängiges Review\nÄNDERUNGEN NÖTIG"}
+        change = {
+            "id": 42,
+            "commit_id": "a" * 40,
+            "body": "Claude Code: unabhängiges Review\nEmpfehlung: ÄNDERUNGEN NÖTIG",
+        }
         jobs = runner.plan(FakeGitHub([fix, review], [issue()], [change]), ["codex", "claude"])
         self.assertEqual([j.kind for j in jobs[:2]], ["fix", "review"])
         self.assertEqual(jobs[0].provider, "codex")
@@ -73,6 +83,14 @@ class PlanningTests(unittest.TestCase):
     def test_old_review_does_not_schedule_fix_of_new_head(self):
         change = {"commit_id": "b" * 40, "body": "Codex: unabhängiges Review\nÄNDERUNGEN NÖTIG"}
         self.assertEqual(runner.plan(FakeGitHub([pr()], reviews=[change]), ["claude"]), [])
+
+    def test_old_findings_quoted_in_approval_do_not_trigger_new_fix(self):
+        approval = {
+            "commit_id": "a" * 40,
+            "body": "Codex: unabhängiges Review\n"
+            "Früher: Empfehlung: ÄNDERUNGEN NÖTIG\nEmpfehlung: FREIGEBEN",
+        }
+        self.assertEqual(runner.plan(FakeGitHub([pr()], reviews=[approval]), ["claude"]), [])
 
     def test_research_critical_forks_drafts_unknown_agents_are_skipped(self):
         fixtures = [pr(i) for i in range(6)]
@@ -165,9 +183,11 @@ class PersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             state, gh = runner.State(Path(temp)), FakeGitHub(issues=[issue()])
             config = {"codex": {}, "claude": {}, "runner": {"timeout_seconds": 5, "cooldown_seconds": 100}}
+
             def login(provider, settings, root):
                 if provider == "codex":
                     raise runner.RunnerError("not installed")
+
             with patch.object(runner, "subscription_login", side_effect=login):
                 with patch.object(runner, "prepare", return_value=Path(temp)), patch.object(runner, "command"):
                     with patch.object(runner, "worker_command", return_value=[]):
@@ -196,25 +216,75 @@ class VerificationTests(unittest.TestCase):
         for conclusion in (None, "failure", "cancelled"):
             gh = FakeGitHub([pr(owner="Codex")])
             original = gh.api
-            def api(endpoint, body=None):
+
+            def api(endpoint, body=None, conclusion=conclusion, original=original):
                 if "check-runs" in endpoint:
                     return {"check_runs": [{"conclusion": conclusion}]}
                 if endpoint.endswith("/status"):
                     return {"state": "pending", "total_count": 0}
                 return original(endpoint, body)
+
             gh.api = api
             with self.subTest(conclusion=conclusion):
                 with patch.object(runner, "command", side_effect=["", "checks passed", "a" * 40]):
                     self.assertFalse(runner.verify(gh, job, Path("/tmp")))
 
 
+class WorktreeTests(unittest.TestCase):
+    def test_real_git_worktrees_are_isolated_and_existing_work_is_not_reset(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            origin, control, state = base / "origin", base / "control", base / "state"
+
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=base, capture_output=True, text=True, check=True).stdout
+
+            git("init", "--bare", str(origin))
+            git("clone", str(origin), str(control))
+            git("-C", str(control), "checkout", "-b", "main")
+            (control / "fixture.txt").write_text("base")
+            git("-C", str(control), "add", "fixture.txt")
+            git(
+                "-C",
+                str(control),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-m",
+                "test fixture",
+            )
+            git("-C", str(control), "push", "origin", "main")
+            state.mkdir()
+            job = runner.Job("implement", 2, "codex", "T-017", "agent/T-017-auto-codex", "", "main")
+            path = runner.prepare(control, state, job, {})
+            (path / "fixture.txt").write_text("unfinished work")
+            resumed = runner.prepare(control, state, job, {"worktree": str(path)})
+            self.assertEqual((resumed / "fixture.txt").read_text(), "unfinished work")
+            self.assertEqual((control / "fixture.txt").read_text(), "base")
+            with self.assertRaises(runner.RunnerError):
+                runner.prepare(control, state, job, {})  # unmanaged existing directory, never reset
+
+
 class WorkerTests(unittest.TestCase):
     def test_output_requires_structured_final_answer_not_tool_output(self):
-        self.assertEqual(runner.outcome(json.dumps({"type": "item.completed", "item": {
-            "type": "command_execution", "text": 'RUNNER_RESULT {"status":"done"}'}}), 0), "blocked")
-        for event in ({"type": "result", "result": 'RUNNER_RESULT {"status":"done"}'},
-                      {"type": "item.completed", "item": {"type": "agent_message", "text":
-                       'RUNNER_RESULT {"status":"done"}'}}):
+        self.assertEqual(
+            runner.outcome(
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {"type": "command_execution", "text": 'RUNNER_RESULT {"status":"done"}'},
+                    }
+                ),
+                0,
+            ),
+            "blocked",
+        )
+        for event in (
+            {"type": "result", "result": 'RUNNER_RESULT {"status":"done"}'},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": 'RUNNER_RESULT {"status":"done"}'}},
+        ):
             self.assertEqual(runner.outcome(json.dumps(event), 0), "verify")
 
     def test_quota_error_even_with_zero_exit_code_and_not_generic_errors(self):
@@ -222,6 +292,10 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(runner.outcome(json.dumps(event), 0), "rate_limited")
         self.assertEqual(runner.outcome('{"type":"error","message":"missing authentication"}', 1), "blocked")
         self.assertEqual(runner.outcome('{"type":"result","result":"test rate limit handling"}', 0), "blocked")
+
+    def test_pretty_printed_terminal_json_is_supported(self):
+        event = {"type": "result", "result": 'RUNNER_RESULT {"status":"done"}'}
+        self.assertEqual(runner.outcome(json.dumps(event, indent=2), 0), "verify")
 
     def test_medium_flags_no_permission_bypass_and_no_api_keys(self):
         for provider in runner.FAMILIES:
@@ -240,10 +314,14 @@ class WorkerTests(unittest.TestCase):
             payload = json.dumps({"type": "result", "result": 'RUNNER_RESULT {"status":"done"}'})
             code = "import sys; sys.stdin.read(); print(" + repr(payload) + ")"
             self.assertEqual(runner.run_worker([sys.executable, "-c", code], Path(temp), "prompt", 5), "verify")
-            self.assertEqual(runner.run_worker([sys.executable, "-c", "import time; time.sleep(30)"],
-                                               Path(temp), "prompt", 0), "blocked")
-            self.assertEqual(runner.run_worker([sys.executable, "-c", "print('x'*10000)"],
-                                               Path(temp), "prompt", 5, max_output=50), "blocked")
+            self.assertEqual(
+                runner.run_worker([sys.executable, "-c", "import time; time.sleep(30)"], Path(temp), "prompt", 0),
+                "blocked",
+            )
+            self.assertEqual(
+                runner.run_worker([sys.executable, "-c", "print('x'*10000)"], Path(temp), "prompt", 5, max_output=50),
+                "blocked",
+            )
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ MANUAL_TASKS = {"T-005", "T-006", "T-008", "T-011", "T-012", "T-013", "T-014", "
 BLOCK_LABELS = {"blocked", "manual-only", "needs-independent-review", "effort:high", "research"}
 CLAIM = "<!-- coding-runner claim "
 RESULT = "RUNNER_RESULT "
-LIMIT_CODES = {"rate_limit_error", "rate_limit_exceeded", "usage_limit_reached", "insufficient_quota"}
+LIMIT_CODES = {"rate_limit", "usage_limit", "insufficient_quota"}
 
 
 class RunnerError(RuntimeError):
@@ -40,8 +40,9 @@ class RunnerError(RuntimeError):
 def command(args: list[str], cwd: Path, *, timeout: int = 60) -> str:
     """Never use a shell, and never include command output in persisted error messages."""
     try:
-        run = subprocess.run(args, cwd=cwd, env=clean_environment(), capture_output=True,
-                             text=True, timeout=timeout, check=False)
+        run = subprocess.run(
+            args, cwd=cwd, env=clean_environment(), capture_output=True, text=True, timeout=timeout, check=False
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RunnerError(f"{Path(args[0]).name}: {type(exc).__name__}") from exc
     if run.returncode:
@@ -106,8 +107,11 @@ class Job:
     @property
     def key(self) -> str:
         # An unassigned issue is one job, regardless of which provider wins it.
-        payload = (f"implement:{self.number}" if self.kind == "implement" else
-                   f"{self.kind}:{self.number}:{self.provider}:{self.sha}:{self.base}:{self.revision}")
+        payload = (
+            f"implement:{self.number}"
+            if self.kind == "implement"
+            else f"{self.kind}:{self.number}:{self.provider}:{self.sha}:{self.base}:{self.revision}"
+        )
         return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
@@ -130,9 +134,11 @@ def plan(gh: GitHub, providers: list[str], resumable: dict[int, str] | None = No
         current = [r for r in reviews if r.get("commit_id") == sha and family(r.get("body") or "")]
         foreign = [r for r in current if family(r.get("body") or "") != owner]
         latest = foreign[-1] if foreign else None
-        if latest and (
-            latest.get("state") == "CHANGES_REQUESTED" or "ÄNDERUNGEN NÖTIG" in (latest.get("body") or "")
-        ):
+        recommendations = re.findall(r"Empfehlung:\s*(FREIGEBEN|ÄNDERUNGEN NÖTIG)", (latest or {}).get("body") or "")
+        needs_fix = latest and (
+            latest.get("state") == "CHANGES_REQUESTED" or recommendations[-1:] == ["ÄNDERUNGEN NÖTIG"]
+        )
+        if needs_fix:
             if owner in providers:
                 jobs.append(Job("fix", number, owner, task, pr["head"]["ref"], sha, base, str(latest["id"])))
             continue
@@ -175,7 +181,7 @@ class State:
         if self.path.exists():
             self.data = json.loads(self.path.read_text())
         for row in self.data["jobs"].values():
-            if row["status"] == "running":
+            if row["status"] in {"preparing", "running"}:
                 row.update(status="blocked", reason="interrupted run; inspect worktree and explicitly retry")
                 self.data["paused"].update(dict.fromkeys(FAMILIES, "interrupted run; check for orphan workers"))
 
@@ -190,7 +196,11 @@ class State:
         if self.data["paused"].get(job.provider) or self.data["cooldown"].get(job.provider, 0) > now:
             return False
         row = self.data["jobs"].get(job.key, {})
-        return row.get("provider", job.provider) == job.provider and row.get("status") in (None, "retry", "rate_limited")
+        return row.get("provider", job.provider) == job.provider and row.get("status") in (
+            None,
+            "retry",
+            "rate_limited",
+        )
 
 
 @contextlib.contextmanager
@@ -232,11 +242,34 @@ def clean_environment() -> dict[str, str]:
 def worker_command(provider: str, settings: dict[str, Any]) -> list[str]:
     binary, model = settings["binary"], settings["model"]
     if provider == "codex":
-        return [binary, "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", "--model", model,
-                "-c", 'model_reasoning_effort="medium"', "--json", "-"]
-    return [binary, "-p", "--model", model, "--effort", "medium", "--output-format", "json",
-            "--permission-mode", "acceptEdits", "--allowedTools",
-            "Read,Edit,Write,Glob,Grep,Bash(git *),Bash(gh *),Bash(make *),Bash(python3 *)"]
+        return [
+            binary,
+            "--ask-for-approval",
+            "never",
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "--model",
+            model,
+            "-c",
+            'model_reasoning_effort="medium"',
+            "--json",
+            "-",
+        ]
+    return [
+        binary,
+        "-p",
+        "--model",
+        model,
+        "--effort",
+        "medium",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "Read,Edit,Write,Glob,Grep,Bash(git *),Bash(gh *),Bash(make *),Bash(python3 *)",
+    ]
 
 
 def subscription_login(provider: str, settings: dict[str, Any], cwd: Path) -> None:
@@ -245,8 +278,9 @@ def subscription_login(provider: str, settings: dict[str, Any], cwd: Path) -> No
         raise RunnerError(f"{provider}: binary missing")
     if provider == "codex":
         # Some Codex releases write login status to stderr; check both streams without logging it.
-        run = subprocess.run([binary, "login", "status"], cwd=cwd, env=clean_environment(),
-                             capture_output=True, text=True, timeout=20)
+        run = subprocess.run(
+            [binary, "login", "status"], cwd=cwd, env=clean_environment(), capture_output=True, text=True, timeout=20
+        )
         if run.returncode or "chatgpt" not in (run.stdout + run.stderr).lower():
             raise RunnerError("codex: ChatGPT subscription login not confirmed")
     else:
@@ -258,7 +292,12 @@ def subscription_login(provider: str, settings: dict[str, Any], cwd: Path) -> No
 def outcome(text: str, returncode: int) -> str:
     """Read only terminal worker messages / errors, not arbitrary tool output containing 'limit'."""
     terminal: list[str] = []
-    for line in text.splitlines():
+    try:
+        json.loads(text)
+        messages = [text]
+    except json.JSONDecodeError:
+        messages = text.splitlines()
+    for line in messages:
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -282,7 +321,7 @@ def outcome(text: str, returncode: int) -> str:
     for line in "\n".join(terminal).splitlines()[::-1]:
         if line.startswith(RESULT):
             try:
-                status = json.loads(line[len(RESULT):])["status"]
+                status = json.loads(line[len(RESULT) :])["status"]
                 return "verify" if status == "done" else "blocked"
             except (ValueError, KeyError, TypeError):
                 break
@@ -292,8 +331,15 @@ def outcome(text: str, returncode: int) -> str:
 def run_worker(args: list[str], cwd: Path, prompt: str, timeout: int, max_output: int = 2_000_000) -> str:
     """Bound runtime/output. Kill the whole process group; never persist raw model/tool output."""
     with tempfile.TemporaryFile() as output:
-        proc = subprocess.Popen(args, cwd=cwd, env=clean_environment(), stdin=subprocess.PIPE,
-                                stdout=output, stderr=output, start_new_session=True)
+        proc = subprocess.Popen(
+            args,
+            cwd=cwd,
+            env=clean_environment(),
+            stdin=subprocess.PIPE,
+            stdout=output,
+            stderr=output,
+            start_new_session=True,
+        )
         try:
             assert proc.stdin is not None
             proc.stdin.write(prompt.encode())
@@ -316,7 +362,10 @@ def run_worker(args: list[str], cwd: Path, prompt: str, timeout: int, max_output
 
 
 def prepare(root: Path, directory: Path, job: Job, row: dict[str, Any]) -> Path:
-    if job.branch and (job.branch.startswith("-") or command(["git", "check-ref-format", "--branch", job.branch], root).strip() != job.branch):
+    if job.branch and (
+        job.branch.startswith("-")
+        or command(["git", "check-ref-format", "--branch", job.branch], root).strip() != job.branch
+    ):
         raise RunnerError("invalid branch name")
     path = directory / "worktrees" / job.key
     path.parent.mkdir(exist_ok=True)
@@ -324,8 +373,9 @@ def prepare(root: Path, directory: Path, job: Job, row: dict[str, Any]) -> Path:
         if path.resolve() != Path(row["worktree"]).resolve() or not path.is_dir():
             raise RunnerError("managed worktree missing; no automatic recreation")
         expected = job.sha if job.kind == "review" else job.branch
-        actual = command(["git", "rev-parse", "HEAD"] if job.kind == "review" else
-                         ["git", "branch", "--show-current"], path).strip()
+        actual = command(
+            ["git", "rev-parse", "HEAD"] if job.kind == "review" else ["git", "branch", "--show-current"], path
+        ).strip()
         if expected != actual:
             raise RunnerError("managed worktree changed branch/revision")
         return path
@@ -348,7 +398,7 @@ def prepare(root: Path, directory: Path, job: Job, row: dict[str, Any]) -> Path:
 
 def prompt_for(job: Job) -> str:
     return f"""Arbeite als {job.provider}, Modell laut CLI, Denkstufe Medium. Auftrag: {job.kind},
-GitHub Nummer {job.number}, Task {job.task}, geprüfte Ausgangsrevision {job.sha or 'origin/main'}.
+GitHub Nummer {job.number}, Task {job.task}, geprüfte Ausgangsrevision {job.sha or "origin/main"}.
 Lies AGENTS.md, PROJECT_SPEC, STATUS, ARCHITECTURE, Issue/PR samt allen Kommentaren und Handoff.
 Nur diese freigegebene Aufgabe bearbeiten. Bei komplexer/risikorelevanter Aufgabe oder nach zwei
 Fehlversuchen: Handoff schreiben, needs-human melden; kein Modell-/Effortwechsel.
@@ -373,14 +423,24 @@ def verify(gh: GitHub, job: Job, worktree: Path) -> bool:
         pr = gh.api(f"pulls/{job.number}")
         if pr["head"]["sha"] != job.sha or pr["base"]["ref"] != job.base:
             return False
-        return any(r.get("commit_id") == job.sha and family(r.get("body") or "") == job.provider
-                   and f"Zielbranch: {job.base}" in (r.get("body") or "")
-                   and "Empfehlung:" in (r.get("body") or "")
-                   for r in gh.api(f"pulls/{job.number}/reviews?per_page=100"))
+        return any(
+            r.get("commit_id") == job.sha
+            and family(r.get("body") or "") == job.provider
+            and f"Zielbranch: {job.base}" in (r.get("body") or "")
+            and "Empfehlung:" in (r.get("body") or "")
+            for r in gh.api(f"pulls/{job.number}/reviews?per_page=100")
+        )
     prs = gh.api("pulls?state=open&per_page=100")
     head = command(["git", "rev-parse", "HEAD"], worktree).strip()
-    matches = [p for p in prs if not p.get("draft") and p["head"]["ref"] == job.branch and p["head"]["sha"] == head
-               and (p["head"].get("repo") or {}).get("full_name") == gh.repo and family(p.get("body") or "") == job.provider]
+    matches = [
+        p
+        for p in prs
+        if not p.get("draft")
+        and p["head"]["ref"] == job.branch
+        and p["head"]["sha"] == head
+        and (p["head"].get("repo") or {}).get("full_name") == gh.repo
+        and family(p.get("body") or "") == job.provider
+    ]
     if not matches or (job.kind == "fix" and head == job.sha):
         return False
     checks = gh.api(f"commits/{head}/check-runs")["check_runs"]
@@ -404,8 +464,11 @@ def validate_root(root: Path, repo: str) -> None:
 
 def cycle(config: dict[str, Any], root: Path, state: State, gh: GitHub, *, dry_run: bool) -> bool:
     providers = [p for p in FAMILIES if config[p].get("enabled", True)]
-    resumable = {r["number"]: r["provider"] for r in state.data["jobs"].values()
-                 if r.get("kind") == "implement" and r["status"] in {"retry", "rate_limited"}}
+    resumable = {
+        r["number"]: r["provider"]
+        for r in state.data["jobs"].values()
+        if r.get("kind") == "implement" and r["status"] in {"retry", "rate_limited"}
+    }
     jobs = plan(gh, providers, resumable)
     if dry_run:
         print(json.dumps([{"key": j.key, "kind": j.kind, "number": j.number, "provider": j.provider} for j in jobs]))
@@ -419,9 +482,13 @@ def cycle(config: dict[str, Any], root: Path, state: State, gh: GitHub, *, dry_r
             state.data["paused"][job.provider] = "CLI/authentication unavailable; doctor then resume-provider"
             state.save()
             continue
-        row = state.data["jobs"].setdefault(job.key, {"status": "retry", "provider": job.provider,
-                                                    "number": job.number, "kind": job.kind})
+        row = state.data["jobs"].setdefault(
+            job.key, {"status": "retry", "provider": job.provider, "number": job.number, "kind": job.kind}
+        )
         try:
+            # Persist our identity before the first irreversible server-side claim.
+            row["status"] = "preparing"
+            state.save()
             if not claim(gh, state, job):
                 row.update(status="blocked", reason="claim belongs to another session")
                 state.save()
@@ -431,8 +498,12 @@ def cycle(config: dict[str, Any], root: Path, state: State, gh: GitHub, *, dry_r
             worktree = prepare(root, state.directory, job, row)
             row.update(status="running", worktree=str(worktree), started_at=time.time())
             state.save()
-            result = run_worker(worker_command(job.provider, config[job.provider]), worktree, prompt_for(job),
-                                int(config["runner"]["timeout_seconds"]))
+            result = run_worker(
+                worker_command(job.provider, config[job.provider]),
+                worktree,
+                prompt_for(job),
+                int(config["runner"]["timeout_seconds"]),
+            )
             if result == "verify":
                 result = "completed" if verify(gh, job, worktree) else "blocked"
             if result == "rate_limited":
@@ -461,12 +532,13 @@ def main() -> int:
     try:
         config = tomllib.loads(config_path.read_text())
         directory = (root / config["runner"]["state_directory"]).resolve()
+        if args.action == "status":
+            state_file = directory / "state.json"
+            print(state_file.read_text() if state_file.exists() else '{"status":"not started"}')
+            return 0
         with lock(directory):
             state = State(directory)
             state.load()
-            if args.action == "status":
-                print(json.dumps(state.data, indent=2))
-                return 0
             if args.action in {"retry", "resume-provider"}:
                 if args.action == "retry":
                     state.data["jobs"][args.target]["status"] = "retry"
@@ -496,7 +568,8 @@ def main() -> int:
                     return 0
                 time.sleep(max(60, config["runner"]["poll_seconds"]))
     except (RunnerError, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:
-        print(f"runner stopped: {type(exc).__name__}; check doctor/configuration locally", file=sys.stderr)
+        detail = str(exc) if isinstance(exc, RunnerError) else f"{type(exc).__name__}; inspect configuration locally"
+        print(f"runner stopped: {detail}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print("runner interrupted; inspect managed worktree before retry", file=sys.stderr)

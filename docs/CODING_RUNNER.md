@@ -117,6 +117,8 @@ Berechtigungsproblem, fehlgeschlagenes Check oder eine unklare Fertigmeldung ben
 Wiederfreigabe. Hat sich ein PR-Head inzwischen geändert, wird neu geplant; eine alte Fix-Sitzung darf
 nicht blind wiederholt werden. Eine Aufgabe mit vorhandenem, nicht vom Runner verwaltetem lokalen
 Branch blockiert statt diesen Branch zurückzusetzen. Manuell bearbeiten oder nach Abstimmung bereinigen.
+`status` liest auch bei aktivem Watch-Prozess atomar den Zustand. Für `retry`/`resume-provider`
+zuerst den Watch-Prozess stoppen; diese Befehle schreiben den Zustand unter derselben Prozesssperre.
 
 Eine Fertigmeldung reicht nicht: Der Runner prüft einen sauberen Worktree, führt `make check` selbst
 aus und prüft das tatsächliche PR-/Review-Artefakt. Implementierungen müssen gepusht und CI-Prüfungen
