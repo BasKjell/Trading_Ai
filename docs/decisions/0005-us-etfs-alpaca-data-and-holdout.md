@@ -14,14 +14,29 @@ sind, und es sollen mehr Daten ergänzt werden.
 - Erste Instrumente sind **SPY** und **QQQ**: sehr liquide US-Index-ETFs, bei Alpaca handelbar
   (provisionsfrei, Bruchstücke möglich) und mit 15-Minuten-Historie ab 2016.
 - Datenquelle: Alpaca Market Data v2 `/stocks/bars`, Feed **SIP** (konsolidiertes Tape aller US-Börsen),
-  `adjustment=all` (split- und dividendenbereinigt), abgerufen mit dem vorhandenen Paper-Key. Im
-  Basic-Plan kostenlos; Einschränkung nur für die letzten 15 Minuten. **Kein Datenkauf.**
-- Nur Bars der regulären Handelszeit (09:30–16:00 America/New_York). Außerbörsliche Bars sind dünn
-  gehandelt und bei Alpaca nur mit Limitorders handelbar.
-- **Holdout:** Alle Bars ab `2025-11-01T00:00:00Z` sind der finale unabhängige Testzeitraum
-  (`[holdout]` in `config/default.toml`). Festgelegt und committet, bevor irgendein Ergebnis auf diesen
-  Daten berechnet wurde. Forschungsläufe schließen ihn automatisch aus; `--use-holdout` ist der zentralen
-  Holdout-Auswertung vorbehalten und wird im Report protokolliert.
+  abgerufen mit dem vorhandenen Paper-Key. Im Basic-Plan kostenlos; Einschränkung nur für die letzten
+  15 Minuten. **Kein Datenkauf.**
+- **Handelbare und bereinigte Preise getrennt** (Spec §5): Die Engine nutzt ausschließlich Rohkurse
+  (`adjustment=raw`, wie gehandelt) für Signale, Ausführung, Stops und Bewertung. Die bereinigte Serie
+  (`adjustment=all`) wird getrennt abgelegt und nur für Analysen verwendet. Bardividenden werden je
+  Ex-Tag aus beiden Serien abgeleitet und auf gehaltene Positionen gebucht, abzüglich 15 % US-Quellensteuer
+  (Annahme W-8BEN), ebenso im Buy-and-hold-Vergleich. Splits werden noch nicht unterstützt: Ein Split im
+  Abrufzeitraum bricht den Abruf ab (SPY/QQQ hatten 2016–2026 keinen).
+- Bekannte Datenlücke: Alpaca fehlen zwei SPY-Dividenden (Ex-Tage im März 2016 und Juni 2018), sowohl in den
+  bereinigten Bars als auch im Corporate-Actions-Endpunkt. Der Abruf meldet solche Lücken im Manifest
+  (`dividend_gaps`). Die übrigen abgeleiteten Beträge stimmen mit dem Corporate-Actions-Endpunkt auf etwa
+  0,5 % überein (Stichprobe 2016–2018).
+- Nur Bars der **regulären Handelszeit des jeweiligen Tages**: 09:30–16:00 America/New_York, an
+  NYSE-Halbtagen bis 13:00 (`localtrader/calendars.py`, für 2016–2025 gegen das Handelsvolumen in den
+  Daten geprüft). Tage nach dem bekannten Kalenderende (2026-12-31) gelten als nicht handelbar.
+  Außerbörsliche Bars sind dünn gehandelt und bei Alpaca nur mit Limitorders handelbar.
+- **Holdout:** Der finale unabhängige Testzeitraum beginnt `2025-11-01T00:00:00Z` (`[holdout]` in
+  `config/default.toml`), festgelegt und committet, bevor irgendein Ergebnis auf diesen Daten berechnet
+  wurde. Beim Import werden alle Zeilen, die nicht vollständig vor dieser Grenze verfügbar sind
+  (`received_at`), vor jeder Qualitätsprüfung verworfen; im Manifest steht nur ihre Anzahl, nie ein Preis.
+  Dividenden ab dem Holdout-Tag werden ebenfalls nicht geladen. `--use-holdout` ist derzeit eine im
+  Report protokollierte **Konvention, keine technische Zugriffskontrolle**; eine zentrale Kontrolle mit
+  Nutzungszähler ist für T-008 geplant.
 - Der DAX bleibt als zweiter, kleiner Datensatz erhalten.
 
 ## Alternativen
@@ -34,8 +49,9 @@ sind, und es sollen mehr Daten ergänzt werden.
 
 - Preise sind in USD, das Konto rechnet in EUR. Bis T-011 (Währungen) werden USD 1:1 als
   Kontowährung behandelt. Renditen sind davon nicht betroffen, absolute Beträge schon.
-- Bereinigte Preise (`adjustment=all`) enthalten Dividenden als Kursanpassung; frühere Kurse liegen
-  unter den damals gehandelten. Für Renditen unkritisch, für absolute Preisniveaus nicht.
-- Kein Feiertags-/Halbtagskalender: Halbtage enden früher; das erkennt der Import nicht als Lücke.
+- Strategien sehen Rohkurse; am Ex-Tag erscheint die Dividende als kleine Eröffnungslücke (etwa 0,3–0,6 %).
+  Das entspricht dem, was der Livebetrieb sieht. Signale auf bereinigten Kursen bei Ausführung auf
+  Rohkursen wären eine spätere, eigene Entscheidung.
+- Der Halbtagskalender muss jährlich ergänzt werden; ohne Ergänzung wird ab 2027 nicht gehandelt.
 - SPY und QQQ sind stark korreliert (gleiche Korrelationsgruppe in der Konfiguration).
 - T-012 ist damit in der Instrumentenfrage entschieden; der Broker-Preflight bleibt offen.

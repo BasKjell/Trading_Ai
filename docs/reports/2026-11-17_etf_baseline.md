@@ -1,11 +1,15 @@
-# Basisreport: SPY und QQQ, 15 Minuten, Basisstrategien (2026-11-17)
+# Basisreport: SPY und QQQ, 15 Minuten, Basisstrategien (2026-11-17, korrigiert 2026-11-18)
 
-Erzeugt mit `intraday-backtest` und `intraday-stress` (`--symbol SPY|QQQ`), Code-Stand T-018 auf
-`1dfb421`. Rohdateien liegen lokal unter `reports/` und werden nicht versioniert. Experiment: EXP-T018-001.
+Erzeugt mit `intraday-backtest` und `intraday-stress` (`--symbol SPY|QQQ`) auf dem Stand nach dem
+Codex-Review zu PR #21. Rohdateien liegen lokal unter `reports/` und werden nicht versioniert.
+Experiment: **EXP-T018-002** (ersetzt EXP-T018-001, das bereinigte Kurse zur Ausführung nutzte und
+Nachbörsen-Bars an Halbtagen enthielt).
 
-**Daten:** Alpaca SIP, bereinigt, nur reguläre Handelszeit (ADR 0005). Forschungszeitraum
-2016-01-04 bis 2025-10-31 (2.473 Handelstage). **Holdout ab 2025-11-01 nicht verwendet** (6.805 Bars je
-Symbol ausgeschlossen). Datenversionen SPY `521f66df08a5c5d8`, QQQ `95c1721523a14210`.
+**Daten:** Alpaca SIP, **handelbare Rohkurse** für Signale, Ausführung, Stops und Bewertung; Dividenden
+abgeleitet und abzüglich 15 % Quellensteuer gebucht; reguläre Handelszeit je Tag inkl. NYSE-Halbtagen
+(ADR 0005). Forschungszeitraum 2016-01-04 bis 2025-10-31 (2.473 Handelstage). **Holdout ab 2025-11-01
+beim Import verworfen** (6.784 bzw. 6.785 Zeilen, nur Anzahl gemeldet). SPY fehlen bei Alpaca zwei
+Dividenden (März 2016, Juni 2018); Trend- und Buy-and-hold-Ergebnisse von SPY sind dadurch minimal zu niedrig.
 **Kosten (Annahme):** keine Kommission, 0,1 bp Gebühren, 0,5 bp Spread, 1,0 bp Slippage, keine Finanzierung.
 **Kapital/Risiko:** 10.000 (USD 1:1 als Kontowährung, T-011 offen), 0,20 % Risiko je Trade, max. 20 % je Instrument.
 **Parameter:** unverändert aus der Konfiguration (keine Optimierung auf diesen Daten).
@@ -17,50 +21,49 @@ Symbol ausgeschlossen). Datenversionen SPY `521f66df08a5c5d8`, QQQ `95c1721523a1
 
 | Kennzahl | Trend SPY | Trend QQQ | MeanRev SPY | MeanRev QQQ |
 |---|---|---|---|---|
-| Nettorendite (9,8 Jahre) | +6,32 % | +12,93 % | −7,93 % | −7,91 % |
-| Jahresrendite | +0,63 % | +1,25 % | −0,84 % | −0,84 % |
+| Nettorendite (9,8 Jahre) | +6,30 % | +12,29 % | −7,94 % | −7,91 % |
+| Jahresrendite | +0,62 % | +1,19 % | −0,84 % | −0,84 % |
 | Geometrische Monatsrendite | +0,05 % | +0,10 % | −0,07 % | −0,07 % |
-| 90-%-Intervall Monatsrendite (Block-Bootstrap) | −0,005 % … +0,11 % | +0,04 % … +0,18 % | −0,11 % … −0,03 % | −0,11 % … −0,03 % |
-| Sharpe (jährlich) | 0,49 | 0,76 | −0,93 | −0,93 |
-| Max. Drawdown | 1,64 % | 1,98 % | 8,03 % | 8,03 % |
-| Längste Drawdown-Phase | 469 Tage | 290 Tage | bis Ende | bis Ende |
-| Trades | 981 | 947 | 847 | 751 |
-| Trefferquote | 39 % | 41 % | 48 % | 47 % |
-| Profit-Faktor | 1,15 | 1,25 | 0,76 | 0,77 |
-| Ø Haltedauer | 27 h | 27 h | 7,2 h | 6,7 h |
-| Kosten gesamt | 536 | 525 | 429 | 360 |
-| Ø Exposure / Zeit im Markt | 6,2 % / 31 % | 6,2 % / 32 % | 1,7 % / 9 % | 1,3 % / 8 % |
-| Buy-and-hold gleicher Zeitraum | +296 % | +519 % | +296 % | +519 % |
+| 90-%-Intervall Monatsrendite (Block-Bootstrap) | −0,005 % … +0,11 % | +0,03 % … +0,17 % | −0,11 % … −0,03 % | −0,11 % … −0,03 % |
+| Sharpe (jährlich) | 0,49 | 0,72 | −0,90 | −0,99 |
+| Max. Drawdown | 1,63 % | 1,95 % | 8,01 % | 8,03 % |
+| Längste Drawdown-Phase | 492 Tage | 296 Tage | bis Ende | bis Ende |
+| Trades | 972 | 946 | 856 | 690 |
+| Trefferquote | 38 % | 41 % | 48 % | 46 % |
+| Profit-Faktor | 1,14 | 1,23 | 0,76 | 0,75 |
+| Ø Haltedauer | 27 h | 27 h | 7,1 h | 6,7 h |
+| Kosten gesamt | 530 | 522 | 434 | 329 |
+| Erhaltene Dividenden (netto) | 67 | 23 | 24 | 8 |
+| Ø Exposure / Zeit im Markt | 6,1 % / 31 % | 6,1 % / 31 % | 1,7 % / 9 % | 1,2 % / 7 % |
+| Buy-and-hold gleicher Zeitraum (mit Nettodividenden) | +263 % | +490 % | +263 % | +490 % |
 
-Mean Reversion erreicht im Dezember 2021 die 8-%-Drawdown-Grenze; danach lehnt die Risiko-Engine alle
-neuen Einstiege ab (965 bzw. 1.212 Ablehnungen `drawdown_block_new`). Die Ergebnisse ab 2022 enthalten
-deshalb keine Trades mehr. 137 bzw. 115 Einstiege wurden verworfen, weil das Signal am Sitzungsende
-entstand und erst am Folgetag hätte ausgeführt werden können.
+Mean Reversion erreicht Ende 2021 die 8-%-Drawdown-Grenze; danach lehnt die Risiko-Engine alle neuen
+Einstiege ab. Ergebnisse ab 2022 enthalten deshalb keine Trades mehr. Am Sitzungsende entstandene Signale
+werden verworfen statt am Folgetag ausgeführt.
 
 ## Robustheit (Nettorendite über den Forschungszeitraum)
 
 | Szenario | Trend SPY | Trend QQQ | MeanRev SPY | MeanRev QQQ |
 |---|---|---|---|---|
-| Basis | +6,32 % | +12,93 % | −7,93 % | −7,91 % |
-| Doppelte variable Kosten | +0,89 % | +7,43 % | −7,98 % | −8,09 % |
-| Dreifacher Spread | +4,27 % | +10,86 % | −7,97 % | −7,95 % |
-| Ausführung 1 Bar später | +4,89 % | +13,30 % | −7,93 % | −7,90 % |
-| Parameter −20 % | +3,40 % | +8,15 % | −7,96 % | −7,93 % |
-| Parameter +20 % | +7,39 % | +15,32 % | −3,88 % | −7,36 % |
-| Phase 1 (2016-01 – 2019-04) | +1,75 % | +2,38 % | −3,87 % | −4,74 % |
-| Phase 2 (2019-04 – 2022-07) | +1,09 % | +4,79 % | −4,70 % | −7,72 % |
-| Phase 3 (2022-07 – 2025-10) | +2,80 % | +4,43 % | +0,13 % | −0,22 % |
+| Basis | +6,30 % | +12,29 % | −7,94 % | −7,91 % |
+| Doppelte variable Kosten | +0,92 % | +6,83 % | −8,01 % | −7,90 % |
+| Dreifacher Spread | +4,27 % | +10,23 % | −7,92 % | −7,94 % |
+| Ausführung 1 Bar später | +5,07 % | +12,73 % | −7,94 % | −7,92 % |
+| Parameter −20 % | +2,86 % | +8,40 % | −7,93 % | −7,98 % |
+| Parameter +20 % | +6,72 % | +15,34 % | −3,79 % | −7,26 % |
+| Phase 1 (2016-01 – 2019-04) | +1,60 % | +1,89 % | −3,65 % | −4,97 % |
+| Phase 2 (2019-04 – 2022-07) | +0,97 % | +4,90 % | −4,95 % | −7,73 % |
+| Phase 3 (2022-07 – 2025-10) | +3,12 % | +4,28 % | −0,29 % | −0,61 % |
 
 ## Einordnung
 
 - **Trendfolge** ist in allen drei Phasen und unter allen Stressszenarien positiv, bei SPY aber nur knapp
   (doppelte Kosten: +0,9 % in fast 10 Jahren; das Intervall schließt null ein). Bei QQQ schließt das
-  90-%-Intervall null aus. Das ist ein Hinweis, **kein Nachweis**: Es ist ein einziger, nicht
-  optimierter Lauf auf einem langen Aufwärtsmarkt; die Strategie ist nur long und profitiert vom Trend
-  des Basiswerts. Mit Ø 6 % Kapitalbindung liegt sie weit unter Buy-and-hold.
+  90-%-Intervall null aus. Das ist ein Hinweis, **kein Nachweis**: ein einziger, nicht optimierter Lauf
+  auf einem langen Aufwärtsmarkt, nur long, mit Ø 6 % Kapitalbindung weit unter Buy-and-hold.
 - **Mean Reversion** ist durchgehend negativ (Profit-Faktor < 1, Intervall vollständig unter null) und
-  wird verworfen. Phase 3 liegt nahe null; eine Umstellung der Parameter wäre Auswahl im Nachhinein.
-- Die Kosten (rund 5 % des Anfangskapitals) entsprechen bei der Trendfolge etwa der Hälfte des
-  Bruttoergebnisses; der Kostenstress ist das wichtigste Risiko.
-- Nächster sinnvoller Schritt ist Walk-forward mit Champion-Challenger (T-008), nicht weitere
-  Parametervarianten auf diesem Zeitraum. Der Holdout bleibt bis dahin unberührt.
+  wird verworfen.
+- Die Korrektur (Rohkurse, Dividenden, Halbtage) ändert die Strategieergebnisse kaum; der
+  Buy-and-hold-Vergleich sinkt, weil bereinigte Kurse Dividenden brutto reinvestiert hatten.
+- Nächster Schritt ist die Walk-forward-Validierung nach dem Protokoll in T-008 (#22), nicht weitere
+  Parametervarianten auf diesem Zeitraum. Der Holdout bleibt unberührt.

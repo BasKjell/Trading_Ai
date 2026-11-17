@@ -60,18 +60,21 @@ Das reicht für technische Prüfungen, aber **nicht** für belastbare Aussagen z
 | Feld | Wert |
 |---|---|
 | Abruf | `python3 -m localtrader fetch-intraday --symbol SPY --env <pfad/zur/.env>` (ebenso QQQ) |
-| Quelle | Alpaca Market Data v2, Feed SIP, `adjustment=all`, Paper-Key aus `.env` (kostenlos, Basic-Plan) |
-| Datei | `data/<SYMBOL>_15m.csv` (Spalten `timestamp` in UTC ISO, `open,high,low,close,volume`), nicht versioniert |
-| Herkunftsnachweis | `data/<SYMBOL>_15m.csv.manifest.json` (Request-ID, Abrufzeit, Bar-Zahlen, Datei-Hash) und Rohseiten unter `data/raw/alpaca/<request_id>/` |
-| Inhalt | nur reguläre Handelszeit 09:30–16:00 New York |
-| Holdout | Bars ab 2025-11-01 werden aus Forschungsläufen entfernt (`[holdout]`) |
+| Quelle | Alpaca Market Data v2, Feed SIP, Paper-Key aus `.env` (kostenlos, Basic-Plan) |
+| Handelbare Preise | `data/<SYMBOL>_15m.csv`, `adjustment=raw`: Signale, Ausführung, Stops, Bewertung |
+| Analysepreise | `data/<SYMBOL>_15m_adjusted.csv`, `adjustment=all`: nur Analyse, nie Ausführung |
+| Dividenden | `data/<SYMBOL>_dividends.csv` (`ex_date,amount` je Anteil), aus beiden Serien abgeleitet; gebucht abzüglich 15 % Quellensteuer |
+| Splits | nicht unterstützt: Abruf bricht ab |
+| Herkunftsnachweis | `data/<SYMBOL>_15m.csv.manifest.json` (Request-IDs, Abrufzeit, Datei-Hashes, Dividendenlücken) und Rohseiten unter `data/raw/alpaca/<request_id>/` |
+| Handelszeit | 09:30–16:00 New York, an NYSE-Halbtagen bis 13:00 (`localtrader/calendars.py`); nach 2026-12-31 kein Handel |
+| Holdout | Zeilen, die nicht vollständig vor 2025-11-01 verfügbar sind, werden beim Import vor jeder Prüfung verworfen; nur die Anzahl wird gemeldet |
 
-Stand des Abrufs vom 2026-11-17:
+Stand des Abrufs vom 2026-11-17 (alle Dateien nicht versioniert):
 
-| Symbol | Bars gesamt / Handelszeit | Zeitraum | Datenversion | Lücken in der Handelszeit | Sprünge > 3 % |
-|---|---|---|---|---|---|
-| SPY | 171.396 / 71.101 | 2016-01-04 bis 2026-11-17 | `521f66df08a5c5d8` | 1 (1 Bar) | 21 |
-| QQQ | 168.642 / 71.096 | 2016-01-04 bis 2026-11-17 | `95c1721523a14210` | 6 (7 Bars) | 30 |
+| Symbol | Bars Handelszeit | Zeitraum | Dividenden | Dividendenlücken (Alpaca) |
+|---|---|---|---|---|
+| SPY | 70.853 | 2016-01-04 bis 2026-11-17 | 41 | 2016-01..2016-06 (Ex-Tag März 2016), 2018-03..2018-09 (Juni 2018) |
+| QQQ | 70.853 | 2016-01-04 bis 2026-11-17 | 44 | keine |
 
-Keine Zeile verworfen. Sprünge sind überwiegend Eröffnungslücken nach Nachrichten/Wochenenden und bleiben
-erhalten. Halbtage (z. B. vor Feiertagen) enden um 13:00 und werden nicht als Lücke erkannt.
+Die Halbtage 2016–2025 im Kalender stimmen genau mit den Tagen überein, an denen das Volumen nach
+13:00 New York auf nachbörsliches Niveau fällt; kein weiterer Tag zeigt dieses Muster.
