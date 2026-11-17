@@ -2,6 +2,9 @@
 
 Timing rules (look-ahead protection)
 ------------------------------------
+* Each step is causal: (0) information up to the open is decided, (1) pending orders fill at the open,
+  (2) information arriving while the bar runs is decided on the state after the open, (3) stops, marking
+  to market, drawdown and kill switch at the bar's end.
 * Information is processed in order of **availability** (``received_at``), not of ``bar.start``. A
   strategy context at ``now`` only contains bars with ``received_at <= now``. A bar that arrives after a
   newer bar is added to the history but triggers no decision of its own (it is stale by then).
@@ -15,7 +18,8 @@ Timing rules (look-ahead protection)
 * Position sizing uses the last *completed* bar's volume for the liquidity cap, never the execution
   bar's volume.
 * Protective stops: if a bar trades through the stop, the exit fills at ``min(open, stop)`` (gaps fill
-  worse than the stop) plus slippage. If an entry and its stop fall into the same bar, the stop is
+  worse than the stop) plus slippage. The stop is booked at the bar's **end**, when its low is known;
+  decisions on information arriving while the bar runs still see the position (no future low leaks). If an entry and its stop fall into the same bar, the stop is
   assumed hit (conservative). There are no take-profit limit orders, so stop/target ambiguity
   within a bar cannot occur; profit exits are close-based and execute at the next open.
 * Exit orders are capped by ``max_volume_participation`` of the previous bar's volume; the remainder
@@ -30,7 +34,7 @@ import math
 import random
 from bisect import insort
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from statistics import fmean, pstdev
 from zoneinfo import ZoneInfo
 
@@ -233,8 +237,86 @@ class IntradayEngine:
                 if symbol not in portfolio.positions:
                     open_trades.pop(symbol, None)
 
-        for step_index, timestamp in enumerate(timestamps):
+        def process_arrivals(limit: datetime, inclusive: bool) -> None:
+            """Turn bars available up to ``limit`` into information, in arrival order, and evaluate them.
+
+            The portfolio state seen here is the simulated state at that moment: stops of a bar that is
+            still running are not applied yet, because its low is only known at the bar's end.
+            """
+            while inbox and (inbox[0].received_at <= limit if inclusive else inbox[0].received_at < limit):
+                bar = inbox.pop(0)
+                symbol = bar.symbol
+                known = history[symbol]
+                newest = not known or bar.start > known[-1].start
+                insort(known, bar, key=lambda b: b.start)
+                if newest:
+                    last_volume[symbol] = bar.volume
+                if risk.deleveraging_required:
+                    continue
+                if not newest:
+                    decisions.append(
+                        {
+                            "time": bar.received_at.isoformat(),
+                            "symbol": symbol,
+                            "event": "late_bar",
+                            "reason": "bar arrived after a newer bar; no decision on stale data",
+                        }
+                    )
+                    continue
+                spec = self.instruments[symbol]
+                data = datasets[symbol]
+                if symbol in pending or not spec.session.contains(bar.start):
+                    continue
+                series = hourly[symbol]
+                while hourly_cursor[symbol] < len(series) and series[hourly_cursor[symbol]][0] <= bar.received_at:
+                    hourly_seen[symbol].append(series[hourly_cursor[symbol]][1])
+                    hourly_cursor[symbol] += 1
+                visible = [b for b in known if b.received_at <= bar.received_at and b.start <= bar.start]
+                position = portfolio.positions.get(symbol)
+                trade = open_trades.get(symbol)
+                candidates = [strategy_by_name[position.strategy]] if position else self.strategies
+                for strategy in candidates:
+                    if position is None and bar.start in data.after_gap:
+                        decisions.append(
+                            {
+                                "time": bar.received_at.isoformat(),
+                                "symbol": symbol,
+                                "strategy": strategy.name,
+                                "event": "skipped",
+                                "reason": "bar follows a data gap",
+                            }
+                        )
+                        break
+                    ctx = StrategyContext(
+                        now=bar.received_at,
+                        bars=visible,
+                        hourly=hourly_seen[symbol],
+                        in_position=position is not None,
+                        entry_time=trade.entry_time if trade else None,
+                        entry_price=trade.entry_price if trade else None,
+                    )
+                    signal = strategy.evaluate(ctx)
+                    if signal is None:
+                        continue
+                    pending[symbol] = _Pending(signal)
+                    decisions.append(
+                        {
+                            "time": signal.signal_time.isoformat(),
+                            "symbol": symbol,
+                            "strategy": strategy.name,
+                            "event": "signal",
+                            "direction": signal.direction.value,
+                            "reason": signal.reason,
+                            "stop": signal.stop_price,
+                        }
+                    )
+                    break
+
+        for timestamp in timestamps:
             current = by_time[timestamp]
+            bar_end = min(bar.end for bar in current.values())
+            # 0) information available up to this open (incl. bars ending now) is decided before the open
+            process_arrivals(timestamp, inclusive=True)
             local_day = timestamp.astimezone(zone).date()
             if current_day is not None and local_day != current_day and equity_points:
                 day_start_equity = equity_points[-1].equity
@@ -289,32 +371,21 @@ class IntradayEngine:
                             book_exit,
                         )
 
-                # 2) protective stop inside this bar
+            # 2) information arriving while this bar runs: decided on the state after the open, before
+            #    this bar's stops (its low is not known before the bar ends)
+            process_arrivals(bar_end, inclusive=False)
+
+            # 3) bar close: stops of this bar become known at its end; mark to market at the close
+            for symbol, bar in current.items():
                 position = portfolio.positions.get(symbol)
                 if position and position.stop_price and bar.low <= position.stop_price:
                     exit_reference = min(bar.open, position.stop_price)
-                    book_exit(symbol, position.quantity, exit_reference, bar.start, "protective stop")
+                    book_exit(symbol, position.quantity, exit_reference, bar.end, "protective stop")
                     pending.pop(symbol, None)
-
-            # 3) bar close: mark to market; the bar becomes *information* only at its received_at
-            for symbol, bar in current.items():
                 prices[symbol] = bar.close
                 insort(inbox, bar, key=lambda b: (b.received_at, b.start, b.symbol))
-            # Everything that is available before the next bar opens is processed now, in arrival order.
-            horizon = (
-                timestamps[step_index + 1] if step_index + 1 < len(timestamps) else timestamp + timedelta(minutes=15)
-            )
-            arrived: list[tuple[Bar, bool]] = []
-            while inbox and inbox[0].received_at <= horizon:
-                info = inbox.pop(0)
-                known = history[info.symbol]
-                newest = not known or info.start > known[-1].start
-                insort(known, info, key=lambda b: b.start)
-                if newest:
-                    last_volume[info.symbol] = info.volume
-                arrived.append((info, newest))
 
-            snapshot = portfolio.snapshot(timestamp + timedelta(minutes=15), prices)
+            snapshot = portfolio.snapshot(bar_end, prices)
             equity_points.append(
                 EquityPoint(
                     snapshot.timestamp, snapshot.equity, snapshot.cash, snapshot.gross_exposure, snapshot.drawdown
@@ -332,76 +403,18 @@ class IntradayEngine:
                                 position.strategy,
                                 symbol,
                                 position.market,
-                                bar.received_at,
-                                bar.received_at,
+                                bar.end,
+                                bar.end,
                                 Direction.FLAT,
                                 1.0,
                                 "drawdown kill switch: controlled de-risking",
                                 stop_price=None,
                             )
                         )
-                continue
 
-            for bar, newest in arrived:
-                symbol = bar.symbol
-                spec = self.instruments[symbol]
-                data = datasets[symbol]
-                if not newest:
-                    decisions.append(
-                        {
-                            "time": bar.received_at.isoformat(),
-                            "symbol": symbol,
-                            "event": "late_bar",
-                            "reason": "bar arrived after a newer bar; no decision on stale data",
-                        }
-                    )
-                    continue
-                if symbol in pending or not spec.session.contains(bar.start):
-                    continue
-                series = hourly[symbol]
-                while hourly_cursor[symbol] < len(series) and series[hourly_cursor[symbol]][0] <= bar.received_at:
-                    hourly_seen[symbol].append(series[hourly_cursor[symbol]][1])
-                    hourly_cursor[symbol] += 1
-                visible = [b for b in history[symbol] if b.received_at <= bar.received_at and b.start <= bar.start]
-                position = portfolio.positions.get(symbol)
-                trade = open_trades.get(symbol)
-                candidates = [strategy_by_name[position.strategy]] if position else self.strategies
-                for strategy in candidates:
-                    if position is None and bar.start in data.after_gap:
-                        decisions.append(
-                            {
-                                "time": bar.received_at.isoformat(),
-                                "symbol": symbol,
-                                "strategy": strategy.name,
-                                "event": "skipped",
-                                "reason": "bar follows a data gap",
-                            }
-                        )
-                        break
-                    ctx = StrategyContext(
-                        now=bar.received_at,
-                        bars=visible,
-                        hourly=hourly_seen[symbol],
-                        in_position=position is not None,
-                        entry_time=trade.entry_time if trade else None,
-                        entry_price=trade.entry_price if trade else None,
-                    )
-                    signal = strategy.evaluate(ctx)
-                    if signal is None:
-                        continue
-                    pending[symbol] = _Pending(signal)
-                    decisions.append(
-                        {
-                            "time": signal.signal_time.isoformat(),
-                            "symbol": symbol,
-                            "strategy": strategy.name,
-                            "event": "signal",
-                            "direction": signal.direction.value,
-                            "reason": signal.reason,
-                            "stop": signal.stop_price,
-                        }
-                    )
-                    break
+        # the last bars still become information (decisions can no longer be executed)
+        if timestamps:
+            process_arrivals(datetime.max.replace(tzinfo=UTC), inclusive=True)
 
         # terminal liquidation at the last close so every result is net of exit costs
         if equity_points:

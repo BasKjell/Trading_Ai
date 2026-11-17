@@ -13,7 +13,8 @@ Herkunft unbekannt, Zeitzone als Europe/Athens angenommen (siehe `docs/DATA_FORM
 
 Aktualisiert nach dem Review zu PR #17: Einstiege werden jetzt auf der Ausführungsbar erneut geprüft
 (Datenlücke, Handelszeit, Signalalter). Dadurch entfallen 2 bzw. 5 Einstiege, die zuvor außerhalb der
-Handelszeit ausgeführt wurden. Die Datei enthält keine verspätet verfügbaren Bars.
+Handelszeit ausgeführt wurden. Die Datei enthält keine verspätet verfügbaren Bars. Stop-Ausstiege werden
+seit dem zweiten Review am Ende der Stop-Bar verbucht (Haltedauer dadurch geringfügig länger, Renditen unverändert).
 
 ## Basislauf
 
@@ -27,7 +28,7 @@ Handelszeit ausgeführt wurden. Die Datei enthält keine verspätet verfügbaren
 | Trades | 96 | 165 | 1 | 0 |
 | Trefferquote | 32 % | 45 % | – | – |
 | Ø Gewinn / Ø Verlust (EUR) | 9,69 / −4,02 | 4,24 / −4,16 | – | – |
-| Ø Haltedauer | 16 h | 3,1 h | – | – |
+| Ø Haltedauer | 16 h | 3,2 h | – | – |
 | Kosten gesamt (EUR) | 39,39 | 49,85 | – | 0 |
 | Ø Marktexposure | 3,7 % | 1,3 % | 100 % | 0 % |
 

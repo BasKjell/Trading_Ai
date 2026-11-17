@@ -167,6 +167,30 @@ class Recorder:
         return None
 
 
+@dataclass(frozen=True)
+class Probe:
+    """Enters once on the first context; records (now, in_position) for every context."""
+
+    seen: list[tuple[datetime, bool]]
+    stop: float
+    name: str = "probe"
+    by_symbol: list[tuple[str, datetime, bool]] | None = None
+
+    def parameters(self) -> dict[str, float]:
+        return {}
+
+    def evaluate(self, ctx: StrategyContext) -> Signal | None:
+        symbol = ctx.bars[-1].symbol
+        self.seen.append((ctx.now, ctx.in_position))
+        if self.by_symbol is not None:
+            self.by_symbol.append((symbol, ctx.now, ctx.in_position))
+        if len(self.seen) == 1:
+            return Signal(
+                self.name, symbol, Market.INDEX, ctx.now, ctx.now, Direction.LONG, 1.0, "probe", stop_price=self.stop
+            )
+        return None
+
+
 class AvailabilityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = load_config()
@@ -189,6 +213,57 @@ class AvailabilityTests(unittest.TestCase):
             ],
         )
         self.assertTrue(any(d["event"] == "late_bar" for d in result.decisions))
+
+    def test_later_low_does_not_change_earlier_decision(self) -> None:
+        # Regression (PR #17 review 2): bar 1 arrives late (09:35), inside bar 2 (09:30-09:45). Whether
+        # bar 2's low hits the stop is only known at 09:45 and must not change the 09:35 context.
+        def run(low: float) -> list[tuple[datetime, bool]]:
+            data = bars([FLAT] * 5)
+            late = replace(data.bars[1], received_at=data.bars[1].end + timedelta(minutes=5))
+            hit = replace(data.bars[2], low=low)
+            data = replace(data, bars=[data.bars[0], late, hit, *data.bars[3:]])
+            seen: list[tuple[datetime, bool]] = []
+            IntradayEngine(self.config, instrument(), [Probe(seen, stop=98.0)]).run({"X": data})
+            return seen
+
+        untouched, stopped = run(99.5), run(97.0)
+        at_0935 = datetime(2024, 1, 2, 9, 35, tzinfo=UTC)
+        self.assertEqual(dict(untouched)[at_0935], dict(stopped)[at_0935])
+        self.assertTrue(dict(stopped)[at_0935])  # still in position: the stop is not known yet
+        # every context before 09:45 is identical; afterwards the stop is visible
+        self.assertEqual(
+            [item for item in untouched if item[0] < at_0935 + timedelta(minutes=10)],
+            [item for item in stopped if item[0] < at_0935 + timedelta(minutes=10)],
+        )
+        self.assertIn((at_0935 + timedelta(minutes=10), False), stopped)
+
+    def test_kill_switch_from_running_bar_does_not_reach_back_to_other_instruments(self) -> None:
+        # X's stop in bar 2 triggers the kill switch, but only at 09:45. Y's bar 1 arrives at 09:35 and
+        # must be decided identically whether or not X's later low hits the stop.
+        config = load_config()
+        tight = replace(config.risk, drawdown_reduce=0.0002, drawdown_block_new=0.0005, drawdown_kill=0.001)
+        config = replace(config, risk=tight)
+        spec = instrument()["X"]
+        instruments = {"X": spec, "Y": replace(spec, symbol="Y")}
+
+        def run(low: float) -> list[tuple[str, datetime, bool]]:
+            x = bars([FLAT] * 5)
+            x = replace(x, bars=[*x.bars[:2], replace(x.bars[2], low=low), *x.bars[3:]])
+            y = bars([FLAT] * 5)
+            y_bars = [replace(b, symbol="Y") for b in y.bars]
+            y_bars[1] = replace(y_bars[1], received_at=y_bars[1].end + timedelta(minutes=5))
+            y = replace(y, bars=y_bars)
+            seen: list[tuple[str, datetime, bool]] = []
+            IntradayEngine(config, instruments, [Probe([], stop=98.0, by_symbol=seen)]).run({"X": x, "Y": y})
+            return seen
+
+        untouched, stopped = run(99.5), run(97.0)
+        at_0935 = datetime(2024, 1, 2, 9, 35, tzinfo=UTC)
+        self.assertIn(("Y", at_0935, False), untouched)
+        self.assertIn(("Y", at_0935, False), stopped)
+        cutoff = at_0935 + timedelta(minutes=10)
+        self.assertEqual([i for i in untouched if i[1] < cutoff], [i for i in stopped if i[1] < cutoff])
+        self.assertNotEqual(untouched, stopped)  # after 09:45 the kill switch does take effect
 
     def test_earliest_execution_is_binding(self) -> None:
         data = bars([FLAT, FLAT, FLAT, (102.0, 102.5, 101.5, 102.0), FLAT])
@@ -220,7 +295,9 @@ class StopTests(unittest.TestCase):
         data = bars([FLAT, (100.0, 103.0, 97.0, 102.0), FLAT])
         result = IntradayEngine(self.config, instrument(), [Scripted({0: 98.0})]).run({"X": data})
         self.assertEqual(result.trades[0].exit_reason, "protective stop")
-        self.assertEqual(result.trades[0].exit_time, data.bars[1].start)
+        # booked when the bar's low is known (its end), at min(open, stop)
+        self.assertEqual(result.trades[0].exit_time, data.bars[1].end)
+        self.assertAlmostEqual(result.trades[0].exit_price, 98.0)
 
     def test_stop_slippage_makes_fill_worse(self) -> None:
         data = bars([FLAT, FLAT, (100.0, 100.2, 97.0, 99.0), FLAT])

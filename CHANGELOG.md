@@ -15,10 +15,15 @@ Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
   Handelszeit oder zu altes Signal → verworfen (`entry_cancelled`). Ausstiege werden nie blockiert.
 - `localtrader/intraday_data.py`: NaN/±Inf in OHLCV werden verworfen (`non_finite_value`).
 - Beispielreport mit neuen Zahlen; auf den DAX-Daten entfallen 2 bzw. 5 Einstiege außerhalb der Handelszeit.
+- Zweites Review (Head `be6bf16`): Das vollständige Tief der laufenden Bar beeinflusste über den Stop schon
+  den Positionsstatus früherer Entscheidungen innerhalb derselben Bar. Die Engine verarbeitet jetzt jeden
+  Schritt kausal (Entscheidungen vor der Eröffnung, Eröffnung, Entscheidungen während der Bar, Stops/
+  Drawdown/Kill-Switch am Barende); Stops werden am Barende verbucht.
 
 **Tests:** Regressionstests für verspätete Bars, bindendes `earliest_execution`, ausstehenden Einstieg nach
 Datenlücke, nicht blockierten Ausstieg, veraltetes Signal über Nacht und NaN/Inf je Feld; alle schlugen
-mit dem alten Code fehl.
+mit dem alten Code fehl. Zusätzlich: späteres Tief verändert keine frühere Entscheidung (ein und zwei
+Instrumente inkl. Kill-Switch).
 
 ## 2026-11-17 – Intraday-Engine, Trendfolge und Mean Reversion
 
