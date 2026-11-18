@@ -32,6 +32,8 @@ jobs:
         run: make test-cov PY=python
       - name: Secret scan
         run: make secret-scan PY=python
+      - name: Markdown link check
+        run: make link-check PY=python
       - name: Config check
         run: make config-check PY=python
       - name: Validate workflow files
