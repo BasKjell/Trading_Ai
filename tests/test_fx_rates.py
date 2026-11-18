@@ -249,3 +249,12 @@ class FetchCliTests(unittest.TestCase):
             self.assertEqual(manifest["quality"]["jumps"], [])
             dates = [line.split(",")[0] for line in output.read_text(encoding="utf-8").splitlines()[1:]]
             self.assertEqual(dates[-1], "2025-10-31")
+
+    def test_help_names_the_actual_default_end(self) -> None:
+        # Regression (issue #33): the help still said "default: today" although the fetch ends before the cutoff.
+        from localtrader import cli
+
+        parser = cli.build_parser()
+        fetch = next(a for a in parser._subparsers._group_actions[0].choices["fetch-fx"]._actions if a.dest == "end")
+        self.assertNotIn("today", fetch.help or "")
+        self.assertIn("cutoff", fetch.help or "")
