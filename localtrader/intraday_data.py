@@ -42,6 +42,9 @@ class CsvImportSpec:
     # Minimum delay between bar end and availability to the strategy.
     availability_delay_seconds: int = 0
     jump_threshold: float = 0.03
+    # Holdout: only bars completely available (received_at) at or before this moment are imported.
+    # Later rows are dropped before any quality check, so no holdout price reaches the manifest.
+    available_until: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,10 +54,21 @@ class SessionSpec:
     timezone: str
     start: time
     end: time
+    # Optional exchange calendar: days that close early, and the last day the calendar is known for.
+    early_closes: frozenset[date] = frozenset()
+    early_close: time | None = None
+    calendar_until: date | None = None
+
+    def close_on(self, day: date) -> time:
+        if self.early_close is not None and day in self.early_closes:
+            return self.early_close
+        return self.end
 
     def contains(self, moment: datetime) -> bool:
         local = moment.astimezone(ZoneInfo(self.timezone))
-        return local.weekday() < 5 and self.start <= local.time() < self.end
+        if self.calendar_until is not None and local.date() > self.calendar_until:
+            return False  # unknown calendar: fail closed
+        return local.weekday() < 5 and self.start <= local.time() < self.close_on(local.date())
 
     def local_date(self, moment: datetime) -> date:
         return moment.astimezone(ZoneInfo(self.timezone)).date()
@@ -70,6 +84,8 @@ class QualityReport:
     jumps: list[str] = field(default_factory=list)
     first_bar: str | None = None
     last_bar: str | None = None
+    # Rows withheld for the holdout. Only the count is recorded, never prices or timestamps.
+    holdout_rows_withheld: int = 0
 
     def reject(self, reason: str) -> None:
         self.rejected[reason] = self.rejected.get(reason, 0) + 1
@@ -98,6 +114,8 @@ class ImportedDataset:
     manifest: DatasetManifest
     # Start times (UTC) of bars that directly follow an unexpected gap inside a session.
     after_gap: frozenset[datetime]
+    # Cash dividends by ex-date (exchange-local): (payment date, amount per share).
+    dividends: dict[date, tuple[date, float]] = field(default_factory=dict)
 
 
 def _parse_timestamp(row: dict[str, str], zone: ZoneInfo) -> datetime:
@@ -115,19 +133,35 @@ def _file_sha256(path: Path) -> str:
 
 
 def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> ImportedDataset:
+    if spec.available_until is not None and spec.available_until.tzinfo is None:
+        raise ValueError("available_until must be timezone-aware")
     path = Path(spec.path)
     zone = ZoneInfo(spec.source_timezone)
     step = timedelta(minutes=spec.timeframe_minutes)
     report = QualityReport()
     seen: set[datetime] = set()
     candidates: list[Bar] = []
+    # With a holdout cut, the provenance hash covers only the research rows, so a change confined to the
+    # withheld suffix leaves every research output bit-identical.
+    research_rows = hashlib.sha256()
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
+        research_rows.update(json.dumps(reader.fieldnames).encode())
         for raw in reader:
             report.rows_read += 1
             row = {key.strip().lower(): (value or "").strip() for key, value in raw.items() if key}
             try:
                 start = _parse_timestamp(row, zone)
+            except (KeyError, ValueError):
+                report.reject("unparseable")
+                continue
+            if spec.available_until is not None and (
+                start + step + timedelta(seconds=spec.availability_delay_seconds) > spec.available_until
+            ):
+                report.holdout_rows_withheld += 1
+                continue
+            research_rows.update(json.dumps(raw, sort_keys=True).encode())
+            try:
                 o, h, low, c = (float(row[k]) for k in ("open", "high", "low", "close"))
                 volume = float(row.get("volume") or 0.0)
             except (KeyError, ValueError):
@@ -205,7 +239,9 @@ def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> Impor
         source_timezone=spec.source_timezone,
         timeframe_minutes=spec.timeframe_minutes,
         data_version=hashlib.sha256(payload.encode()).hexdigest()[:16],
-        file_sha256=_file_sha256(path),
+        file_sha256=_file_sha256(path)
+        if spec.available_until is None
+        else "research-rows:" + research_rows.hexdigest(),
         synthetic=False,
         quality=asdict(report),
     )

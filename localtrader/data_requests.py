@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import http.client
 import json
 import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -42,6 +43,8 @@ class DataRequestSpec:
     feed: str | None
     purpose: str
     strategy_name: str
+    # Stock bars only: "all" (split/dividend adjusted, analysis) or "raw" (as traded, execution).
+    adjustment: str = "all"
 
     def __post_init__(self) -> None:
         if self.start.tzinfo is None or self.end.tzinfo is None:
@@ -63,6 +66,8 @@ class DataRequestSpec:
             "feed": self.feed,
             "purpose": self.purpose,
             "strategy_name": self.strategy_name,
+            # omitted for the default so request IDs of earlier downloads stay unchanged
+            **({"adjustment": self.adjustment} if self.adjustment != "all" else {}),
         }
 
     @classmethod
@@ -77,6 +82,7 @@ class DataRequestSpec:
             feed=str(raw["feed"]) if raw.get("feed") else None,
             purpose=str(raw["purpose"]),
             strategy_name=str(raw["strategy_name"]),
+            adjustment=str(raw.get("adjustment", "all")),
         )
 
 
@@ -87,6 +93,8 @@ class DataRequestPolicy:
     def validate(self, request: DataRequestSpec) -> DataRequestSpec:
         if request.provider != "alpaca" or request.endpoint_type not in {"stocks", "crypto"}:
             raise DataRequestError("only allowlisted Alpaca stock/crypto bar requests are supported")
+        if request.adjustment not in {"all", "raw"}:
+            raise DataRequestError("adjustment must be 'all' or 'raw'")
         if request.timeframe not in ALLOWED_TIMEFRAMES:
             raise DataRequestError(f"unsupported timeframe: {request.timeframe}")
         if not 1 <= len(request.symbols) <= 20 or len(set(request.symbols)) != len(request.symbols):
@@ -208,10 +216,36 @@ class AlpacaDatasetDownloader:
                     self._cooldown(headers, attempt)
                     continue
                 raise DataRequestError(f"Alpaca rejected data request ({error.code}): {last_error[:300]}") from error
-            except (URLError, TimeoutError) as error:
+            # dropped connections (e.g. RemoteDisconnected) are transient like timeouts: retry with backoff
+            except (URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
                 last_error = str(error)
                 self._sleep_chunked(min(300.0, 2.0**attempt))
         raise RetryExhausted(f"Alpaca request failed after {self.max_attempts} attempts: {last_error[:300]}")
+
+    def corporate_actions(self, symbol: str, start: date, end: date) -> dict[str, list[dict[str, Any]]]:
+        """Cash dividends and splits from Alpaca's corporate-actions endpoint (all pages).
+
+        The endpoint filters by processing date, so the caller filters by ex-date afterwards.
+        """
+        result: dict[str, list[dict[str, Any]]] = {}
+        page_token: str | None = None
+        for _ in range(1000):
+            params = {
+                "symbols": symbol,
+                "types": "cash_dividend,forward_split,reverse_split,unit_split",
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "limit": 1000,
+            }
+            if page_token:
+                params["page_token"] = page_token
+            payload, _ = self._request_page(f"https://data.alpaca.markets/v1/corporate-actions?{urlencode(params)}")
+            for kind, items in (payload.get("corporate_actions") or {}).items():
+                result.setdefault(kind, []).extend(items)
+            page_token = payload.get("next_page_token")
+            if not page_token:
+                return result
+        raise DataRequestError("excessive corporate-actions pagination")
 
     def _cooldown(self, headers: dict[str, str], attempt: int) -> None:
         delay = min(300.0, 2.0**attempt)
@@ -252,7 +286,7 @@ class AlpacaDatasetDownloader:
             "sort": "asc",
         }
         if request.endpoint_type == "stocks":
-            params.update({"feed": request.feed, "adjustment": "all"})
+            params.update({"feed": request.feed, "adjustment": request.adjustment})
         if page_token:
             params["page_token"] = page_token
         return params
@@ -274,7 +308,7 @@ class AlpacaDatasetDownloader:
         while True:
             page_number += 1
             url = f"{self._base_url(request)}?{urlencode(self._params(request, page_token))}"
-            payload, _ = self._request_page(url)
+            payload = self._within_request(request, self._request_page(url)[0])
             pages.append(payload)
             (raw_dir / f"page_{page_number:05d}.json").write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
             downloaded_bars = sum(len(items) for page in pages for items in page.get("bars", {}).values())
@@ -311,6 +345,26 @@ class AlpacaDatasetDownloader:
         }
         (raw_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
         return bars, manifest, normalized_path
+
+    @staticmethod
+    def _within_request(request: DataRequestSpec, payload: dict[str, Any]) -> dict[str, Any]:
+        """Drop rows outside the requested window (``start`` and ``end`` are inclusive at Alpaca) **before**
+        anything is persisted, hashed, counted or normalized. Fail closed on unreadable timestamps without
+        echoing the row (it may lie in a withheld period)."""
+        kept: dict[str, list[dict[str, Any]]] = {}
+        for api_symbol, items in (payload.get("bars") or {}).items():
+            rows = []
+            for item in items or []:
+                try:
+                    moment = datetime.fromisoformat(str(item["t"]).replace("Z", "+00:00"))
+                except (KeyError, TypeError, ValueError):
+                    raise DataRequestError("Alpaca returned a bar with an unreadable timestamp") from None
+                if moment.tzinfo is None:
+                    raise DataRequestError("Alpaca returned a bar without a time zone")
+                if request.start <= moment <= request.end:
+                    rows.append(item)
+            kept[api_symbol] = rows
+        return {**payload, "bars": kept}
 
     @staticmethod
     def _duration(timeframe: str) -> timedelta:

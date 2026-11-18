@@ -1,8 +1,9 @@
 import unittest
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from localtrader.data_requests import (
     DataRequestError,
@@ -97,3 +98,103 @@ class DataRequestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DroppedConnectionTests(unittest.TestCase):
+    def test_remote_disconnect_is_retried(self):
+        # Regression: a full 10-year download aborted on http.client.RemoteDisconnected after 270 pages.
+        import http.client
+        import io
+
+        from localtrader.data_requests import AlpacaDatasetDownloader
+
+        class Response(io.BytesIO):
+            headers: dict = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+        calls = {"n": 0}
+
+        def fake_urlopen(request, timeout=60):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise http.client.RemoteDisconnected("Remote end closed connection without response")
+            return Response(b'{"bars": {}}')
+
+        downloader = AlpacaDatasetDownloader("k", "s", sleeper=lambda seconds: None)
+        with mock.patch("localtrader.data_requests.urlopen", fake_urlopen):
+            payload, _ = downloader._request_page("https://data.alpaca.markets/v2/stocks/bars")
+        self.assertEqual(payload, {"bars": {}})
+        self.assertEqual(calls["n"], 2)
+
+
+class ProviderWindowTests(unittest.TestCase):
+    def test_rows_beyond_the_request_never_reach_raw_or_normalized_files(self):
+        # Regression (PR #21 review 5): Alpaca's end is inclusive and its answer was written to
+        # raw/alpaca/.../page_*.json and normalized/*.jsonl before any window check, so a row exactly at
+        # the holdout start stayed on disk even though the research CSV dropped it.
+        from localtrader.data_requests import AlpacaDatasetDownloader
+
+        cutoff = datetime(2025, 11, 1, tzinfo=UTC)
+        start = datetime(2025, 10, 31, 19, 15, tzinfo=UTC)
+        request = DataRequestSpec(
+            "alpaca",
+            "stocks",
+            ("SPY",),
+            "15Min",
+            start,
+            cutoff - timedelta(minutes=15),
+            "sip",
+            "research:t",
+            "s",
+            "raw",
+        )
+
+        def item(moment: str, price: float) -> dict:
+            return {"t": moment, "o": price, "h": price, "l": price, "c": price, "v": 1}
+
+        answer = {
+            "bars": {
+                "SPY": [
+                    item("2025-10-31T19:00:00Z", 1.0),  # before the requested start
+                    item("2025-10-31T19:15:00Z", 2.0),
+                    item("2025-10-31T19:45:00Z", 3.0),  # last allowed: ends exactly at the cutoff
+                    item("2025-11-01T00:00:00Z", 987.65),  # exactly at the holdout start
+                    item("2025-11-03T14:30:00Z", 876.54),
+                ]
+            },
+            "next_page_token": None,
+        }
+        with TemporaryDirectory() as tmp:
+            downloader = AlpacaDatasetDownloader("k", "s", root=tmp, sleeper=lambda seconds: None)
+            with mock.patch.object(downloader, "_request_page", return_value=(answer, {})):
+                bars, manifest, normalized = downloader.download(request)
+            stored = "".join(path.read_text(encoding="utf-8") for path in Path(tmp).rglob("*") if path.is_file())
+        self.assertEqual([bar.close for bar in bars], [2.0, 3.0])
+        self.assertEqual(manifest["last_timestamp"], "2025-10-31T19:45:00+00:00")
+        self.assertTrue(all(bar.end <= cutoff for bar in bars))
+        for withheld in ("2025-11-01", "2025-11-03", "987.65", "876.54", "2025-10-31T19:00"):
+            self.assertNotIn(withheld, stored)
+
+    def test_unreadable_timestamp_fails_without_echoing_the_row(self):
+        from localtrader.data_requests import AlpacaDatasetDownloader
+
+        request = DataRequestSpec(
+            "alpaca", "stocks", ("SPY",), "15Min", datetime(2025, 10, 1, tzinfo=UTC),
+            datetime(2025, 10, 2, tzinfo=UTC), "sip", "research:t", "s", "raw",
+        )  # fmt: skip
+        answer = {"bars": {"SPY": [{"t": "not-a-time", "o": 543.21, "h": 1, "l": 1, "c": 1}]}}
+        with TemporaryDirectory() as tmp:
+            downloader = AlpacaDatasetDownloader("k", "s", root=tmp, sleeper=lambda seconds: None)
+            with (
+                mock.patch.object(downloader, "_request_page", return_value=(answer, {})),
+                self.assertRaises(DataRequestError) as caught,
+            ):
+                downloader.download(request)
+            self.assertEqual(list(Path(tmp).rglob("page_*.json")), [])
+        self.assertNotIn("543.21", str(caught.exception))
+        self.assertNotIn("not-a-time", str(caught.exception))

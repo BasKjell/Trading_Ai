@@ -105,6 +105,56 @@ min_fee = 0.0
 qty_step = 0.1                  # 0.1 contract of 1 EUR/point
 financing_rate_annual = 0.05    # long overnight financing (reference rate + markup, assumption)
 
+# US index ETFs via Alpaca (T-018, ADR 0005). Data: Alpaca SIP 15-minute bars as traded (raw), regular
+# session of each day only; cash dividends booked separately. Alpaca charges no commission; fee_bps
+# approximates SEC/FINRA fees on sells.
+# Prices are in USD and are treated 1:1 as account currency until T-011 adds FX (known limitation).
+[instruments.SPY]
+market = "etf"
+venue = "NYSE Arca via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 0.5                # typical 1 cent at ~500 USD is 0.2 bp; doubled as a margin
+slippage_bps = 1.0
+min_fee = 0.0
+qty_step = 0.001                # fractional shares (Alpaca, market day orders)
+financing_rate_annual = 0.0     # cash account, no margin
+data_file = "data/SPY_15m.csv"   # raw, as traded (execution, signals, valuation)
+data_source = "alpaca_sip_raw"
+data_timezone = "UTC"
+corporate_actions = "dividends_file"  # data/<SYMBOL>_dividends.csv from fetch-intraday
+dividend_withholding = 0.15     # US withholding with W-8BEN treaty rate (assumption)
+session_calendar = "nyse"       # early closes; days after the covered range are not traded
+
+[instruments.QQQ]
+market = "etf"
+venue = "Nasdaq via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 0.5
+slippage_bps = 1.0
+min_fee = 0.0
+qty_step = 0.001
+financing_rate_annual = 0.0
+data_file = "data/QQQ_15m.csv"   # raw, as traded (execution, signals, valuation)
+data_source = "alpaca_sip_raw"
+data_timezone = "UTC"
+corporate_actions = "dividends_file"  # data/<SYMBOL>_dividends.csv from fetch-intraday
+dividend_withholding = 0.15     # US withholding with W-8BEN treaty rate (assumption)
+session_calendar = "nyse"       # early closes; days after the covered range are not traded
+
+# Final independent test period, fixed before the first evaluation of the ETF data (T-018, ADR 0005).
+# The boundary is fixed in localtrader/holdout.py; this entry documents it and must be identical (checked
+# at start). Research commands cannot reach data at or after it; central access belongs to T-008.
+[holdout]
+start = "2025-11-01T00:00:00+00:00"
+
 # Binding operating rules (spec §18.7, T-019, docs/OPERATING_RULES.md). Fixed vocabulary, validated at start.
 [operating_rules]
 trading_hours = "regular_session_only"
