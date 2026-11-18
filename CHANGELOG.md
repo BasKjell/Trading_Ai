@@ -15,6 +15,37 @@ Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
 **Tests:** `tests/test_cost_schedule.py`.
 
+## 2026-11-18 – T-008 Walk-forward-Forschungsdesign (PR #22)
+
+**Anlass/Ziel:** Forschungsplan und maschinenlesbares Protokoll für US-Index-ETFs, einen Vergleich mit Cash und Exposure-Benchmark sowie einen kontrollierten finalen Test.
+
+- Vier vorab definierte Varianten, drei chronologische Falten, unveränderte zentral-konfirmatorische Gates.
+- Benutzerentscheidungen aus dem Methodenreview: Shadow-Gate mit unadjustierter einseitiger 95-%-Untergrenze je Vergleich. Adjustierte Schranke als Bericht mit ausgewiesener Trennschärfe. Aktualisierte Vergleichsfamilie und Budgetabgrenzung.
+- Physische Forschungsexporte vor dem Holdout. Der Benutzer verwahrt die Freigabe und das Journal für maximal einen reservierten zentralen Abruf. Teilweise frühere Exposition dokumentiert.
+- Vollständiger Börsenkalender, Umgang mit Anbieterausnahmen, kausaler EZB-Mittelkurs mit separaten Umtauschkosten und Definition vollständiger Stundenkerzen vorgegeben.
+
+**Stand:** Design überarbeitet. Freeze, Implementierung und Auswertung ausstehend.
+
+## 2026-11-18 – T-011 (Datenteil): EUR/USD-Referenzkurse der EZB (PR #25)
+
+**Anlass/Ziel:** Voraussetzung für Ergebnisse in EUR (T-011, T-008). Nur Daten, keine Buchhaltung.
+
+**Änderungen**
+- `localtrader/fx_rates.py`: Abruf, Prüfung und Speicherung der EZB-Referenzkurse; Verfügbarkeit ab
+  16:00 Europe/Berlin; kausale Abfrage mit maximalem Kursalter (5 Tage, fail closed); Holdout-Schnitt
+  nach Verfügbarkeit; Digest der Reihe.
+- CLI `fetch-fx`; Abschnitt in `docs/DATA_FORMAT.md`.
+
+- Nach Review (`552ae42`): Holdout-Zeilen werden vor dem Parsen übersprungen (ein Defekt im Holdout
+  bricht den Forschungsimport nicht ab); leerer `OBS_STATUS` wird verworfen.
+
+**Tests:** `tests/test_fx_rates.py`: Veröffentlichungszeit (MEZ/MESZ), Verwerfungsgründe, Konflikt-
+abbruch, Sprünge/Lücken, Nutzung erst nach Veröffentlichung, Wochenende, veralteter/fehlender Kurs,
+Umrechnung, Dateirundlauf mit Manifest, Holdout-Schnitt, manipulierte Verfügbarkeit, Abruf-URL.
+
+**Nicht enthalten (T-011, High):** Decimal-Buchhaltung, Umrechnung von Fills, Bewertung, Dividenden und
+Kosten, getrennter Währungseffekt, Export.
+
 ## 2026-11-18 – T-005 Persistenter Orderzustand und Fake-Broker-Abgleich (PR #26)
 
 Ein SQLite-Journal sichert Client-ID, Orderzustand, kumulierte Ausführungen und Abgleichalarme im Fake-Broker-Pfad. Offene Verkäufe reservieren Bestand. Nach einem Timeout oder einer Abweichung sperrt der Manager neue Orders. Der Wiederanlauf gleicht offene und abgeschlossene Orders, Cash und Bestände ab. Der Risikoprüfer kann den Abgleichstatus lesen. Tests umfassen doppelte und ungeordnete Meldungen, konkurrierende Aufrufer und einen echten Prozessabbruch mit simuliertem Broker.

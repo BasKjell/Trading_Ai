@@ -151,6 +151,21 @@ def run_measure_spreads(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_fetch_fx(args: argparse.Namespace) -> int:
+    from datetime import date
+
+    from .fx_rates import ECB_URL, fetch_ecb_csv, parse_ecb_csv, write_fx_file
+
+    start = date.fromisoformat(args.start)
+    end = date.fromisoformat(args.end) if args.end else datetime.now(UTC).date()
+    series, report = parse_ecb_csv(fetch_ecb_csv(start, end))
+    if not series:
+        raise SystemExit("ECB returned no usable rates")
+    manifest = write_fx_file(series, args.output, report, ECB_URL)
+    print(json.dumps(manifest, indent=2))
+    return 0
+
+
 def experiments(args: argparse.Namespace) -> int:
     from .experiment_registry import summary
 
@@ -390,6 +405,11 @@ def build_parser() -> argparse.ArgumentParser:
     spreads.add_argument("--output", default=None, help="default: data/spreads_<SYMBOL>.json")
     spreads.add_argument("--env", default=".env")
     spreads.set_defaults(func=run_measure_spreads)
+    fx = sub.add_parser("fetch-fx", help="download ECB EUR/USD reference rates into data/")
+    fx.add_argument("--start", default="2015-12-01")
+    fx.add_argument("--end", default=None, help="default: today")
+    fx.add_argument("--output", default="data/EURUSD_ecb.csv")
+    fx.set_defaults(func=run_fetch_fx)
     register = sub.add_parser("experiments", help="show the shared experiment register and total variants tested")
     register.add_argument("--directory", default="experiments")
     register.set_defaults(func=experiments)
