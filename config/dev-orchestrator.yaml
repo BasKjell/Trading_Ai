@@ -1,0 +1,46 @@
+# Copy outside the clone and set a private, absolute state directory.
+repository: BasKjell/Trading_Ai
+state_directory: ~/.trading-ai/dev-orchestrator
+execution_enabled: false
+merge_enabled: false
+image: ""
+author: codex
+required_check: check
+poll_seconds: 60
+timeout_seconds: 1800
+cooldown_seconds: 18000
+max_age_seconds: 172800
+max_tasks: 20
+max_corrections: 3
+max_quota_pauses: 5
+output_bytes: 2000000
+diff_bytes: 100000
+file_bytes: 2000000
+pids: 128
+memory: 4g
+scratch: 2g
+cpus: 2
+codex:
+  model: gpt-6.2-sol
+  proxy: http://egress-codex:3128
+  network: trading-dev-codex
+  auth_volume: trading-dev-codex-auth
+claude:
+  model: claude-opus-5-5
+  proxy: http://egress-claude:3128
+  network: trading-dev-claude
+  auth_volume: trading-dev-claude-auth
+# Optional separate restricted network and an existing Ollama model.
+# ollama:
+#   model: qwen3-coder:30b
+#   network: trading-dev-ollama
+#   host: http://ollama:11434
+tasks: {}
+# Example entry (use the actual issue, reviewed scope and dependencies):
+# tasks:
+#   T-099:
+#     class: U
+#     priority: 10
+#     depends_on: [5]
+#     paths: [docs/REPORTS.md]
+#     ollama: false
