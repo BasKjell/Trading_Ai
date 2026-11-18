@@ -6,9 +6,14 @@
   - Neu ist der API-Endpunkt `/api/whatif`.
   - Neu ist der Dashboard-Abschnitt „Was wäre wenn“ mit Reglern. Er zeigt Basis und Variante für das Gesamtergebnis und für jede Strategie.
   - `intraday-backtest` speichert jetzt die verwendeten Kostenannahmen je Instrument (`cost_profiles`) in `summary.json`. Ältere Reports nutzen die aktuelle Config und werden als Näherung markiert.
+- **Schutz (Review #43, Klasse K):**
+  - Gezeigt und nachgerechnet werden nur Forschungsreports. Dafür muss `holdout.used` ausdrücklich `false` sein, und jedes Dataset muss vor dem Holdout-Start enden. Beides wird in `summary.json` geprüft, bevor Trades gelesen werden.
+  - Trades oder Equity im Holdout führen ebenfalls zur Ablehnung.
+  - Reportdateien müssen reguläre Dateien im Reportverzeichnis sein.
 - **Modell und Grenzen:**
+  - Jedes Instrument behält sein eigenes Kostenprofil. Ein Regler überschreibt nur das Feld, das er setzt.
   - Das Startkapital skaliert alle Stückzahlen linear. Mindestorder, Stückelung und Volumengrenze werden nicht neu angewendet.
-  - Der Drawdown ist auf abgeschlossene Trades bezogen.
+  - Der Drawdown ist auf abgeschlossene Trades bezogen. Er enthält die Fixkosten bis zu jedem Trade-Ende und bis zum Ende des Zeitraums.
   - Fixkosten werden anteilig je Kalendertag berechnet.
   - Regler für Risiko pro Trade und maximalen Drawdown gibt es bewusst nicht, weil sie die Trades selbst ändern (erst nach dem T-008-Forschungsurteil).
 - **Tests:** `tests/test_whatif.py`:

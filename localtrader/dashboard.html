@@ -350,10 +350,11 @@
       {key:'server_per_year',label:'Server / Betrieb pro Jahr',min:0,max:3000,step:10,unit:'€',digits:0,hint:'Fixkosten, unabhängig vom Handel'},
       {key:'data_per_year',label:'Marktdaten pro Jahr',min:0,max:3000,step:50,unit:'€',digits:0,hint:'z. B. SIP-Echtzeitabo (derzeit nicht gebucht)'},
     ];
-    const whatif={report:'',values:{},baseline:null,timer:null};
+    const whatif={report:'',values:{},baseline:null,timer:null,touched:new Set()};
+    const ACCOUNT_KEYS=['capital','server_per_year','data_per_year'];
     function renderSliders() {
       $('whatifSliders').innerHTML=SLIDERS.map(s=>`<div class="slider"><label for="wi_${s.key}"><span>${esc(s.label)}</span><output id="wo_${s.key}"></output></label><input type="range" id="wi_${s.key}" min="${s.min}" max="${s.max}" step="${s.step}"><div class="hint">${esc(s.hint)}</div></div>`).join('');
-      for (const s of SLIDERS) $('wi_'+s.key).addEventListener('input',e=>{whatif.values[s.key]=Number(e.target.value); showSliderValues(); scheduleWhatif();});
+      for (const s of SLIDERS) $('wi_'+s.key).addEventListener('input',e=>{whatif.values[s.key]=Number(e.target.value); whatif.touched.add(s.key); showSliderValues(); scheduleWhatif();});
     }
     function showSliderValues() {
       for (const s of SLIDERS) {
@@ -382,16 +383,19 @@
         `Ohne Fixkosten bliebe pro Jahr ${money(total.break_even_fixed_per_year)} übrig (Break-even der Fixkosten).<br>`+
         `* Drawdown auf Basis abgeschlossener Trades (ohne Schwankung innerhalb eines Trades). ** Handels- und Fixkosten im Verhältnis zum Bruttogewinn. `+
         `Startkapital skaliert alle Stückzahlen linear; Mindestorder, Stückelung und Volumengrenze werden nicht neu angewendet.`+
+        (r.profiles_differ?' Die Instrumente haben unterschiedliche Kostenannahmen: ein bewegter Kosten-Regler setzt seinen Wert für alle Instrumente, unbewegte behalten die Werte je Instrument.':'')+
         (r.approximate_cost_profiles?' Älterer Report ohne gespeicherte Kostenannahmen: Basis aus der aktuellen Config übernommen (Näherung).':'');
     }
     async function runWhatif() {
       if (!whatif.report) return;
-      const q=new URLSearchParams({report:whatif.report,...Object.fromEntries(Object.entries(whatif.values).map(([k,v])=>[k,String(v)]))});
+      // account values always; a cost field only once its slider was moved (other fields keep each instrument's profile)
+      const sent=Object.entries(whatif.values).filter(([k])=>ACCOUNT_KEYS.includes(k)||whatif.touched.has(k));
+      const q=new URLSearchParams({report:whatif.report,...Object.fromEntries(sent.map(([k,v])=>[k,String(v)]))});
       try { const r=await (await fetch('/api/whatif?'+q,{cache:'no-store'})).json(); renderWhatif(r); }
       catch (error) { $('whatifRows').innerHTML=`<tr><td colspan="10" class="muted">${esc(String(error))}</td></tr>`; }
     }
     async function selectWhatifReport(name) {
-      whatif.report=name; whatif.values={};
+      whatif.report=name; whatif.values={}; whatif.touched=new Set();
       const r=await (await fetch('/api/whatif?'+new URLSearchParams({report:name}),{cache:'no-store'})).json();
       if (r.error) { renderWhatif(r); return; }
       whatif.baseline=r.baseline_assumptions; whatif.values={...r.baseline_assumptions}; showSliderValues(); renderWhatif(r);
@@ -406,7 +410,7 @@
     }
     renderSliders();
     $('whatifReport').addEventListener('change',e=>selectWhatifReport(e.target.value));
-    $('whatifReset').addEventListener('click',()=>{ if(!whatif.baseline) return; whatif.values={...whatif.baseline}; showSliderValues(); runWhatif(); });
+    $('whatifReset').addEventListener('click',()=>{ if(!whatif.baseline) return; whatif.values={...whatif.baseline}; whatif.touched=new Set(); showSliderValues(); runWhatif(); });
     $('whatifT008').addEventListener('click',()=>{ whatif.values.server_per_year=120; whatif.values.data_per_year=1200; showSliderValues(); runWhatif(); });
     loadWhatifReports();
     load(); setInterval(load,5000);
