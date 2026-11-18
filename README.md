@@ -140,3 +140,7 @@ PYTHONPATH=. .venv/bin/python -m localtrader dashboard
 ```
 
 Danach im Browser öffnen: `http://127.0.0.1:8501`. Alternativ genügt `make dashboard`. Die laufende Ollama-Suche kann parallel in einem zweiten Terminal bleiben.
+
+## Lokaler Coding-Runner
+
+Die Vorschau für freigegebene Medium-Coding-Aufgaben ist verfügbar. Die Worker-Ausführung ist technisch gesperrt. Bedienung und Voraussetzungen: [docs/CODING_RUNNER.md](docs/CODING_RUNNER.md).

@@ -35,6 +35,7 @@ research_registry/*
 *.db-wal
 *.sqlite
 *.log
+.coding-runner/
 
 # Downloaded market data stays local; the small DAX sample is versioned on purpose
 data/*

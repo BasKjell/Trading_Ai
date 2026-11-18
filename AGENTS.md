@@ -187,3 +187,24 @@ scripts/start_task.sh T-005 order-state     # Worktree + Branch für eine Aufgab
 make intraday && make intraday-stress       # Backtests auf DAX-Beispieldaten
 python3 -m localtrader experiments          # Experimentregister und Gesamtzahl der Versuche
 ```
+
+## 7. Lokaler Coding-Runner (T-020, technisch gesperrt)
+
+Der Benutzer hat am 2026-11-17 das Konzept für automatisierte Medium-Coding-Aufgaben beschlossen.
+Die implementierte Ausführung ist technisch gesperrt. Verfügbar sind Planung, Diagnose und Offline-Tests.
+Labels und Konfiguration schalten keine Worker frei. Details: [CODING_RUNNER](docs/CODING_RUNNER.md).
+
+Eine spätere Freischaltung erfordert einen unabhängig geprüften isolierten Ausführungsbereich,
+beschränkte Werkzeuge, einen separaten Clone ohne `.env` oder Broker-Zustand und getrennte GitHub-Rechte.
+Worker erhalten keine GitHub-Schreibidentität. Der Steuerprozess kontrolliert Veröffentlichung und
+GitHub-Mutationen separat. Branch-Schutz für `main` verlangt Pull Requests und Status-Checks. Der erste
+echte Lauf benötigt ausdrückliche Benutzerfreigabe.
+
+Für eine spätere freigegebene Ausführung gelten:
+
+- Nur Benutzer setzen `auto-ready` und `effort:medium`; Coding-Issues benötigen zusätzlich `work:coding`.
+- Reihenfolge: eigene aktuelle Review-Befunde, fremde Reviews, freie freigegebene Coding-Aufgaben.
+- Kritische Aufgaben und höhere Denkstufen bleiben manuell. Modell- und Denkstufenwechsel erfolgen bewusst.
+- Ein Worker je Runner, persistente Claims, isolierte Worktrees und kein Übernehmen aktiver manueller Arbeit.
+- Merges, Forschung, Strategieexperimente, Liveorders und bezahlte API-Fallbacks sind ausgeschlossen.
+- Die Regeln zu Prüfungen, Handoffs und Geheimnissen bleiben verbindlich. Bei Blockaden anhalten.
