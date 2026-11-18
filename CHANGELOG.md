@@ -2,6 +2,10 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – T-008 Zeitfenster der Walk-forward-Prüfung (PR #30)
+
+Die Forschungsrollen verwenden die im Protokoll festgelegten Sitzungsgrenzen, Purge, Embargo und das separate Einstiegsverbot am Ende des Bewertungsfensters. Pro Rolle und ETF stehen zeitlich verfügbare Viertelstunden und vollständige lokale Uhrstunden für den Warm-up bereit. Synthetische Tests prüfen auch verzögerte Daten, Frühschlüsse und die Frist bis zur tatsächlichen Glattstellung.
+
 ## 2026-11-18 – T-019 Verbindliche Betriebsregeln
 
 **Anlass/Ziel:** Spec §18.7: Handelszeiten, Verhalten vor Handelsschluss, Übernacht/Wochenende,
