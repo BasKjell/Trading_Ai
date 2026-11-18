@@ -24,7 +24,7 @@ from .holdout import HOLDOUT_START, HoldoutError, research_limit
 from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, synthetic_intraday
 from .intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics, instruments_from_config
 from .intraday_fetch import dividends_digest, output_paths, read_dividends
-from .intraday_report import run_scenarios, strategies_from_config, write_intraday_report
+from .intraday_report import default_workers, run_scenarios, strategies_from_config, write_intraday_report
 from .ollama_lab import OllamaClient, OllamaStrategySearch
 from .paper import PaperSession
 from .reporting import write_report
@@ -171,7 +171,10 @@ def run_intraday_backtest(args: argparse.Namespace) -> int:
 
 def run_intraday_stress(args: argparse.Namespace) -> int:
     config, instruments, datasets, holdout = _load_intraday(args.config, args.data, args.synthetic_days, args.symbol)
-    output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets)
+    workers = args.workers if args.workers is not None else default_workers()
+    if workers < 1:
+        raise SystemExit("--workers must be at least 1")
+    output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets, workers)
     output["holdout"] = holdout
     path = Path(args.output)
     path.mkdir(parents=True, exist_ok=True)
@@ -508,6 +511,13 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--cost-multiplier", type=float, default=1.0)
             command.add_argument("--spread-multiplier", type=float, default=1.0)
             command.add_argument("--delay-bars", type=int, default=0)
+        else:
+            command.add_argument(
+                "--workers",
+                type=int,
+                default=None,
+                help="processes for the independent scenarios; default: available CPUs, 1 = serial",
+            )
         command.set_defaults(func=func)
     spreads = sub.add_parser("measure-spreads", help="sample quoted SIP spreads at bar opens (research period only)")
     spreads.add_argument("--symbol", required=True)

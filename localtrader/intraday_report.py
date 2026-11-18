@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import csv
 import json
+import multiprocessing
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -128,45 +131,107 @@ def _perturb(strategy: IntradayStrategy, factor: float) -> IntradayStrategy:
     return build_strategy(strategy.name, changed)
 
 
+# One stress scenario: (name, strategies, engine settings, phase index or None for the full sample).
+Scenario = tuple[str, list[IntradayStrategy], dict[str, float], int | None]
+
+
+def default_workers() -> int:
+    """CPUs this process may use; ``os.process_cpu_count`` (3.13+) honours affinity masks."""
+    count = getattr(os, "process_cpu_count", os.cpu_count)()
+    return count if isinstance(count, int) and count > 0 else 1
+
+
+def _scenario_plan(
+    config: AppConfig, strategy_names: list[str], datasets: dict[str, ImportedDataset]
+) -> list[Scenario]:
+    base = strategies_from_config(config, strategy_names)
+    plan: list[Scenario] = [
+        ("baseline", base, {}, None),
+        ("costs_2x", base, {"cost_multiplier": 2.0}, None),
+        ("spread_3x", base, {"spread_multiplier": 3.0}, None),
+        ("delay_1_bar", base, {"extra_delay_bars": 1}, None),
+        ("params_minus_20pct", [_perturb(s, 0.8) for s in base], {}, None),
+        ("params_plus_20pct", [_perturb(s, 1.2) for s in base], {}, None),
+    ]
+    for index, (label, _part) in enumerate(_phases(datasets)):
+        plan.append((f"phase_{index + 1}_{label}", base, {}, index))
+    return plan
+
+
+def _run_scenario(
+    config: AppConfig,
+    instruments: dict[str, InstrumentSpec],
+    datasets: dict[str, ImportedDataset],
+    scenario: Scenario,
+) -> dict[str, object]:
+    """Run one scenario. Identical code path for the serial and the parallel run."""
+    _name, strategies, settings, phase = scenario
+    data = datasets if phase is None else _phases(datasets)[phase][1]
+    engine = IntradayEngine(
+        config,
+        instruments,
+        strategies,
+        cost_multiplier=settings.get("cost_multiplier", 1.0),
+        spread_multiplier=settings.get("spread_multiplier", 1.0),
+        extra_delay_bars=int(settings.get("extra_delay_bars", 0)),
+    )
+    result = engine.run(data)
+    metrics = compute_metrics(result)
+    return {
+        "total_return": metrics["total_return"],
+        "geometric_monthly_return": metrics["geometric_monthly_return"],
+        "max_drawdown": metrics["max_drawdown"],
+        "trades": metrics["trades"],
+        "total_costs": metrics["total_costs"],
+        "benchmark": buy_and_hold(data, instruments, config, settings.get("cost_multiplier", 1.0)),
+    }
+
+
+# Inputs shared by all scenarios, sent once per worker process instead of once per scenario.
+_WORKER_INPUTS: tuple[AppConfig, dict[str, InstrumentSpec], dict[str, ImportedDataset]] | None = None
+
+
+def _init_worker(
+    config: AppConfig, instruments: dict[str, InstrumentSpec], datasets: dict[str, ImportedDataset]
+) -> None:
+    global _WORKER_INPUTS
+    _WORKER_INPUTS = (config, instruments, datasets)
+
+
+def _run_in_worker(scenario: Scenario) -> dict[str, object]:
+    assert _WORKER_INPUTS is not None, "worker not initialised"
+    return _run_scenario(*_WORKER_INPUTS, scenario)
+
+
 def run_scenarios(
     config: AppConfig,
     instruments: dict[str, InstrumentSpec],
     strategy_names: list[str],
     datasets: dict[str, ImportedDataset],
+    workers: int = 1,
 ) -> dict[str, dict[str, object]]:
-    """Baseline plus the robustness checks required by the project spec (section 7)."""
-    base = strategies_from_config(config, strategy_names)
-    scenarios: dict[str, tuple[list[IntradayStrategy], dict[str, float], dict[str, ImportedDataset]]] = {
-        "baseline": (base, {}, datasets),
-        "costs_2x": (base, {"cost_multiplier": 2.0}, datasets),
-        "spread_3x": (base, {"spread_multiplier": 3.0}, datasets),
-        "delay_1_bar": (base, {"extra_delay_bars": 1}, datasets),
-        "params_minus_20pct": ([_perturb(s, 0.8) for s in base], {}, datasets),
-        "params_plus_20pct": ([_perturb(s, 1.2) for s in base], {}, datasets),
-    }
-    for index, (label, part) in enumerate(_phases(datasets)):
-        scenarios[f"phase_{index + 1}_{label}"] = (base, {}, part)
-    output: dict[str, dict[str, object]] = {}
-    for name, (strategies, settings, data) in scenarios.items():
-        engine = IntradayEngine(
-            config,
-            instruments,
-            strategies,
-            cost_multiplier=settings.get("cost_multiplier", 1.0),
-            spread_multiplier=settings.get("spread_multiplier", 1.0),
-            extra_delay_bars=int(settings.get("extra_delay_bars", 0)),
-        )
-        result = engine.run(data)
-        metrics = compute_metrics(result)
-        output[name] = {
-            "total_return": metrics["total_return"],
-            "geometric_monthly_return": metrics["geometric_monthly_return"],
-            "max_drawdown": metrics["max_drawdown"],
-            "trades": metrics["trades"],
-            "total_costs": metrics["total_costs"],
-            "benchmark": buy_and_hold(data, instruments, config, settings.get("cost_multiplier", 1.0)),
-        }
-    return output
+    """Baseline plus the robustness checks required by the project spec (section 7).
+
+    The scenarios are independent, so ``workers > 1`` runs them in separate processes. Each process
+    runs the same deterministic code on the same (already holdout-free) datasets; the output keeps
+    the fixed scenario order and is identical to ``workers=1``.
+    """
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
+    plan = _scenario_plan(config, strategy_names, datasets)
+    workers = min(workers, len(plan))
+    if workers == 1:
+        results = [_run_scenario(config, instruments, datasets, scenario) for scenario in plan]
+    else:
+        # "spawn" gives the same start method on macOS and Linux and avoids forking a threaded parent.
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_init_worker,
+            initargs=(config, instruments, datasets),
+        ) as pool:
+            results = list(pool.map(_run_in_worker, plan))
+    return {scenario[0]: result for scenario, result in zip(plan, results, strict=True)}
 
 
 def _phases(datasets: dict[str, ImportedDataset], parts: int = 3) -> list[tuple[str, dict[str, ImportedDataset]]]:
