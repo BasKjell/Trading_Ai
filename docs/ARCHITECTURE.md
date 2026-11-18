@@ -58,3 +58,9 @@ Risikodefinitionen (High-Water-Mark, Drawdown, Freigabe): Docstring von `risk.py
 
 Seed, Datenversion (SHA-256 über akzeptierte Bars), Konfigurations-Digest und Parameter stehen in
 jedem Report (`summary.json`) und jedem Registereintrag.
+
+## Lokaler Coding-Runner (T-020)
+
+`scripts/coding_runner.py` verwendet die GitHub CLI für Diagnose und Jobvorschau. Die
+Worker-Ausführung ist technisch gesperrt. Vor einer Freischaltung ist ein getrennt geprüfter
+Ausführungsbereich erforderlich. Siehe [CODING_RUNNER.md](CODING_RUNNER.md).

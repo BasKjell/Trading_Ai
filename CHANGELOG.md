@@ -85,6 +85,13 @@ und Benchmark.
 
 **Einschränkungen:** USD wird bis T-011 1:1 als Kontowährung behandelt; kein Feiertagskalender.
 
+## 2026-11-18 – T-020 Lokaler Coding-Runner (PR #20)
+
+- GitHub-Planung für freigegebene Medium-Coding-Aufgaben sowie lokale Diagnose und Offline-Tests.
+- Worker-Ausführung technisch gesperrt. `once` und `watch` im Ausführungsmodus stoppen vor Login, Claim und Worktree-Erstellung.
+- AGENTS §7 und Spec §22 dokumentieren die spätere Freigabe nach unabhängiger Prüfung der Isolation, beschränkter Werkzeuge, getrennter GitHub-Rechte und des Branch-Schutzes.
+- Review-Befunde zu Host-Worker-Rechten und widersprüchlicher Betriebsdokumentation adressiert. Echte Worker-Ausführung und Netzwerktest bleiben offen.
+
 ## 2026-11-18 – T-008 Zeitfenster der Walk-forward-Prüfung (PR #30)
 
 Die Forschungsrollen verwenden die im Protokoll festgelegten Sitzungsgrenzen, Purge, Embargo und das separate Einstiegsverbot am Ende des Bewertungsfensters. Pro Rolle und ETF stehen zeitlich verfügbare Viertelstunden und vollständige lokale Uhrstunden für den Warm-up bereit. Synthetische Tests prüfen auch verzögerte Daten, Frühschlüsse und die Frist bis zur tatsächlichen Glattstellung.
