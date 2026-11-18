@@ -19,7 +19,8 @@ Vor jeder neuen Aufgabe:
    Branch mit Regressionstests beheben, im PR auf jeden Befund antworten (behoben in `<SHA>` / begründet
    abgelehnt) und erneutes Review anfordern. Das ist Fehlerbehebung, kein Selbstreview. Erst wenn eigene
    PRs keine offenen Befunde haben, gilt §0 für sie als erledigt.
-3. Fremde PRs reviewen: Code und Tests lesen, `make check` im eigenen Worktree ausführen, Look-ahead,
+3. Fremde PRs reviewen: Code und Tests lesen, `make check` nachweisen (siehe „Nachweis von `make check`"),
+   Look-ahead,
    Kosten, Risikogrenzen, Orderlogik und Validierung gezielt prüfen. Ergebnis als PR-Review mit klarer
    Empfehlung (freigeben / Änderungen nötig) und gefundenen Fehlern; Fehler in
    `docs/agents/MODEL_EVALUATION.md` beim verursachenden Eintrag nachtragen.
@@ -32,6 +33,12 @@ Vor jeder neuen Aufgabe:
 - Herkunft und Unabhängigkeit richten sich nach der dokumentierten tatsächlichen Bearbeitung (Feld
   „Agent", Co-Authored-By, Handoff), nicht nach dem GitHub-Autor: Alle Agenten nutzen denselben
   GitHub-Account.
+- **Nachweis von `make check`** (Benutzerentscheidung 2026-11-18): Ein grüner CI-Lauf auf **genau dem
+  geprüften Head-SHA** gilt als Nachweis, weil die CI dieselben Prüfungen mit den gepinnten Versionen aus
+  `requirements-dev.txt` ausführt. Das Review nennt Lauf-ID, Head-SHA und Ergebnis. Ein lokaler Lauf ist
+  zusätzlich willkommen, aber nicht Pflicht, wenn die eigene Umgebung die Werkzeuge oder das Netzwerk
+  nicht bereitstellt. Ein roter, abgebrochener oder zu einem anderen SHA gehörender CI-Lauf ist kein
+  Nachweis; ändert sich die CI-Konfiguration im PR selbst, prüft der Reviewer diese Änderung gesondert.
 - Weil derselbe Account keinen eigenen PR formal freigeben kann, wird ein Agentenreview als
   `COMMENT`-Review abgegeben, das beginnt mit `<Agent>: unabhängiges Review`, den geprüften
   **Head-SHA** und Zielbranch nennt und mit „Empfehlung: FREIGEBEN" oder „Empfehlung: ÄNDERUNGEN NÖTIG"
@@ -57,7 +64,9 @@ Vor jeder neuen Aufgabe:
 
 - Kleine, fachlich zusammenhängende, geprüfte Commits; Präfixe `feat|fix|test|docs|refactor|chore`.
 - Vor jedem Commit: `make check` (Format, Lint, Typen, Tests, Secret-Scan, Konfiguration). Nur
-  tatsächlich ausgeführte Ergebnisse berichten; übersprungene Prüfungen ausdrücklich nennen.
+  tatsächlich ausgeführte Ergebnisse berichten; übersprungene Prüfungen ausdrücklich nennen. Fehlen
+  lokal die Werkzeuge: venv mit `pip install -r requirements-dev.txt`; ist das nicht möglich, den Lauf als
+  „lokal nicht ausgeführt" melden und die CI am gepushten SHA abwarten.
 - Jede ausführbare Änderung mit aussagekräftigen Tests; jede Fehlerbehebung mit Regressionstest.
   Erwartete Testergebnisse nie anpassen, nur damit fehlerhafter Code besteht.
 - Änderungsnotiz in `changelog.d/T-xxx.md` (nicht direkt in `CHANGELOG.md`; das wird bei der
@@ -83,7 +92,8 @@ Bedingungen erfüllt sind:
 2. Ein unabhängiges Review mit Empfehlung „freigeben" liegt vor (bei Risiko, Orderausführung,
    Validierung zwingend; sonst durch den mergenden Agenten selbst).
 3. Der PR enthält den aktuellen Stand von `main`; Konflikte sind fachlich gelöst (nie pauschal
-   ours/theirs); `make check` lokal und die CI des PRs sind grün.
+   ours/theirs); die CI des PRs ist auf genau dem freigegebenen Head-SHA grün (gilt als `make check`-
+   Nachweis, siehe §0).
 3a. Die Freigabe nennt genau den aktuellen Head-SHA des PRs und `main` als Ziel. Gemergt wird mit
    erwartetem Head (`gh pr merge <n> --merge --match-head-commit <SHA>` bzw. REST-Feld `sha`).
 4. Keine offenen Blockaden, keine WIP-Commits, keine ungeklärten Benutzerentscheidungen im PR.
