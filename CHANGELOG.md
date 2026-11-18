@@ -2,6 +2,79 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-17 – T-018 Mehrjährige 15-Minuten-Daten (SPY, QQQ) und fester Holdout (PR #21)
+
+**Anlass/Ziel:** Benutzerentscheidung: Instrument muss nicht der DAX sein; geeignetes Instrument mit gut
+verfügbaren Daten wählen und mehr Daten ergänzen (ADR 0005).
+
+**Änderungen**
+- `localtrader/intraday_fetch.py` und CLI `fetch-intraday`: 15-Minuten-Bars über den vorhandenen
+  Alpaca-Downloader (SIP, bereinigt), nur reguläre Handelszeit, CSV + Manifest unter `data/`.
+- `config/default.toml`: Instrumente SPY und QQQ (Kostenannahmen, Bruchstücke, keine Finanzierung) mit
+  eigener Datendatei; `[holdout] start = 2025-11-01`, vor der ersten Auswertung festgelegt.
+- `intraday-backtest`/`intraday-stress`: `--symbol`, Holdout wird automatisch ausgeschlossen,
+  `--use-holdout` nur für die zentrale Auswertung; Holdout-Angaben im Report.
+- `split_holdout()` in `localtrader/intraday_data.py`.
+- Basisreport `docs/reports/2026-11-17_etf_baseline.md`, Experiment EXP-T018-001, ADR 0005,
+  `docs/DATA_FORMAT.md`, `docs/DATA_ACCESS.md`.
+
+- Nach Codex-Review (`9c47014`): handelbare Rohkurse für Engine und Benchmark, bereinigte Kurse getrennt
+  nur für Analyse; Dividenden abgeleitet und gebucht (15 % Quellensteuer), Splits brechen ab;
+  NYSE-Halbtagskalender (`localtrader/calendars.py`); Holdout beim Import nach Verfügbarkeit
+  (`available_until`), keine Holdout-Preise mehr in Manifest/Report; `split_holdout` entfernt;
+  `Portfolio.receive_income()`; Dividendenlücken im Manifest. Ergebnisse als EXP-T018-002 neu
+  berechnet (EXP-T018-001 beruhte auf bereinigten Kursen und enthielt Halbtags-Nachbörse).
+
+- Nach Review 2 (`535493e`): Dividenden aus dem Corporate-Actions-Endpunkt mit Zahltag, Gegenprobe
+  gegen die abgeleiteten Beträge; Forderung am Ex-Tag, Cash am Zahltag (`Portfolio.accrue_income`,
+  `settle_income`), offene Forderungen am Ende ausgewiesen; Dividenden validiert und an die Datenversion
+  gebunden; Herkunftshash bei Holdout-Schnitt nur über die Forschungszeilen. Beim Neuladen behoben:
+  Wiederholung bei Verbindungsabbruch, fehlende Zahltage vor 2020 (gekennzeichnete Annahme), doppelt
+  gelistete QQQ-Dividende. Neuberechnung EXP-T018-003 (Ergebnisse praktisch unverändert).
+
+**Tests:** `tests/test_intraday_fetch.py`: Handelszeit inkl. Sommerzeit, Halbtag und Kalenderende;
+Dividendenableitung, Split- und Inkonsistenzabbruch, Lückenmeldung; getrennte Roh-/Analyse-/Dividenden-
+dateien; Holdout ohne Preisabfluss ins Manifest, Grenze innerhalb einer Bar, verzögerte Verfügbarkeit,
+naive Grenze; Holdout und Dividenden im CLI inkl. fehlender Dividendendatei; Dividendenbuchung in Engine
+und Benchmark.
+
+**Einschränkungen:** USD wird bis T-011 1:1 als Kontowährung behandelt; kein Feiertagskalender.
+
+## 2026-11-17 – T-009 Zusammenarbeit mehrerer Agenten (PR #18)
+
+**Anlass/Ziel:** Projekt mit Claude und Codex abwechselnd fortsetzbar machen (Spec §19, §20).
+
+**Änderungen**
+- `AGENTS.md` (einziges Regelwerk, inkl. Modellwahl/Denkstufe/Eskalation/Review), `CLAUDE.md` verweist darauf.
+- `docs/PROJECT_SPEC.md` mit den vollständigen Anforderungen inkl. §18–20; alte Codex-Spezifikation
+  nach `docs/archive/` (nicht mehr verbindlich); `docs/PLAN.md` durch `docs/STATUS.md` ersetzt;
+  `docs/ARCHITECTURE.md` mit Komponenten, Schnittstellen und Statuskennzeichnung.
+- Vorlagen: Handoff, Research, PR, Issue; `docs/agents/MODEL_EVALUATION.md`; ADR 0004.
+- Experimentregister `localtrader/experiment_registry.py`, CLI `experiments`, Eintrag EXP-0001 (18 Varianten).
+- `scripts/start_task.sh` (Branch + Worktree je Aufgabe), `scripts/check_links.py` in `make check` und CI.
+- GitHub: Zustandslabels und Issues T-005 bis T-019.
+- Benutzerentscheidung: Jede Sitzung beginnt mit dem Review fremder PRs; Merge nach `main` durch einen
+  Integrationsagenten einer anderen Agentenart nach unabhängigem Review und grüner CI erlaubt
+  (AGENTS.md §0/§2a, Spec §21). Spec-Einleitung um „gemeinsam mit anderen Entwicklern" ergänzt.
+
+- Nach Codex-Review (PR #18, `9991e9c`): Experiment-IDs aufgabenbezogen (`EXP-T009-001`), weil ein
+  globaler Zähler in getrennten Worktrees doppelte IDs vergab. AGENTS.md §0: eigene PRs auf Befunde
+  prüfen und diese vorrangig beheben; REST-Fallback ohne `gh`; Unabhängigkeit nach tatsächlicher
+  Bearbeitung; Freigabe an Head-SHA und Zielbranch gebunden; Merge mit erwartetem Head; Integrationsstand
+  (CHANGELOG/STATUS) vor der Freigabe im PR, keine Direktänderungen an `main`.
+
+- Benutzerentscheidung 2026-11-18: Grüne CI auf genau dem geprüften Head-SHA gilt als Nachweis für
+  `make check` (AGENTS.md §0, §2a); lokaler Lauf nur noch zusätzlich, da Reviewer-Umgebungen ohne
+  Netzwerk die gepinnten Werkzeuge nicht installieren können.
+
+**Tests:** `tests/test_experiment_registry.py` (Unveränderlichkeit, Zählung über Agenten, Validierung,
+umbenannte Dateien, versioniertes Register, zwei getrennte Register ohne Kollision und ohne Verlust beim Zusammenführen), `tests/test_tooling_scripts.py` (Linkprüfung, Worktree-Skript).
+
+**Ausgeführte Prüfungen:** `make check` bestanden (106 Tests + 11 Subtests, Secret-Scan, Linkprüfung).
+
+**Einschränkungen:** EXP-0001 wurde nachträglich registriert. Frühere Versuche des Tages-Research-Labs
+(lokale SQLite auf dem Mac) sind nicht im Register enthalten.
+
 ## 2026-11-17 – Korrekturen nach unabhängigem Review (PR #17)
 
 **Anlass/Ziel:** Drei von Codex reproduzierte Fehler beheben (Review am Commit `1cd6e14`).
@@ -119,7 +192,7 @@ Rücknahme: Revert dieses Commits stellt die alten Limits wieder her (nicht empf
   GitHub-Actions-Workflow mit JUnit- und Coverage-Artefakten.
 - Lint-/Typfehler behoben, u. a. ein Fehler, bei dem Stop-/Exit-Signale positional `None` als
   Strategieversion statt als Stop-Preis übergaben.
-- Plan (`docs/PLAN.md`) und ADR 0001.
+- Plan (`docs/PLAN.md`, inzwischen durch `docs/STATUS.md` ersetzt) und ADR 0001.
 
 **Tests:** neu `tests/test_secret_scan.py` (verbotene Dateien, Schlüsselmuster, saubere Dateien, Regressionstest:
 noch nicht hinzugefügte Dateien werden ebenfalls gescannt).
@@ -127,4 +200,4 @@ noch nicht hinzugefügte Dateien werden ebenfalls gescannt).
 **Ausgeführte Prüfungen:** `make check` lokal (Python 3.13): Format, Lint, mypy, 46 Tests,
 Secret-Scan, Konfiguration – bestanden.
 
-**Einschränkungen:** Coverage läuft nur in CI (lokal nicht installiert). Fachliche Lücken siehe `docs/PLAN.md`.
+**Einschränkungen:** Coverage läuft nur in CI (lokal nicht installiert). Fachliche Lücken siehe `docs/STATUS.md`.

@@ -1,0 +1,28 @@
+name: Aufgabe (T-xxx)
+description: Abgegrenzte Aufgabe für einen Agenten
+title: "T-xxx: "
+labels: ["backlog"]
+body:
+  - type: textarea
+    id: problem
+    attributes: {label: Problem und gewünschtes Ergebnis}
+    validations: {required: true}
+  - type: textarea
+    id: acceptance
+    attributes: {label: Überprüfbare Abnahmekriterien}
+    validations: {required: true}
+  - type: textarea
+    id: components
+    attributes: {label: Betroffene Komponenten/Dateien}
+  - type: textarea
+    id: dependencies
+    attributes: {label: Abhängigkeiten}
+  - type: textarea
+    id: tests
+    attributes: {label: Geplante Tests}
+  - type: input
+    id: model
+    attributes: {label: Empfohlenes Modell/Denkstufe, placeholder: "medium | high (Grund)"}
+  - type: input
+    id: owner
+    attributes: {label: Zuständiger Agent/Sitzung, Branch, PR}
