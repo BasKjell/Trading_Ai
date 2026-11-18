@@ -155,6 +155,20 @@ session_calendar = "nyse"       # early closes; days after the covered range are
 [holdout]
 start = "2025-11-01T00:00:00+00:00"
 
+# Binding operating rules (spec §18.7, T-019, docs/OPERATING_RULES.md). Fixed vocabulary, validated at start.
+[operating_rules]
+trading_hours = "regular_session_only"
+before_close = "no_new_entries_in_last_bar"
+overnight_positions = "allowed"
+weekend_positions = "allowed"
+trading_halt = "no_orders_while_halted"
+dividends = "entitlement_at_ex_date_cash_at_payment"
+splits = "block_symbol_until_reviewed"
+delisting = "block_new_entries_and_alert"
+foreign_positions = "never_liquidate"          # fixed: never liquidate positions the bot did not open
+manual_orders = "never_touch_and_reconcile_as_foreign"
+dedicated_account_required_for_live = true     # fixed
+
 [intraday]
 signal_interval_minutes = 15
 data_file = "data/DAX3015.csv"

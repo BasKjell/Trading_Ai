@@ -47,6 +47,25 @@ und Benchmark.
 
 **Einschränkungen:** USD wird bis T-011 1:1 als Kontowährung behandelt; kein Feiertagskalender.
 
+## 2026-11-18 – T-008 Zeitfenster der Walk-forward-Prüfung (PR #30)
+
+Die Forschungsrollen verwenden die im Protokoll festgelegten Sitzungsgrenzen, Purge, Embargo und das separate Einstiegsverbot am Ende des Bewertungsfensters. Pro Rolle und ETF stehen zeitlich verfügbare Viertelstunden und vollständige lokale Uhrstunden für den Warm-up bereit. Synthetische Tests prüfen auch verzögerte Daten, Frühschlüsse und die Frist bis zur tatsächlichen Glattstellung.
+
+## 2026-11-18 – T-019 Verbindliche Betriebsregeln
+
+**Anlass/Ziel:** Spec §18.7: Handelszeiten, Verhalten vor Handelsschluss, Übernacht/Wochenende,
+Unterbrechungen, Splits/Dividenden/Delistings, manuelle Orders und fremde Positionen ausdrücklich festlegen.
+
+**Änderungen**
+- `docs/OPERATING_RULES.md` mit Status je Regel (implementiert im Backtest / in den Daten / geplant).
+- `[operating_rules]` in `config/default.toml`, geprüft von `localtrader/operating_rules.py` beim Laden
+  der Konfiguration; „fremde Positionen nie liquidieren“ und „eigenes Konto für Live“ sind fest.
+
+**Tests:** `tests/test_operating_rules.py`: gültige Standardregeln, Abschwächungen/Tippfehler/fehlende/
+unbekannte/inkonsistente Werte werden abgelehnt; Verhaltenstests in der Engine für Handelszeiten,
+letzte Bar vor Schluss, Übernacht/Wochenende und Datenlücke; nicht durchgesetzte Alternativen werden beim
+Start abgelehnt (Test über `load_config`).
+
 ## 2026-11-18 – T-008 Bausteine: Protokollprüfung, Versuchsjournal, Modellregistry (PR #23)
 
 **Anlass/Ziel:** Aus dem Auftrag in PR #22 die klar abgegrenzten Bausteine umsetzen (Benutzerauftrag,
