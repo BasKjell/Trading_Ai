@@ -1,0 +1,13 @@
+{
+  "schema": "T008-economics/1",
+  "currency": "EUR",
+  "historical_fetch_eur": 0,
+  "annual_data_eur": 1200,
+  "annual_operations_eur": 120,
+  "annual_strategy_increment_eur": 0,
+  "funding": "usd_shortfall_only_reuse_proceeds",
+  "day_count": "actual_calendar_days_actual_year",
+  "data_basis": "Budget assumption of EUR 100/month for a deployable timely consolidated SIP feed. Historical download on Basic is free. USD 99/month provider listing is a reference, not a historical invoice or a subscription order.",
+  "data_sources": ["https://docs.alpaca.markets/us/docs/about-market-data-api", "https://docs.alpaca.markets/us/docs/market-data-faq"],
+  "operations_basis": "Model allowance of EUR 10/month for a small shared local service, power and storage. Charge the same amount to each simulated standalone portfolio, including the cash benchmark and intervening cash periods."
+}
