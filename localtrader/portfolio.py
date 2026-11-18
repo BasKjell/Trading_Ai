@@ -11,6 +11,8 @@ class Portfolio:
             raise ValueError("initial_cash must be positive")
         self.initial_cash = initial_cash
         self.cash = initial_cash
+        # Dividend entitlements from the ex-date until payment: part of equity, never spendable cash.
+        self.income_receivable = 0.0
         self.positions: dict[str, Position] = {}
         self.peak_equity = initial_cash
         self.realized_costs = 0.0
@@ -22,7 +24,7 @@ class Portfolio:
         )
 
     def equity(self, prices: dict[str, float]) -> float:
-        return self.cash + self.market_value(prices)
+        return self.cash + self.income_receivable + self.market_value(prices)
 
     def exposure(self, prices: dict[str, float], market: Market | None = None) -> float:
         return sum(
@@ -85,6 +87,20 @@ class Portfolio:
             raise ValueError("charge must be non-negative")
         self.cash -= amount
         self.realized_costs += amount
+
+    def accrue_income(self, amount: float) -> None:
+        """Entitlement to investment income (e.g. a dividend at its ex-date, net of withholding). It counts
+        towards equity but is not cash until :meth:`settle_income` on the payment date."""
+        if amount < 0:
+            raise ValueError("income must be non-negative")
+        self.income_receivable += amount
+
+    def settle_income(self, amount: float) -> None:
+        """Payment of a previously accrued entitlement: receivable becomes cash."""
+        if amount < 0 or amount > self.income_receivable + 1e-9:
+            raise ValueError("settlement exceeds the accrued receivable")
+        self.income_receivable = max(0.0, self.income_receivable - amount)
+        self.cash += amount
 
     def deposit(self, amount: float) -> None:
         """External cash flow in. The high-water mark moves by the same amount, so flows are not P&L."""

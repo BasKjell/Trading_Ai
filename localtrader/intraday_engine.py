@@ -34,10 +34,11 @@ import math
 import random
 from bisect import insort
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from statistics import fmean, pstdev
 from zoneinfo import ZoneInfo
 
+from .calendars import NYSE_COVERED_UNTIL, NYSE_EARLY_CLOSE, NYSE_EARLY_CLOSES
 from .config import AppConfig
 from .domain import Bar, Direction, Fill, Market, OrderIntent, Signal
 from .execution import CostProfile, FillModel
@@ -57,6 +58,8 @@ class InstrumentSpec:
     costs: CostProfile
     qty_step: float = 0.0001
     financing_rate_annual: float = 0.0
+    # Share of cash dividends withheld at source (e.g. 15 % US treaty rate with W-8BEN; assumption).
+    dividend_withholding: float = 0.0
 
 
 @dataclass(slots=True)
@@ -96,6 +99,8 @@ class EngineResult:
     initial_cash: float
     timezone: str
     warnings: list[str] = field(default_factory=list)
+    dividend_income: float = 0.0  # entitlements at ex-date, net of withholding
+    dividend_receivable_end: float = 0.0  # entitled but not yet paid at the end of data
 
 
 def instruments_from_config(config: AppConfig) -> dict[str, InstrumentSpec]:
@@ -110,14 +115,26 @@ def instruments_from_config(config: AppConfig) -> dict[str, InstrumentSpec]:
             market=Market(raw["market"]),
             venue=str(raw["venue"]),
             currency=str(raw["currency"]),
-            session=SessionSpec(str(raw["session_timezone"]), _time(start_h, start_m), _time(end_h, end_m)),
+            session=_session(raw, _time(start_h, start_m), _time(end_h, end_m)),
             costs=CostProfile(
                 float(raw["fee_bps"]), float(raw["spread_bps"]), float(raw["slippage_bps"]), float(raw["min_fee"])
             ),
             qty_step=float(raw["qty_step"]),
             financing_rate_annual=float(raw.get("financing_rate_annual", 0.0)),
+            dividend_withholding=float(raw.get("dividend_withholding", 0.0)),
         )
     return output
+
+
+def _session(raw: dict[str, object], start: time, end: time) -> SessionSpec:
+    calendar = raw.get("session_calendar")
+    if calendar is None:
+        return SessionSpec(str(raw["session_timezone"]), start, end)
+    if calendar != "nyse":
+        raise ValueError(f"unknown session_calendar {calendar!r}")
+    return SessionSpec(
+        str(raw["session_timezone"]), start, end, NYSE_EARLY_CLOSES, NYSE_EARLY_CLOSE, NYSE_COVERED_UNTIL
+    )
 
 
 def _client_id(*parts: object) -> str:
@@ -192,6 +209,8 @@ class IntradayEngine:
         decisions: list[dict[str, object]] = []
         equity_points: list[EquityPoint] = []
         financing = 0.0
+        dividend_income = 0.0
+        receivables: list[tuple[date, str, float]] = []  # (pay date, symbol, net amount)
         day_start_equity = cfg.initial_cash
         current_day = None
         strategy_by_name = {s.name: s for s in self.strategies}
@@ -334,6 +353,35 @@ class IntradayEngine:
                     cost = position.quantity * bar.open * spec.financing_rate_annual / 360 * nights
                     portfolio.charge(cost)
                     financing += cost
+                # dividend paid today: the entitlement becomes cash (also after the position was closed)
+                for entitlement in [e for e in receivables if e[1] == symbol and e[0] <= bar_day]:
+                    receivables.remove(entitlement)
+                    portfolio.settle_income(entitlement[2])
+                    decisions.append(
+                        {
+                            "time": bar.start.isoformat(),
+                            "symbol": symbol,
+                            "event": "dividend_paid",
+                            "amount": entitlement[2],
+                        }
+                    )
+                # entitlement for a position held into the ex-date (before any fill at this open)
+                dividend = datasets[symbol].dividends.get(bar_day)
+                if dividend and position and previous_day is not None and bar_day != previous_day:
+                    pay_date, amount = dividend
+                    income = position.quantity * amount * (1 - spec.dividend_withholding)
+                    portfolio.accrue_income(income)
+                    receivables.append((pay_date, symbol, income))
+                    dividend_income += income
+                    decisions.append(
+                        {
+                            "time": bar.start.isoformat(),
+                            "symbol": symbol,
+                            "event": "dividend_entitlement",
+                            "amount": income,
+                            "pay_date": pay_date.isoformat(),
+                        }
+                    )
                 last_local_date[symbol] = bar_day
 
                 # 1) pending orders execute at this bar's open
@@ -433,6 +481,8 @@ class IntradayEngine:
             fills=fills,
             decisions=decisions,
             financing_costs=financing,
+            dividend_income=dividend_income,
+            dividend_receivable_end=portfolio.income_receivable,
             manifests=[d.manifest for d in datasets.values()],
             parameters={s.name: s.parameters() for s in self.strategies},
             settings={
@@ -636,6 +686,8 @@ def compute_metrics(result: EngineResult) -> dict[str, object]:
         "fees": fees,
         "spread_and_slippage": spread_slippage,
         "financing": result.financing_costs,
+        "dividends_entitled": result.dividend_income,
+        "dividends_unpaid_at_end": result.dividend_receivable_end,
         "total_costs": fees + spread_slippage + result.financing_costs,
         "cost_share_of_initial": (fees + spread_slippage + result.financing_costs) / initial,
         "average_exposure": fmean(exposure) if exposure else 0.0,
@@ -664,5 +716,13 @@ def buy_and_hold(
         if rate:
             nights = (last.end - first.start).days
             financing = quantity * fmean([first.open, last.close]) * rate / 360 * nights
-        final += quantity * last.close * (1 - cost / 2) - financing
+        dividends = sum(
+            amount
+            for day, (_, amount) in data.dividends.items()
+            if instruments[symbol].session.local_date(first.start)
+            < day
+            <= instruments[symbol].session.local_date(last.start)
+        )
+        income = quantity * dividends * (1 - instruments[symbol].dividend_withholding)
+        final += quantity * last.close * (1 - cost / 2) - financing + income
     return {"buy_and_hold_total_return": final / config.initial_cash - 1, "cash_total_return": 0.0}

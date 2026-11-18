@@ -196,10 +196,12 @@ class ReviewRegressionTests(unittest.TestCase):
             bars.write_text("\n".join(rows) + "\n", encoding="utf-8")
             config = REPO / "config" / "default.toml"
             moved = Path(tmp) / "moved.toml"  # an alternative configuration trying to move the boundary later
-            moved.write_text(
-                config.read_text(encoding="utf-8") + '\n[holdout]\nstart = "2026-06-01T00:00:00+00:00"\n',
-                encoding="utf-8",
-            )
+            original = config.read_text(encoding="utf-8")
+            shifted = original.replace('start = "2025-11-01T00:00:00+00:00"', 'start = "2026-06-01T00:00:00+00:00"')
+            if "[holdout]" not in original:
+                shifted += '\n[holdout]\nstart = "2026-06-01T00:00:00+00:00"\n'
+            self.assertIn("2026-06-01", shifted)
+            moved.write_text(shifted, encoding="utf-8")
 
             def args(before: str | None, config_path: Path = config) -> argparse.Namespace:
                 return argparse.Namespace(

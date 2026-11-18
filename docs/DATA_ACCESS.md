@@ -13,6 +13,8 @@ Für belastbare Forschung werden später folgende Zugänge empfohlen. Zugangsdat
 - Sicherheitslimit 180 API-Anfragen pro Minute, Pagination, Retry mit Provider-Cooldown und persistente Wiederaufnahme.
 - Der aktuelle Katalog ist bewusst allowlisted; beliebige vom LLM erfundene Symbole oder URLs werden abgelehnt.
 
+- 15-Minuten-ETF-Historie für die Intraday-Engine: `fetch-intraday` (T-018, ADR 0005, `docs/DATA_FORMAT.md`).
+
 ## Noch sinnvoll für belastbare Forschung
 
 1. **Point-in-time US-Aktien- und ETF-Daten**
