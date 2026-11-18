@@ -450,6 +450,18 @@ def alpaca_check(args: argparse.Namespace) -> int:
     return 0 if account_ok and data_available else 2
 
 
+def alpaca_preflight(args: argparse.Namespace) -> int:
+    from .broker_preflight import preflight_from_env
+
+    try:
+        report = preflight_from_env(args.env_file).run()
+    except AlpacaCheckError as error:
+        print(json.dumps({"status": "failed_safe", "error": str(error), "orders_sent": False}, indent=2))
+        return 2
+    print(json.dumps(report, indent=2))
+    return 2 if report["blockers"] else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Offline research and paper-trading platform")
     parser.add_argument("--config", default="config/default.toml")
@@ -554,6 +566,11 @@ def build_parser() -> argparse.ArgumentParser:
     alpaca = sub.add_parser("alpaca-check", help="verify paper authentication and read-only market-data entitlements")
     alpaca.add_argument("--env-file", default=".env")
     alpaca.set_defaults(func=alpaca_check)
+    preflight = sub.add_parser(
+        "alpaca-preflight", help="read-only paper preflight: account, assets, open orders, positions, data freshness"
+    )
+    preflight.add_argument("--env-file", default=".env")
+    preflight.set_defaults(func=alpaca_preflight)
     request = sub.add_parser("data-request", help="enqueue an allowlisted historical Alpaca download")
     request.add_argument("--endpoint-type", choices=["stocks", "crypto"], required=True)
     request.add_argument("--symbols", required=True, help="comma-separated approved symbols")
