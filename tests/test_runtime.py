@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_config(ROOT / "config" / "default.toml")
 INSTRUMENTS = instruments_from_config(CONFIG)
 TRADE_FROM = datetime(2026, 11, 3, 14, 30, tzinfo=UTC)  # day 1 (Nov 2) is warm-up history only
-SEEN_AFTER = timedelta(minutes=1)  # the runtime ticks one minute after each bar end
+SEEN_AFTER = timedelta(minutes=16)  # delayed SIP (ADR 0006): a bar is complete 15 minutes after its end
 
 
 @dataclass(frozen=True)
@@ -201,10 +201,10 @@ class RuntimeTests(unittest.TestCase):
 
     def test_stale_data_books_no_new_orders_and_late_bars_decide_only_from_arrival(self) -> None:
         runtime = self.runtime()
-        cut = datetime(2026, 11, 3, 15, 1, tzinfo=UTC)  # entry signal on fresh data at 10:00 New York
+        cut = datetime(2026, 11, 3, 15, 16, tzinfo=UTC)  # 10:00 New York bar arrives (delayed SIP): entry signal
         self.run_ticks(runtime, cut)
         before = runtime.booked_fills()
-        write_feed(self.feed, [r for r in self.rows if r[0] + BAR <= cut])  # the feed stops delivering
+        write_feed(self.feed, [r for r in self.rows if r[0] + BAR + SEEN_AFTER <= cut])  # the feed stops
         self.clock.now = cut + timedelta(minutes=45)
         status = runtime.tick()
         self.assertEqual(status["status"], "stale")
@@ -215,12 +215,31 @@ class RuntimeTests(unittest.TestCase):
         self.clock.now = resumed
         self.assertEqual(runtime.tick()["status"], "ok")
         times = [datetime.fromisoformat(f["time"]) for f in runtime.booked_fills()]
-        # The order decided on fresh data executes at the next eligible open (15:15 UTC). Late bars become
+        # The order decided on fresh data executes at the next eligible open (15:30 UTC). Late bars become
         # information only at their arrival: no decision dated inside the outage, no fill before arrival.
-        self.assertIn(datetime(2026, 11, 3, 15, 15, tzinfo=UTC), times)
-        self.assertEqual([t for t in times if datetime(2026, 11, 3, 15, 15, tzinfo=UTC) < t < resumed], [])
+        self.assertIn(datetime(2026, 11, 3, 15, 30, tzinfo=UTC), times)
+        self.assertEqual([t for t in times if datetime(2026, 11, 3, 15, 30, tzinfo=UTC) < t < resumed], [])
         outage = [s for s in runtime.signals() if cut < datetime.fromisoformat(s["time"]) < resumed]
         self.assertEqual(outage, [])
+
+    def test_bars_inside_the_feed_delay_are_not_read(self) -> None:
+        runtime = self.runtime()
+        end_of_first = self.rows[0][0] + BAR
+        self.clock.now = end_of_first + timedelta(minutes=10)  # the provider may still revise this bar
+        self.assertEqual(runtime.ingest(self.clock.now)["new"], 0)
+        self.clock.now = end_of_first + timedelta(minutes=15)
+        self.assertEqual(runtime.ingest(self.clock.now)["new"], 1)
+        with self.assertRaises(ValueError):
+            PaperRuntime(
+                CONFIG,
+                INSTRUMENTS,
+                [EveryHour()],
+                self.dir / "y",
+                Mode.PAPER,
+                {"SPY": self.feed},
+                TRADE_FROM,
+                max_bar_age=timedelta(minutes=10),
+            )
 
     def test_market_closed_is_not_stale(self) -> None:
         runtime = self.runtime()

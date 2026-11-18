@@ -220,7 +220,8 @@ class PaperRuntime:
         feeds: dict[str, Path],
         trade_from: datetime,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-        max_bar_age: timedelta = timedelta(minutes=20),
+        max_bar_age: timedelta = timedelta(minutes=35),
+        feed_delay: timedelta = timedelta(minutes=15),
         sink: OrderSink | None = None,
     ) -> None:
         if mode == Mode.LIVE:
@@ -238,7 +239,12 @@ class PaperRuntime:
         self.feeds = {symbol: Path(path) for symbol, path in feeds.items()}
         self.trade_from = trade_from
         self.clock = clock
+        # ADR 0006: delayed SIP. A bar is complete at the provider only ``feed_delay`` after its end (a newer row
+        # may still be running), and a normal newest bar is then 15-30 minutes old.
+        if feed_delay < timedelta(0) or max_bar_age <= feed_delay:
+            raise ValueError("max_bar_age must exceed the feed delay")
         self.max_bar_age = max_bar_age
+        self.feed_delay = feed_delay
         self.sink: OrderSink = sink or (SimulatedPaperBroker() if mode == Mode.PAPER else ShadowLog())
         if self.sink.mode != mode:
             raise ValueError("order sink does not match the runtime mode")
@@ -359,7 +365,7 @@ class PaperRuntime:
             if rejected:
                 raise RuntimeHalted(f"{symbol}: invalid feed rows {rejected}")
             for bar in data.bars:
-                if bar.end > now:
+                if bar.end > now - self.feed_delay:
                     counts["incomplete"] += 1
                     continue
                 payload = _bar_payload(bar)
@@ -382,8 +388,8 @@ class PaperRuntime:
         stale = []
         for symbol in self.feeds:
             session = self.instruments[symbol].session
-            if not session.contains(now - BAR):
-                continue  # market closed or opening bar still running: no bar is expected
+            if not session.contains(now - self.max_bar_age):
+                continue  # market closed or first bar not yet due: no bar is expected
             row = self.db.execute("SELECT max(start) FROM bars WHERE symbol=?", (symbol,)).fetchone()
             newest_end = datetime.fromisoformat(row[0]) + BAR if row and row[0] else None
             if newest_end is None or now - newest_end > self.max_bar_age:
