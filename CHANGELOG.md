@@ -2,6 +2,17 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – Kostentabelle SPY/QQQ mit gemessenen Spreads (Vorbedingung T-008)
+
+**Änderungen**
+- `config/cost_schedule.json` und `localtrader/cost_schedule.py`: Kosten je Instrument, Währung, Seite und
+  Zeitraum, getrennt nach Quelle/Messwert/Annahme, mit Validierung und Digest.
+- CLI `measure-spreads`: Stichprobe der SIP-Quotes an Bar-Eröffnungen, nur Forschungszeitraum.
+- `docs/costs/COST_SCHEDULE.md`: Belege, Messergebnisse, Vergleich mit der Konfiguration (unterschätzt
+  um ca. 6 % / 19 %). Engine unverändert.
+
+**Tests:** `tests/test_cost_schedule.py`.
+
 ## 2026-11-17 – Korrekturen nach unabhängigem Review (PR #17)
 
 **Anlass/Ziel:** Drei von Codex reproduzierte Fehler beheben (Review am Commit `1cd6e14`).
