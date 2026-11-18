@@ -160,6 +160,26 @@ class DividendTests(unittest.TestCase):
         self.assertEqual(list(derived), [US_REGULAR_SESSION.local_date(starts[1])])
         self.assertAlmostEqual(derived[US_REGULAR_SESSION.local_date(starts[1])], 0.17, delta=0.002)
 
+    def test_small_dividend_is_checked_against_the_rounding_precision(self) -> None:
+        # T-021 regression (EEM 2021-12-30): 0.026007 official vs 0.0241 derived at ~48 USD is within cent precision
+        from localtrader.intraday_fetch import crosscheck_dividends, derive_dividends_with_precision
+
+        ex = date(2021, 12, 30)
+        official = {ex: (date(2022, 1, 5), 0.026007)}
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.0241})[0])
+        self.assertEqual(crosscheck_dividends(official, {ex: 0.0241}, None, {ex: 0.011}), [])
+        # outside the precision it still aborts
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.05}, None, {ex: 0.011})[0])
+        starts = _days(3)
+        raw = [bar("EEM", s, 48.0) for s in starts]
+        ex_day = US_REGULAR_SESSION.local_date(starts[2])
+        adjusted = FakeDownloader(raw, lambda day: 0.95 if day < ex_day else 1.0).download(replace_request("all"))[0]
+        amounts, precision = derive_dividends_with_precision(raw, adjusted)
+        self.assertEqual(list(amounts), [ex_day])
+        self.assertAlmostEqual(
+            precision[ex_day], 48.0 * (0.005 / (48.0 * 0.95) + 0.005 / 48.0), places=9
+        )  # larger band: day before
+
     def test_adjustment_changing_within_a_day_is_rejected(self) -> None:
         raw = [bar("SPY", OPEN, 100.0), bar("SPY", OPEN + timedelta(minutes=15), 100.0)]
         adjusted = [raw[0], replace(raw[1], close=99.0)]
