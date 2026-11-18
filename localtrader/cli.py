@@ -140,6 +140,13 @@ def run_fetch_fx(args: argparse.Namespace) -> int:
     return 0
 
 
+def experiments(args: argparse.Namespace) -> int:
+    from .experiment_registry import summary
+
+    print(json.dumps(summary(args.directory), indent=2, ensure_ascii=False))
+    return 0
+
+
 def run_paper(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     session = PaperSession(config, args.state, args.audit)
@@ -369,6 +376,9 @@ def build_parser() -> argparse.ArgumentParser:
     fx.add_argument("--end", default=None, help="default: today")
     fx.add_argument("--output", default="data/EURUSD_ecb.csv")
     fx.set_defaults(func=run_fetch_fx)
+    register = sub.add_parser("experiments", help="show the shared experiment register and total variants tested")
+    register.add_argument("--directory", default="experiments")
+    register.set_defaults(func=experiments)
     paper = sub.add_parser("paper-demo")
     paper.add_argument("--state", default="state/paper_state.json")
     paper.add_argument("--audit", default="state/audit.jsonl")

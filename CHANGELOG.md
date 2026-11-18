@@ -22,6 +22,41 @@ Umrechnung, Dateirundlauf mit Manifest, Holdout-Schnitt, manipulierte Verfügbar
 **Nicht enthalten (T-011, High):** Decimal-Buchhaltung, Umrechnung von Fills, Bewertung, Dividenden und
 Kosten, getrennter Währungseffekt, Export.
 
+## 2026-11-17 – T-009 Zusammenarbeit mehrerer Agenten (PR #18)
+
+**Anlass/Ziel:** Projekt mit Claude und Codex abwechselnd fortsetzbar machen (Spec §19, §20).
+
+**Änderungen**
+- `AGENTS.md` (einziges Regelwerk, inkl. Modellwahl/Denkstufe/Eskalation/Review), `CLAUDE.md` verweist darauf.
+- `docs/PROJECT_SPEC.md` mit den vollständigen Anforderungen inkl. §18–20; alte Codex-Spezifikation
+  nach `docs/archive/` (nicht mehr verbindlich); `docs/PLAN.md` durch `docs/STATUS.md` ersetzt;
+  `docs/ARCHITECTURE.md` mit Komponenten, Schnittstellen und Statuskennzeichnung.
+- Vorlagen: Handoff, Research, PR, Issue; `docs/agents/MODEL_EVALUATION.md`; ADR 0004.
+- Experimentregister `localtrader/experiment_registry.py`, CLI `experiments`, Eintrag EXP-0001 (18 Varianten).
+- `scripts/start_task.sh` (Branch + Worktree je Aufgabe), `scripts/check_links.py` in `make check` und CI.
+- GitHub: Zustandslabels und Issues T-005 bis T-019.
+- Benutzerentscheidung: Jede Sitzung beginnt mit dem Review fremder PRs; Merge nach `main` durch einen
+  Integrationsagenten einer anderen Agentenart nach unabhängigem Review und grüner CI erlaubt
+  (AGENTS.md §0/§2a, Spec §21). Spec-Einleitung um „gemeinsam mit anderen Entwicklern" ergänzt.
+
+- Nach Codex-Review (PR #18, `9991e9c`): Experiment-IDs aufgabenbezogen (`EXP-T009-001`), weil ein
+  globaler Zähler in getrennten Worktrees doppelte IDs vergab. AGENTS.md §0: eigene PRs auf Befunde
+  prüfen und diese vorrangig beheben; REST-Fallback ohne `gh`; Unabhängigkeit nach tatsächlicher
+  Bearbeitung; Freigabe an Head-SHA und Zielbranch gebunden; Merge mit erwartetem Head; Integrationsstand
+  (CHANGELOG/STATUS) vor der Freigabe im PR, keine Direktänderungen an `main`.
+
+- Benutzerentscheidung 2026-11-18: Grüne CI auf genau dem geprüften Head-SHA gilt als Nachweis für
+  `make check` (AGENTS.md §0, §2a); lokaler Lauf nur noch zusätzlich, da Reviewer-Umgebungen ohne
+  Netzwerk die gepinnten Werkzeuge nicht installieren können.
+
+**Tests:** `tests/test_experiment_registry.py` (Unveränderlichkeit, Zählung über Agenten, Validierung,
+umbenannte Dateien, versioniertes Register, zwei getrennte Register ohne Kollision und ohne Verlust beim Zusammenführen), `tests/test_tooling_scripts.py` (Linkprüfung, Worktree-Skript).
+
+**Ausgeführte Prüfungen:** `make check` bestanden (106 Tests + 11 Subtests, Secret-Scan, Linkprüfung).
+
+**Einschränkungen:** EXP-0001 wurde nachträglich registriert. Frühere Versuche des Tages-Research-Labs
+(lokale SQLite auf dem Mac) sind nicht im Register enthalten.
+
 ## 2026-11-17 – Korrekturen nach unabhängigem Review (PR #17)
 
 **Anlass/Ziel:** Drei von Codex reproduzierte Fehler beheben (Review am Commit `1cd6e14`).
@@ -139,7 +174,7 @@ Rücknahme: Revert dieses Commits stellt die alten Limits wieder her (nicht empf
   GitHub-Actions-Workflow mit JUnit- und Coverage-Artefakten.
 - Lint-/Typfehler behoben, u. a. ein Fehler, bei dem Stop-/Exit-Signale positional `None` als
   Strategieversion statt als Stop-Preis übergaben.
-- Plan (`docs/PLAN.md`) und ADR 0001.
+- Plan (`docs/PLAN.md`, inzwischen durch `docs/STATUS.md` ersetzt) und ADR 0001.
 
 **Tests:** neu `tests/test_secret_scan.py` (verbotene Dateien, Schlüsselmuster, saubere Dateien, Regressionstest:
 noch nicht hinzugefügte Dateien werden ebenfalls gescannt).
@@ -147,4 +182,4 @@ noch nicht hinzugefügte Dateien werden ebenfalls gescannt).
 **Ausgeführte Prüfungen:** `make check` lokal (Python 3.13): Format, Lint, mypy, 46 Tests,
 Secret-Scan, Konfiguration – bestanden.
 
-**Einschränkungen:** Coverage läuft nur in CI (lokal nicht installiert). Fachliche Lücken siehe `docs/PLAN.md`.
+**Einschränkungen:** Coverage läuft nur in CI (lokal nicht installiert). Fachliche Lücken siehe `docs/STATUS.md`.
