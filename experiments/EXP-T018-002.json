@@ -1,0 +1,923 @@
+{
+  "agent": "Claude Code",
+  "code_version": "T-018 review fixes on 1dfb421 (see PR #21)",
+  "cost_assumptions": {
+    "QQQ": {
+      "dividend_withholding": 0.15,
+      "fee_bps": 0.1,
+      "financing_rate_annual": 0.0,
+      "min_fee": 0.0,
+      "qty_step": 0.001,
+      "slippage_bps": 1.0,
+      "spread_bps": 0.5
+    },
+    "SPY": {
+      "dividend_withholding": 0.15,
+      "fee_bps": 0.1,
+      "financing_rate_annual": 0.0,
+      "min_fee": 0.0,
+      "qty_step": 0.001,
+      "slippage_bps": 1.0,
+      "spread_bps": 0.5
+    }
+  },
+  "created_at": "2026-11-18T00:00:00+00:00",
+  "data_versions": [
+    "alpaca_sip_raw:SPY:a898c0b6d9c6c2c5",
+    "alpaca_sip_raw:QQQ:4174f1bae75afb7b",
+    "dividends:SPY:9bfbf8832f1d4256",
+    "dividends:QQQ:f13cb711ee8d67bd"
+  ],
+  "decision": "mean_reversion rejected; intraday_trend candidate for walk-forward (T-008), not accepted",
+  "experiment_id": "EXP-T018-002",
+  "holdout_used": false,
+  "model": "claude-opus-5-5 (configured; serving model may differ)",
+  "rationale": "Rerun of EXP-T018-001 on corrected data (raw tradable prices, dividends booked net of 15% withholding, NYSE early closes, holdout withheld at import by availability). Same parameters, scenarios and criteria. Trend positive in all phases/stress cases; QQQ interval excludes zero, SPY not. Mean reversion negative throughout. Alpaca lacks two SPY dividends (2016-03, 2018-06).",
+  "references": [
+    "docs/research/EXP-T018-002.md",
+    "docs/research/EXP-T018-001.md",
+    "docs/reports/2026-11-17_etf_baseline.md",
+    "docs/decisions/0005-us-etfs-alpaca-data-and-holdout.md"
+  ],
+  "seeds": [
+    20261106
+  ],
+  "splits": {
+    "holdout": "from 2025-11-01, withheld at import",
+    "research_period": "2016-01-04/2025-10-31",
+    "type": "full_research_period_plus_three_chronological_phases",
+    "walk_forward": false
+  },
+  "synthetic_data": false,
+  "task_id": "T-018",
+  "uncertainty": {
+    "block_days": 5,
+    "geometric_monthly_return_90ci_block_bootstrap": {
+      "QQQ/intraday_trend": [
+        0.0003303029680008507,
+        0.00170601832601891
+      ],
+      "QQQ/mean_reversion": [
+        -0.0011102051909460675,
+        -0.0003281928462210981
+      ],
+      "SPY/intraday_trend": [
+        -4.593428591403992e-05,
+        0.0010762224709257584
+      ],
+      "SPY/mean_reversion": [
+        -0.001112468456751614,
+        -0.0002967694515161323
+      ]
+    },
+    "samples": 1000
+  },
+  "variants": [
+    {
+      "name": "SPY/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0005188424085209586,
+        "max_drawdown": 0.016324343657346807,
+        "total_costs": 529.8863706408531,
+        "total_return": 0.06298822820913563,
+        "trades": 972
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/costs_2x",
+      "parameters": {
+        "scenario": "costs_2x",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 7.795348903205657e-05,
+        "max_drawdown": 0.0247491629079577,
+        "total_costs": 1031.527112892057,
+        "total_return": 0.009221855250284294,
+        "trades": 972
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/spread_3x",
+      "parameters": {
+        "scenario": "spread_3x",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.00035546690978538464,
+        "max_drawdown": 0.01778798523037506,
+        "total_costs": 718.8924224257852,
+        "total_return": 0.042741207610405674,
+        "trades": 972
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/delay_1_bar",
+      "parameters": {
+        "scenario": "delay_1_bar",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0004202505239454535,
+        "max_drawdown": 0.016473843974657787,
+        "total_costs": 509.02823492046707,
+        "total_return": 0.050723638265530946,
+        "trades": 936
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/params_minus_20pct",
+      "parameters": {
+        "scenario": "params_minus_20pct",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.00023962637888641503,
+        "max_drawdown": 0.02592723884584347,
+        "total_costs": 636.2430866098069,
+        "total_return": 0.02861730531065909,
+        "trades": 1188
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/params_plus_20pct",
+      "parameters": {
+        "scenario": "params_plus_20pct",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.00055250899722048,
+        "max_drawdown": 0.02512371607312891,
+        "total_costs": 457.96545067255784,
+        "total_return": 0.06720869556539366,
+        "trades": 844
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/phase_1_2016-01-04_2019-04-12",
+      "parameters": {
+        "scenario": "phase_1_2016-01-04_2019-04-12",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.00040347370755777767,
+        "max_drawdown": 0.015411434027318927,
+        "total_costs": 168.23612684158746,
+        "total_return": 0.015973794466556335,
+        "trades": 312
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/phase_2_2019-04-12_2022-07-21",
+      "parameters": {
+        "scenario": "phase_2_2019-04-12_2022-07-21",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0002468212122568314,
+        "max_drawdown": 0.012700907582360976,
+        "total_costs": 179.63475771453605,
+        "total_return": 0.009742503343976638,
+        "trades": 339
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/phase_3_2022-07-21_2025-10-31",
+      "parameters": {
+        "scenario": "phase_3_2022-07-21_2025-10-31",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0007826729925688447,
+        "max_drawdown": 0.012703082471397509,
+        "total_costs": 170.19189916622292,
+        "total_return": 0.031213063772304706,
+        "trades": 314
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0007019777984540454,
+        "max_drawdown": 0.08013871250358595,
+        "total_costs": 434.3916588551209,
+        "total_return": -0.07936835251158114,
+        "trades": 856
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/costs_2x",
+      "parameters": {
+        "scenario": "costs_2x",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0007086281448674958,
+        "max_drawdown": 0.08083453998972645,
+        "total_costs": 644.1796384859236,
+        "total_return": -0.08008957828424046,
+        "trades": 649
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/spread_3x",
+      "parameters": {
+        "scenario": "spread_3x",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0007008327383400959,
+        "max_drawdown": 0.08000538733046447,
+        "total_costs": 530.8772217161323,
+        "total_return": -0.07924411491705308,
+        "trades": 770
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/delay_1_bar",
+      "parameters": {
+        "scenario": "delay_1_bar",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0007021519981346147,
+        "max_drawdown": 0.08025715572053638,
+        "total_costs": 372.1659926460101,
+        "total_return": -0.07938725150302384,
+        "trades": 746
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/params_minus_20pct",
+      "parameters": {
+        "scenario": "params_minus_20pct",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0007009215909329347,
+        "max_drawdown": 0.08025963398317992,
+        "total_costs": 586.3670261873748,
+        "total_return": -0.07925375590745587,
+        "trades": 1124
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/params_plus_20pct",
+      "parameters": {
+        "scenario": "params_plus_20pct",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0003278239125897864,
+        "max_drawdown": 0.059318089370788085,
+        "total_costs": 457.4412022896044,
+        "total_return": -0.03787557580986756,
+        "trades": 899
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/phase_1_2016-01-04_2019-04-12",
+      "parameters": {
+        "scenario": "phase_1_2016-01-04_2019-04-12",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0009448223616892459,
+        "max_drawdown": 0.0420686430060484,
+        "total_costs": 251.4841328634242,
+        "total_return": -0.03645449883812657,
+        "trades": 473
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/phase_2_2019-04-12_2022-07-21",
+      "parameters": {
+        "scenario": "phase_2_2019-04-12_2022-07-21",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0012908166188723147,
+        "max_drawdown": 0.06327978672205992,
+        "total_costs": 227.92468006818387,
+        "total_return": -0.04947746632395722,
+        "trades": 461
+      }
+    },
+    {
+      "name": "SPY/mean_reversion/phase_3_2022-07-21_2025-10-31",
+      "parameters": {
+        "scenario": "phase_3_2022-07-21_2025-10-31",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -7.460097936184962e-05,
+        "max_drawdown": 0.03749153153826068,
+        "total_costs": 215.53469586165343,
+        "total_return": -0.0029265713012355254,
+        "trades": 402
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0009850095462342612,
+        "max_drawdown": 0.019481502907221393,
+        "total_costs": 522.3923769171536,
+        "total_return": 0.12292794302336119,
+        "trades": 946
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/costs_2x",
+      "parameters": {
+        "scenario": "costs_2x",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0005613996365188001,
+        "max_drawdown": 0.022840837900757638,
+        "total_costs": 1016.5493193523357,
+        "total_return": 0.06832600275825329,
+        "trades": 946
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/spread_3x",
+      "parameters": {
+        "scenario": "spread_3x",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0008277596211234695,
+        "max_drawdown": 0.02026547582999516,
+        "total_costs": 708.6214405592045,
+        "total_return": 0.10234334497199016,
+        "trades": 946
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/delay_1_bar",
+      "parameters": {
+        "scenario": "delay_1_bar",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.001018001298790594,
+        "max_drawdown": 0.02265074682893553,
+        "total_costs": 504.83294029739267,
+        "total_return": 0.1272948148920523,
+        "trades": 914
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/params_minus_20pct",
+      "parameters": {
+        "scenario": "params_minus_20pct",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0006851138214456487,
+        "max_drawdown": 0.027898046764115225,
+        "total_costs": 638.312653986084,
+        "total_return": 0.08399434217889667,
+        "trades": 1156
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/params_plus_20pct",
+      "parameters": {
+        "scenario": "params_plus_20pct",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0012125542092609187,
+        "max_drawdown": 0.01999618712044715,
+        "total_costs": 444.16408886205085,
+        "total_return": 0.15339087559056597,
+        "trades": 802
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/phase_1_2016-01-04_2019-04-12",
+      "parameters": {
+        "scenario": "phase_1_2016-01-04_2019-04-12",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.00047549395536017336,
+        "max_drawdown": 0.011903042238572414,
+        "total_costs": 178.06280081285573,
+        "total_return": 0.01885116115892793,
+        "trades": 331
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/phase_2_2019-04-12_2022-07-21",
+      "parameters": {
+        "scenario": "phase_2_2019-04-12_2022-07-21",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0012192094285632393,
+        "max_drawdown": 0.01948242202525252,
+        "total_costs": 159.880844939081,
+        "total_return": 0.04903252895795096,
+        "trades": 302
+      }
+    },
+    {
+      "name": "QQQ/intraday_trend/phase_3_2022-07-21_2025-10-31",
+      "parameters": {
+        "scenario": "phase_3_2022-07-21_2025-10-31",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "enabled": true,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        }
+      },
+      "rejected": false,
+      "results": {
+        "geometric_monthly_return": 0.0010665116039574318,
+        "max_drawdown": 0.015022204981140042,
+        "total_costs": 164.48503875035948,
+        "total_return": 0.042765525854680186,
+        "trades": 305
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0006994311701273848,
+        "max_drawdown": 0.08032724568083027,
+        "total_costs": 329.22667431278296,
+        "total_return": -0.0790920238873456,
+        "trades": 690
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/costs_2x",
+      "parameters": {
+        "scenario": "costs_2x",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0006984497504518572,
+        "max_drawdown": 0.08019607379139737,
+        "total_costs": 544.2298808145686,
+        "total_return": -0.07898551040517832,
+        "trades": 559
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/spread_3x",
+      "parameters": {
+        "scenario": "spread_3x",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0007023555232722467,
+        "max_drawdown": 0.08063494644902258,
+        "total_costs": 414.4393705935203,
+        "total_return": -0.07940933153750318,
+        "trades": 623
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/delay_1_bar",
+      "parameters": {
+        "scenario": "delay_1_bar",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.000700484568634252,
+        "max_drawdown": 0.08070298352643679,
+        "total_costs": 354.9004131637524,
+        "total_return": -0.07920633564251434,
+        "trades": 741
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/params_minus_20pct",
+      "parameters": {
+        "scenario": "params_minus_20pct",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0007058500526443412,
+        "max_drawdown": 0.08016892293629829,
+        "total_costs": 531.0748874997961,
+        "total_return": -0.07978836413346524,
+        "trades": 1054
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/params_plus_20pct",
+      "parameters": {
+        "scenario": "params_plus_20pct",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.0006400990218825564,
+        "max_drawdown": 0.0802629676912483,
+        "total_costs": 319.30916822059913,
+        "total_return": -0.07263070424966678,
+        "trades": 716
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/phase_1_2016-01-04_2019-04-12",
+      "parameters": {
+        "scenario": "phase_1_2016-01-04_2019-04-12",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.001296300528697114,
+        "max_drawdown": 0.061154787590369075,
+        "total_costs": 239.63191110232717,
+        "total_return": -0.049682489370588834,
+        "trades": 472
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/phase_2_2019-04-12_2022-07-21",
+      "parameters": {
+        "scenario": "phase_2_2019-04-12_2022-07-21",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.002046660842834336,
+        "max_drawdown": 0.0804065306891365,
+        "total_costs": 207.83189691379437,
+        "total_return": -0.07733303350606147,
+        "trades": 446
+      }
+    },
+    {
+      "name": "QQQ/mean_reversion/phase_3_2022-07-21_2025-10-31",
+      "parameters": {
+        "scenario": "phase_3_2022-07-21_2025-10-31",
+        "strategy_parameters": {
+          "atr_bars": 14,
+          "enabled": true,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        }
+      },
+      "rejected": true,
+      "results": {
+        "geometric_monthly_return": -0.00015596882510182652,
+        "max_drawdown": 0.03445485949661131,
+        "total_costs": 225.6879195780962,
+        "total_return": -0.00610908776209218,
+        "trades": 428
+      }
+    }
+  ]
+}

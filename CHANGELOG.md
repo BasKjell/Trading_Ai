@@ -20,6 +20,54 @@ verfallene Freigaben nach reinen main-Merges).
 
 **Tests:** reine Regeländerung; `make check` (inkl. Linkprüfung).
 
+## 2026-11-17 – T-018 Mehrjährige 15-Minuten-Daten (SPY, QQQ) und fester Holdout (PR #21)
+
+**Anlass/Ziel:** Benutzerentscheidung: Instrument muss nicht der DAX sein; geeignetes Instrument mit gut
+verfügbaren Daten wählen und mehr Daten ergänzen (ADR 0005).
+
+**Änderungen**
+- `localtrader/intraday_fetch.py` und CLI `fetch-intraday`: 15-Minuten-Bars über den vorhandenen
+  Alpaca-Downloader (SIP, bereinigt), nur reguläre Handelszeit, CSV + Manifest unter `data/`.
+- `config/default.toml`: Instrumente SPY und QQQ (Kostenannahmen, Bruchstücke, keine Finanzierung) mit
+  eigener Datendatei; `[holdout] start = 2025-11-01`, vor der ersten Auswertung festgelegt.
+- `intraday-backtest`/`intraday-stress`: `--symbol`, Holdout wird automatisch ausgeschlossen,
+  `--use-holdout` nur für die zentrale Auswertung; Holdout-Angaben im Report.
+- `split_holdout()` in `localtrader/intraday_data.py`.
+- Basisreport `docs/reports/2026-11-17_etf_baseline.md`, Experiment EXP-T018-001, ADR 0005,
+  `docs/DATA_FORMAT.md`, `docs/DATA_ACCESS.md`.
+
+- Nach Codex-Review (`9c47014`): handelbare Rohkurse für Engine und Benchmark, bereinigte Kurse getrennt
+  nur für Analyse; Dividenden abgeleitet und gebucht (15 % Quellensteuer), Splits brechen ab;
+  NYSE-Halbtagskalender (`localtrader/calendars.py`); Holdout beim Import nach Verfügbarkeit
+  (`available_until`), keine Holdout-Preise mehr in Manifest/Report; `split_holdout` entfernt;
+  `Portfolio.receive_income()`; Dividendenlücken im Manifest. Ergebnisse als EXP-T018-002 neu
+  berechnet (EXP-T018-001 beruhte auf bereinigten Kursen und enthielt Halbtags-Nachbörse).
+
+- Nach Review 5: Anbieteranfrage endet eine Bar vor der Grenze (Alpaca-`end` ist inklusiv); Antwortzeilen
+  außerhalb des Anfragefensters werden vor dem Schreiben von Roh-/Normalisierungsdateien, Hash und Manifest
+  verworfen. Lokale Rohdaten geprüft: keine Bar ab dem Holdout-Start.
+- Nach Review 4: Holdout-Grenze fest im Code (`localtrader/holdout.py`), Konfiguration muss übereinstimmen,
+  Grenzen nur früher; `--use-holdout` entfernt (kein Forschungspfad zum Holdout).
+- Nach Review 3 (`e41c8f7`): Zahltag-Schätzung nur aus Forschungsaktionen, Dividendenzeilen vor dem Parsen
+  nach Ex-Datum gefiltert (Grenze konsistent zur Session), Fehlermeldungen ohne Zeileninhalt;
+  Neuregistrierung EXP-T018-004 (bitgenau gleich EXP-T018-003).
+- Benutzerentscheidung 2026-11-18: `fetch-intraday` lädt Kurse und Corporate Actions nur bis vor den
+  Holdout-Start; Forschungsdateien enthalten physisch keine Holdout-Daten.
+- Nach Review 2 (`535493e`): Dividenden aus dem Corporate-Actions-Endpunkt mit Zahltag, Gegenprobe
+  gegen die abgeleiteten Beträge; Forderung am Ex-Tag, Cash am Zahltag (`Portfolio.accrue_income`,
+  `settle_income`), offene Forderungen am Ende ausgewiesen; Dividenden validiert und an die Datenversion
+  gebunden; Herkunftshash bei Holdout-Schnitt nur über die Forschungszeilen. Beim Neuladen behoben:
+  Wiederholung bei Verbindungsabbruch, fehlende Zahltage vor 2020 (gekennzeichnete Annahme), doppelt
+  gelistete QQQ-Dividende. Neuberechnung EXP-T018-003 (Ergebnisse praktisch unverändert).
+
+**Tests:** `tests/test_intraday_fetch.py`: Handelszeit inkl. Sommerzeit, Halbtag und Kalenderende;
+Dividendenableitung, Split- und Inkonsistenzabbruch, Lückenmeldung; getrennte Roh-/Analyse-/Dividenden-
+dateien; Holdout ohne Preisabfluss ins Manifest, Grenze innerhalb einer Bar, verzögerte Verfügbarkeit,
+naive Grenze; Holdout und Dividenden im CLI inkl. fehlender Dividendendatei; Dividendenbuchung in Engine
+und Benchmark.
+
+**Einschränkungen:** USD wird bis T-011 1:1 als Kontowährung behandelt; kein Feiertagskalender.
+
 ## 2026-11-18 – T-008 Zeitfenster der Walk-forward-Prüfung (PR #30)
 
 Die Forschungsrollen verwenden die im Protokoll festgelegten Sitzungsgrenzen, Purge, Embargo und das separate Einstiegsverbot am Ende des Bewertungsfensters. Pro Rolle und ETF stehen zeitlich verfügbare Viertelstunden und vollständige lokale Uhrstunden für den Warm-up bereit. Synthetische Tests prüfen auch verzögerte Daten, Frühschlüsse und die Frist bis zur tatsächlichen Glattstellung.

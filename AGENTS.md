@@ -46,8 +46,8 @@ verbrauchter Holdout, echte Orders), und weniger Runden für alles andere.
 - **Gleicher Befund nach zwei Runden nicht geschlossen:** Benutzer informieren; ggf. stärkeres Modell (§3).
 - **Übergang:** Diese Regeln gelten ab dem Merge-Commit des PRs, der sie einführt (#32), für alle PRs,
   die danach geöffnet oder neu freigegeben werden. #32 selbst wird nach der vorher geltenden Regel
-  integriert (unabhängiges Review vor dem Merge, Integrationsstand im PR). Die zu diesem Zeitpunkt offenen
-  PRs #20, #21, #28, #29 und #31 sind Klasse K; ihre offenen Befunde, Abhängigkeiten sowie Head- und
+  integriert (unabhängiges Review vor dem Merge, Integrationsstand im PR). Die beim Erstellen dieser Regel
+  offenen PRs #20, #21, #28, #29 und #31 sind Klasse K; ihre offenen Befunde, Abhängigkeiten sowie Head- und
   Zielbindung bleiben bestehen, und sie dürfen ihre vorhandenen `CHANGELOG.md`-/`docs/STATUS.md`-Einträge
   behalten. Die fachliche Freigabe von #31 gilt nur gegen den Branch von #21; nach dem Umstellen auf
   `main` braucht #31 eine neue zielgebundene Freigabe am neuen Head und grüne CI.
