@@ -205,25 +205,7 @@ def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> Impor
                 )
             )
     candidates.sort(key=lambda bar: bar.start)
-    after_gap: set[datetime] = set()
-    for previous, current in zip(candidates, candidates[1:], strict=False):
-        if current.close <= 0:
-            continue
-        jump = abs(current.open / previous.close - 1)
-        if jump > spec.jump_threshold:
-            report.jumps.append(f"{current.start.isoformat()} open/prev_close {jump:.2%}")
-        gap = current.start - previous.end
-        if gap <= timedelta(0):
-            continue
-        same_session = session is None or (
-            session.local_date(previous.start) == session.local_date(current.start)
-            and session.contains(previous.start)
-            and session.contains(current.start)
-        )
-        if same_session:
-            report.intraday_gaps += 1
-            report.missing_bars_in_gaps += int(gap / step)
-            after_gap.add(current.start)
+    after_gap = scan_gaps(candidates, session, step, spec.jump_threshold, report)
     report.bars_accepted = len(candidates)
     if candidates:
         report.first_bar = candidates[0].start.isoformat()
@@ -246,6 +228,38 @@ def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> Impor
         quality=asdict(report),
     )
     return ImportedDataset(candidates, manifest, frozenset(after_gap))
+
+
+def scan_gaps(
+    bars: list[Bar],
+    session: SessionSpec | None,
+    step: timedelta,
+    jump_threshold: float,
+    report: QualityReport | None = None,
+) -> set[datetime]:
+    """Start times of bars that follow an unexpected gap inside one session (shared by CSV import and the
+    paper runtime, T-006). ``bars`` must be sorted by start; jumps and gap counts go into ``report``."""
+    after_gap: set[datetime] = set()
+    for previous, current in zip(bars, bars[1:], strict=False):
+        if current.close <= 0:
+            continue
+        jump = abs(current.open / previous.close - 1)
+        if report is not None and jump > jump_threshold:
+            report.jumps.append(f"{current.start.isoformat()} open/prev_close {jump:.2%}")
+        gap = current.start - previous.end
+        if gap <= timedelta(0):
+            continue
+        same_session = session is None or (
+            session.local_date(previous.start) == session.local_date(current.start)
+            and session.contains(previous.start)
+            and session.contains(current.start)
+        )
+        if same_session:
+            if report is not None:
+                report.intraday_gaps += 1
+                report.missing_bars_in_gaps += int(gap / step)
+            after_gap.add(current.start)
+    return after_gap
 
 
 def resample(bars: Iterable[Bar], minutes: int, timezone: str = "UTC") -> list[Bar]:

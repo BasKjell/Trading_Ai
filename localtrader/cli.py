@@ -270,6 +270,82 @@ def run_paper(args: argparse.Namespace) -> int:
     return 0
 
 
+def _feeds(values: list[str]) -> dict[str, Path]:
+    feeds = {}
+    for item in values:
+        symbol, _, path = item.partition("=")
+        if not symbol or not path:
+            raise SystemExit(f"--feed expects SYMBOL=PATH, got {item!r}")
+        feeds[symbol.strip()] = Path(path.strip())
+    if not feeds:
+        raise SystemExit("at least one --feed SYMBOL=PATH is required")
+    return feeds
+
+
+def run_runtime(args: argparse.Namespace) -> int:
+    """T-006: one entry point for all modes. Live is locked; paper/shadow replay the shared engine."""
+    import time as _time
+
+    from .alpaca_check import load_local_env
+    from .runtime import LiveGate, LiveLocked, Mode, PaperRuntime, code_sha
+
+    config = load_config(args.config)
+    mode = Mode(args.mode)
+    if mode == Mode.LIVE:
+        env = load_local_env(args.env_file) if Path(args.env_file).exists() else {}
+        try:
+            LiveGate(config, env, Path(args.release) if args.release else None, code_sha()).check()
+        except LiveLocked as error:
+            print(json.dumps({"mode": "live", "locked": True, "reasons": error.reasons}, indent=2))
+            return 2
+        return 2  # unreachable: the gate always raises in this build
+    instruments = instruments_from_config(config)
+    strategies = strategies_from_config(config, _strategy_names(args.strategies))
+    feeds = _feeds(args.feed)
+    if mode == Mode.BACKTEST:
+        datasets = {}
+        for symbol, path in feeds.items():
+            spec = instruments[symbol]
+            datasets[symbol] = import_csv(
+                CsvImportSpec(
+                    str(path), symbol, spec.market, spec.venue, "file", "UTC", available_until=research_limit()
+                ),
+                spec.session,
+            )
+        result = IntradayEngine(config, instruments, strategies).run(datasets)
+        print(json.dumps({"mode": "backtest", "metrics": compute_metrics(result)}, indent=2, default=str))
+        return 0
+    if not args.trade_from:
+        raise SystemExit("--trade-from is required for paper and shadow")
+    runtime = PaperRuntime(
+        config,
+        instruments,
+        strategies,
+        args.state_dir or f"state/runtime-{mode.value}",
+        mode,
+        feeds,
+        datetime.fromisoformat(args.trade_from),
+    )
+    try:
+        if args.halt:
+            runtime.halt(args.halt)
+            print(json.dumps({"halted": args.halt}))
+            return 0
+        if args.resume:
+            runtime.resume(args.resume)
+            print(json.dumps({"resumed_by": args.resume}))
+            return 0
+        while True:
+            print(json.dumps(runtime.tick(), default=str), flush=True)
+            if args.once:
+                return 0
+            _time.sleep(args.interval_seconds)
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        runtime.close()
+
+
 def kill_switch(args: argparse.Namespace) -> int:
     session = PaperSession(load_config(args.config), args.state, args.audit)
     session.set_kill_switch(args.action == "on")
@@ -511,6 +587,19 @@ def build_parser() -> argparse.ArgumentParser:
     paper.add_argument("--state", default="state/paper_state.json")
     paper.add_argument("--audit", default="state/audit.jsonl")
     paper.set_defaults(func=run_paper)
+    runtime = sub.add_parser("run", help="15-minute runtime: backtest | paper | shadow | live (live is locked)")
+    runtime.add_argument("--mode", required=True, choices=["backtest", "paper", "shadow", "live"])
+    runtime.add_argument("--feed", action="append", default=[], help="SYMBOL=PATH of a completed-bar CSV feed")
+    runtime.add_argument("--strategies", default="intraday_trend")
+    runtime.add_argument("--state-dir", default=None, help="default state/runtime-<mode>")
+    runtime.add_argument("--trade-from", default=None, help="aware ISO time; earlier bars are warm-up only")
+    runtime.add_argument("--once", action="store_true", help="one tick, then exit")
+    runtime.add_argument("--interval-seconds", type=float, default=60.0)
+    runtime.add_argument("--halt", default=None, help="latch a halt with this reason")
+    runtime.add_argument("--resume", default=None, help="operator name; clears a halt")
+    runtime.add_argument("--release", default=None, help="live release file (live stays locked in this build)")
+    runtime.add_argument("--env-file", default=".env")
+    runtime.set_defaults(func=run_runtime)
     kill = sub.add_parser("kill-switch")
     kill.add_argument("action", choices=["on", "off"])
     kill.add_argument("--state", default="state/paper_state.json")
