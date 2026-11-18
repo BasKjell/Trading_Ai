@@ -132,10 +132,33 @@ class ReviewRegressionTests(unittest.TestCase):
         from localtrader.cost_schedule import missing_components
 
         schedule = copy.deepcopy(load_schedule(SCHEDULE))
-        self.assertEqual(missing_components(schedule, "SPY", date(2027, 1, 1)), ["regulatory_taf"])
+        self.assertEqual(missing_components(schedule, "SPY", date(2027, 1, 1)), ["regulatory_taf/sell"])
         schedule["coverage"]["to"] = "2027-06-01"  # vouching for 2027 although TAF ends 2026-12-31
-        with self.assertRaisesRegex(ScheduleError, "regulatory_taf missing on 2027-01-01"):
+        with self.assertRaisesRegex(ScheduleError, "regulatory_taf/sell missing on 2027-01-01"):
             validate(schedule)
+
+    def test_coverage_is_checked_per_trade_side(self) -> None:
+        # Regression (PR #28 review 3): setting commission from "both" to "sell" left every purchase
+        # without a commission entry, yet validate accepted the table and no gap was reported.
+        from localtrader.cost_schedule import missing_components
+
+        schedule = copy.deepcopy(load_schedule(SCHEDULE))
+        self.assertEqual(missing_components(schedule, "SPY", date(2025, 10, 31)), [])
+        commission = next(entry for entry in schedule["entries"] if entry["component"] == "commission")
+        commission["side"] = "sell"
+        self.assertEqual(missing_components(schedule, "SPY", date(2025, 10, 31)), ["commission/buy"])
+        self.assertFalse(any(e["component"] == "commission" and e["side"] in ("buy", "both")
+                             for e in entries_for(schedule, "SPY", date(2025, 10, 31))))  # fmt: skip
+        with self.assertRaisesRegex(ScheduleError, "SPY: commission/buy missing on 2016-01-01"):
+            validate(schedule)
+        # an explicit buy entry (a documented zero is valid) closes the gap
+        schedule["entries"].append({**commission, "id": "commission-buy", "side": "buy", "value": 0})
+        validate(schedule)
+        # spread and slippage need both sides as well; SEC/TAF only the sale
+        spread = next(entry for entry in schedule["entries"] if entry["id"] == "spread-qqq")
+        spread["side"] = "buy"
+        self.assertEqual(missing_components(schedule, "QQQ", date(2020, 1, 2)), ["spread/sell"])
+        self.assertEqual(missing_components(schedule, "SPY", date(2020, 1, 2)), [])
 
     def test_session_open_is_classified_in_new_york_time(self) -> None:
         moments = [

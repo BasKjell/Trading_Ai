@@ -3,7 +3,7 @@
 Maschinenlesbar: [`config/cost_schedule.json`](../../config/cost_schedule.json), geprüft von
 `localtrader/cost_schedule.py`: keine Überlappungen, endliche nichtnegative Werte, jede Zeile mit Beleg und
 jede Pflichtkomponente an **jedem** Tag des erklärten Geltungsbereichs (`coverage` 2016-01-01 bis
-2026-12-31); `missing_components()` zeigt Lücken für ein konkretes Datum (z. B. FINRA TAF ab 2027). Der Digest der Datei wird bei T-008 im Freeze-Beleg gebunden. **Die Engine rechnet noch mit
+2026-12-31); Pflichtdeckung gilt je Komponente **und Handelsseite** (Provision, CAT, Spread, Slippage für Kauf und Verkauf; SEC-Gebühr und FINRA TAF nur für Verkäufe; `both` deckt beide, eine belegte Null ist ein gültiger Eintrag). `missing_components()` zeigt Lücken als `Komponente/Seite` für ein konkretes Datum (z. B. `regulatory_taf/sell` ab 2027). Der Digest der Datei wird bei T-008 im Freeze-Beleg gebunden. **Die Engine rechnet noch mit
 den Werten aus `config/default.toml`;** die Anbindung der Tabelle gehört zu T-008/T-011.
 
 Jede Zeile ist genau einer Art zugeordnet:

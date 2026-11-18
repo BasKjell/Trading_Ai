@@ -34,7 +34,17 @@ KINDS = ("source", "measurement", "assumption")
 NEW_YORK = ZoneInfo("America/New_York")
 UNITS = ("bps_of_notional", "usd_per_share", "usd_per_trade_max", "bps_half_spread", "bps_per_conversion")
 SIDES = ("buy", "sell", "both", "conversion")
-REQUIRED_COMPONENTS = ("commission", "regulatory_sec", "regulatory_taf", "regulatory_cat", "spread", "slippage")
+# Mandatory coverage per component and trade side: every pair needs a valid entry on every covered day
+# (a documented zero is a valid entry). ``both`` covers buy and sell. SEC fee and FINRA TAF apply to sales only.
+REQUIRED_COVERAGE: dict[str, tuple[str, ...]] = {
+    "commission": ("buy", "sell"),
+    "regulatory_sec": ("sell",),
+    "regulatory_taf": ("sell",),
+    "regulatory_cat": ("buy", "sell"),
+    "spread": ("buy", "sell"),
+    "slippage": ("buy", "sell"),
+}
+REQUIRED_COMPONENTS = tuple(REQUIRED_COVERAGE)
 
 
 class ScheduleError(ValueError):
@@ -117,22 +127,29 @@ def validate(schedule: dict[str, Any]) -> None:
         for instrument in schedule.get("instruments", []):
             for day in sorted(boundaries):
                 for component in missing_components(schedule, instrument, day):
-                    problems.append(f"{instrument}: component {component} missing on {day}")
+                    problems.append(f"{instrument}: {component} missing on {day}")
     if problems:
         raise ScheduleError("; ".join(problems))
 
 
 def missing_components(schedule: dict[str, Any], instrument: str, day: date) -> list[str]:
-    """Required components without a valid entry on ``day`` (a run must not use a day with gaps)."""
-    present = set()
+    """Required ``component/side`` pairs without a valid entry on ``day`` (a run must not use a day with gaps)."""
+    present: set[tuple[str, str]] = set()
     for entry in schedule.get("entries", []):
         try:
             start, end = _period(entry)
         except (KeyError, ValueError, ScheduleError):
             continue
         if entry.get("instrument") in (instrument, "*") and start <= day < end:
-            present.add(entry.get("component"))
-    return [component for component in REQUIRED_COMPONENTS if component not in present]
+            side = str(entry.get("side"))
+            for covered in ("buy", "sell") if side == "both" else (side,):
+                present.add((str(entry.get("component")), covered))
+    return [
+        f"{component}/{side}"
+        for component, sides in REQUIRED_COVERAGE.items()
+        for side in sides
+        if (component, side) not in present
+    ]
 
 
 def entries_for(schedule: dict[str, Any], instrument: str, day: date) -> list[dict[str, Any]]:

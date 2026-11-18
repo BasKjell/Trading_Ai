@@ -8,6 +8,8 @@ Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 - `config/cost_schedule.json` und `localtrader/cost_schedule.py`: Kosten je Instrument, Währung, Seite und
   Zeitraum, getrennt nach Quelle/Messwert/Annahme, mit Validierung und Digest.
 - CLI `measure-spreads`: Stichprobe der SIP-Quotes an Bar-Eröffnungen, nur Forschungszeitraum.
+- Nach Review 3: Pflichtdeckung je Komponente und Handelsseite (`both` deckt Kauf und Verkauf; SEC/TAF
+  nur Verkauf). Die versionierte Tabelle ist vollständig; Werte unverändert.
 - Nach Review 2: Holdout-Grenze fest im Code (`localtrader/holdout.py`, Konfiguration muss übereinstimmen),
   Anfragefenster endet strikt vor der Grenze. Messwerte unverändert (kein Stichprobenzeitpunkt betroffen).
 - Nach Review (`1404b5e`): Obergrenze fest `[holdout] start` (inkl. ganzem Anfragefenster), Eröffnungsstatistik
