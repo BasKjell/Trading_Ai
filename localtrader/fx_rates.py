@@ -142,19 +142,19 @@ def read_fx_file(path: str | Path, available_until: datetime | None = None) -> F
         raise ValueError("available_until must be timezone-aware")
     rates: list[FxRate] = []
     with Path(path).open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
+        for line, row in enumerate(csv.DictReader(handle), start=2):
             # the window is decided from the date alone, before any value is parsed, so a defect in a
             # withheld (holdout) row can neither abort nor influence the research import
             try:
                 day = date.fromisoformat(row["date"])
             except (KeyError, TypeError, ValueError) as error:
-                raise FxDataError(f"unreadable date in {row}") from error
+                raise FxDataError(f"unreadable date in line {line}") from None  # never echo row values
             if available_until is not None and available_at(day) > available_until:
                 continue
             try:
                 rate = FxRate(day, float(row["usd_per_eur"]), datetime.fromisoformat(row["available_at"]))
             except (KeyError, TypeError, ValueError) as error:
-                raise FxDataError(f"{day}: unreadable rate") from error
+                raise FxDataError(f"{day}: unreadable rate (line {line})") from None
             if rate.available_at != available_at(day):
                 raise FxDataError(f"{day}: availability differs from the publication rule")
             rates.append(rate)

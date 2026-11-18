@@ -132,6 +132,14 @@ class FileTests(unittest.TestCase):
             with self.assertRaises(FxDataError):
                 read_fx_file(path)
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            # Regression (PR #25 review 2): an unreadable date must not echo the row (it may hold a holdout rate)
+            path.write_text("\n".join([*lines, "not-a-date,1.2345,x"]) + "\n", encoding="utf-8")
+            with self.assertRaises(FxDataError) as caught:
+                read_fx_file(path, datetime(2025, 11, 1, tzinfo=UTC))
+            self.assertNotIn("1.2345", str(caught.exception))
+            self.assertIsNone(caught.exception.__cause__)
+            self.assertIn("line 8", str(caught.exception))
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
             text = path.read_text(encoding="utf-8").replace("2025-10-31T15:00:00+00:00", "2025-10-31T09:00:00+00:00")
             path.write_text(text, encoding="utf-8")
             with self.assertRaises(FxDataError):  # earlier availability than published: look-ahead
