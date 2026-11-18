@@ -59,10 +59,8 @@ Risikodefinitionen (High-Water-Mark, Drawdown, Freigabe): Docstring von `risk.py
 Seed, Datenversion (SHA-256 über akzeptierte Bars), Konfigurations-Digest und Parameter stehen in
 jedem Report (`summary.json`) und jedem Registereintrag.
 
-## Lokaler Coding-Runner (T-020, nicht integriert)
+## Lokaler Coding-Runner (T-020)
 
-`scripts/coding_runner.py` ist ein separater Entwicklungsprozess (Python-Standardbibliothek, macOS/Linux).
-Er liest GitHub über die angemeldete `gh`-CLI und startet begrenzte Codex-/Claude-CLI-Prozesse in
-Git-Worktrees. Atomarer lokaler Zustand und flock liegen unter ignoriertem `.coding-runner/`;
-serverseitige Claim-Kommentare koordinieren konkurrierende Runner. Kein Zugriff auf Brokerdienste
-als Runner-Funktion. Betriebsgrenzen: [CODING_RUNNER.md](CODING_RUNNER.md).
+`scripts/coding_runner.py` verwendet die GitHub CLI für Diagnose und Jobvorschau. Die
+Worker-Ausführung ist technisch gesperrt. Vor einer Freischaltung ist ein getrennt geprüfter
+Ausführungsbereich erforderlich. Siehe [CODING_RUNNER.md](CODING_RUNNER.md).

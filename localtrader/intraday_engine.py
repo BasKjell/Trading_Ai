@@ -2,13 +2,24 @@
 
 Timing rules (look-ahead protection)
 ------------------------------------
+* Each step is causal: (0) information up to the open is decided, (1) pending orders fill at the open,
+  (2) information arriving while the bar runs is decided on the state after the open, (3) stops, marking
+  to market, drawdown and kill switch at the bar's end.
+* Information is processed in order of **availability** (``received_at``), not of ``bar.start``. A
+  strategy context at ``now`` only contains bars with ``received_at <= now``. A bar that arrives after a
+  newer bar is added to the history but triggers no decision of its own (it is stale by then).
 * A strategy sees a bar only after its ``received_at`` (its close). Signals are created at that time.
 * Orders execute at the **open of a later bar** (next bar by default, ``extra_delay_bars`` more under
-  stress), never at the close of the signal bar.
+  stress), never at the close of the signal bar. ``Signal.earliest_execution`` is binding: a bar is
+  eligible only if ``bar.start >= earliest_execution``.
+* New entries are re-checked on the execution bar: no entry on a bar that follows a data gap, outside
+  the session, or more than ``(1 + extra_delay_bars)`` bar lengths after ``earliest_execution``. Exits
+  (including de-risking and protective stops) are never blocked by these checks.
 * Position sizing uses the last *completed* bar's volume for the liquidity cap, never the execution
   bar's volume.
 * Protective stops: if a bar trades through the stop, the exit fills at ``min(open, stop)`` (gaps fill
-  worse than the stop) plus slippage. If an entry and its stop fall into the same bar, the stop is
+  worse than the stop) plus slippage. The stop is booked at the bar's **end**, when its low is known;
+  decisions on information arriving while the bar runs still see the position (no future low leaks). If an entry and its stop fall into the same bar, the stop is
   assumed hit (conservative). There are no take-profit limit orders, so stop/target ambiguity
   within a bar cannot occur; profit exits are close-based and execute at the next open.
 * Exit orders are capped by ``max_volume_participation`` of the previous bar's volume; the remainder
@@ -21,8 +32,9 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+from bisect import insort
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from statistics import fmean, pstdev
 from zoneinfo import ZoneInfo
 
@@ -165,6 +177,9 @@ class IntradayEngine:
                 (max(h.received_at, h.start + timedelta(hours=1)), h) for h in resample(data.bars, 60, session.timezone)
             ]
         history: dict[str, list[Bar]] = {symbol: [] for symbol in datasets}
+        # Bars not yet available to strategies, kept sorted by availability.
+        inbox: list[Bar] = []
+        timestamps = sorted(by_time)
         hourly_seen: dict[str, list[Bar]] = {symbol: [] for symbol in datasets}
         hourly_cursor: dict[str, int] = dict.fromkeys(datasets, 0)
         pending: dict[str, _Pending] = {}
@@ -222,8 +237,86 @@ class IntradayEngine:
                 if symbol not in portfolio.positions:
                     open_trades.pop(symbol, None)
 
-        for timestamp in sorted(by_time):
+        def process_arrivals(limit: datetime, inclusive: bool) -> None:
+            """Turn bars available up to ``limit`` into information, in arrival order, and evaluate them.
+
+            The portfolio state seen here is the simulated state at that moment: stops of a bar that is
+            still running are not applied yet, because its low is only known at the bar's end.
+            """
+            while inbox and (inbox[0].received_at <= limit if inclusive else inbox[0].received_at < limit):
+                bar = inbox.pop(0)
+                symbol = bar.symbol
+                known = history[symbol]
+                newest = not known or bar.start > known[-1].start
+                insort(known, bar, key=lambda b: b.start)
+                if newest:
+                    last_volume[symbol] = bar.volume
+                if risk.deleveraging_required:
+                    continue
+                if not newest:
+                    decisions.append(
+                        {
+                            "time": bar.received_at.isoformat(),
+                            "symbol": symbol,
+                            "event": "late_bar",
+                            "reason": "bar arrived after a newer bar; no decision on stale data",
+                        }
+                    )
+                    continue
+                spec = self.instruments[symbol]
+                data = datasets[symbol]
+                if symbol in pending or not spec.session.contains(bar.start):
+                    continue
+                series = hourly[symbol]
+                while hourly_cursor[symbol] < len(series) and series[hourly_cursor[symbol]][0] <= bar.received_at:
+                    hourly_seen[symbol].append(series[hourly_cursor[symbol]][1])
+                    hourly_cursor[symbol] += 1
+                visible = [b for b in known if b.received_at <= bar.received_at and b.start <= bar.start]
+                position = portfolio.positions.get(symbol)
+                trade = open_trades.get(symbol)
+                candidates = [strategy_by_name[position.strategy]] if position else self.strategies
+                for strategy in candidates:
+                    if position is None and bar.start in data.after_gap:
+                        decisions.append(
+                            {
+                                "time": bar.received_at.isoformat(),
+                                "symbol": symbol,
+                                "strategy": strategy.name,
+                                "event": "skipped",
+                                "reason": "bar follows a data gap",
+                            }
+                        )
+                        break
+                    ctx = StrategyContext(
+                        now=bar.received_at,
+                        bars=visible,
+                        hourly=hourly_seen[symbol],
+                        in_position=position is not None,
+                        entry_time=trade.entry_time if trade else None,
+                        entry_price=trade.entry_price if trade else None,
+                    )
+                    signal = strategy.evaluate(ctx)
+                    if signal is None:
+                        continue
+                    pending[symbol] = _Pending(signal)
+                    decisions.append(
+                        {
+                            "time": signal.signal_time.isoformat(),
+                            "symbol": symbol,
+                            "strategy": strategy.name,
+                            "event": "signal",
+                            "direction": signal.direction.value,
+                            "reason": signal.reason,
+                            "stop": signal.stop_price,
+                        }
+                    )
+                    break
+
+        for timestamp in timestamps:
             current = by_time[timestamp]
+            bar_end = min(bar.end for bar in current.values())
+            # 0) information available up to this open (incl. bars ending now) is decided before the open
+            process_arrivals(timestamp, inclusive=True)
             local_day = timestamp.astimezone(zone).date()
             if current_day is not None and local_day != current_day and equity_points:
                 day_start_equity = equity_points[-1].equity
@@ -246,9 +339,20 @@ class IntradayEngine:
                 # 1) pending orders execute at this bar's open
                 order = pending.get(symbol)
                 # A signal formed at a bar's close may execute at the open of any bar starting at/after it.
-                if order is not None and bar.start >= order.signal.signal_time:
+                if order is not None and bar.start >= order.signal.earliest_execution:
                     if order.bars_waited < self.extra_delay_bars:
                         order.bars_waited += 1
+                    elif (block := self._entry_block(order.signal, bar, spec, datasets[symbol])) is not None:
+                        pending.pop(symbol, None)
+                        decisions.append(
+                            {
+                                "time": bar.start.isoformat(),
+                                "symbol": symbol,
+                                "strategy": order.signal.strategy,
+                                "event": "entry_cancelled",
+                                "reason": block,
+                            }
+                        )
                     else:
                         self._execute(
                             order,
@@ -267,24 +371,21 @@ class IntradayEngine:
                             book_exit,
                         )
 
-                # 2) protective stop inside this bar
+            # 2) information arriving while this bar runs: decided on the state after the open, before
+            #    this bar's stops (its low is not known before the bar ends)
+            process_arrivals(bar_end, inclusive=False)
+
+            # 3) bar close: stops of this bar become known at its end; mark to market at the close
+            for symbol, bar in current.items():
                 position = portfolio.positions.get(symbol)
                 if position and position.stop_price and bar.low <= position.stop_price:
                     exit_reference = min(bar.open, position.stop_price)
-                    book_exit(symbol, position.quantity, exit_reference, bar.start, "protective stop")
+                    book_exit(symbol, position.quantity, exit_reference, bar.end, "protective stop")
                     pending.pop(symbol, None)
-
-            # 3) bar close: update state, then evaluate strategies on completed data
-            for symbol, bar in current.items():
                 prices[symbol] = bar.close
-                last_volume[symbol] = bar.volume
-                history[symbol].append(bar)
-                series = hourly[symbol]
-                while hourly_cursor[symbol] < len(series) and series[hourly_cursor[symbol]][0] <= bar.received_at:
-                    hourly_seen[symbol].append(series[hourly_cursor[symbol]][1])
-                    hourly_cursor[symbol] += 1
+                insort(inbox, bar, key=lambda b: (b.received_at, b.start, b.symbol))
 
-            snapshot = portfolio.snapshot(timestamp + timedelta(minutes=15), prices)
+            snapshot = portfolio.snapshot(bar_end, prices)
             equity_points.append(
                 EquityPoint(
                     snapshot.timestamp, snapshot.equity, snapshot.cash, snapshot.gross_exposure, snapshot.drawdown
@@ -302,60 +403,18 @@ class IntradayEngine:
                                 position.strategy,
                                 symbol,
                                 position.market,
-                                bar.received_at,
-                                bar.received_at + timedelta(microseconds=1),
+                                bar.end,
+                                bar.end,
                                 Direction.FLAT,
                                 1.0,
                                 "drawdown kill switch: controlled de-risking",
                                 stop_price=None,
                             )
                         )
-                continue
 
-            for symbol, bar in current.items():
-                spec = self.instruments[symbol]
-                data = datasets[symbol]
-                if symbol in pending or not spec.session.contains(bar.start):
-                    continue
-                position = portfolio.positions.get(symbol)
-                trade = open_trades.get(symbol)
-                candidates = [strategy_by_name[position.strategy]] if position else self.strategies
-                for strategy in candidates:
-                    if position is None and bar.start in data.after_gap:
-                        decisions.append(
-                            {
-                                "time": bar.received_at.isoformat(),
-                                "symbol": symbol,
-                                "strategy": strategy.name,
-                                "event": "skipped",
-                                "reason": "bar follows a data gap",
-                            }
-                        )
-                        break
-                    ctx = StrategyContext(
-                        now=bar.received_at,
-                        bars=history[symbol],
-                        hourly=hourly_seen[symbol],
-                        in_position=position is not None,
-                        entry_time=trade.entry_time if trade else None,
-                        entry_price=trade.entry_price if trade else None,
-                    )
-                    signal = strategy.evaluate(ctx)
-                    if signal is None:
-                        continue
-                    pending[symbol] = _Pending(signal)
-                    decisions.append(
-                        {
-                            "time": signal.signal_time.isoformat(),
-                            "symbol": symbol,
-                            "strategy": strategy.name,
-                            "event": "signal",
-                            "direction": signal.direction.value,
-                            "reason": signal.reason,
-                            "stop": signal.stop_price,
-                        }
-                    )
-                    break
+        # the last bars still become information (decisions can no longer be executed)
+        if timestamps:
+            process_arrivals(datetime.max.replace(tzinfo=UTC), inclusive=True)
 
         # terminal liquidation at the last close so every result is net of exit costs
         if equity_points:
@@ -385,6 +444,19 @@ class IntradayEngine:
             timezone=primary_tz,
             warnings=warnings,
         )
+
+    def _entry_block(self, signal: Signal, bar: Bar, spec: InstrumentSpec, data: ImportedDataset) -> str | None:
+        """Reason why an entry must not be executed on ``bar``; ``None`` if allowed. Exits are never blocked."""
+        if signal.direction == Direction.FLAT:
+            return None
+        if bar.start in data.after_gap:
+            return "execution bar follows a data gap"
+        if not spec.session.contains(bar.start):
+            return "execution bar outside session"
+        max_age = (bar.end - bar.start) * (1 + self.extra_delay_bars)
+        if bar.start - max(signal.signal_time, signal.earliest_execution) > max_age:
+            return "signal too old for entry"
+        return None
 
     def _execute(
         self,

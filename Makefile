@@ -7,7 +7,7 @@ check: format-check lint typecheck test secret-scan link-check config-check
 	@echo "make check: all checks passed"
 
 format-check:
-	ruff format --diff localtrader tests scripts
+	ruff format --check localtrader tests scripts
 
 lint:
 	ruff check localtrader tests scripts

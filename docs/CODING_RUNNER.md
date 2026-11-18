@@ -1,6 +1,6 @@
 # Lokaler Coding-Runner
 
-Status: **Planung und Offline-Tests** (T-020, Draft). Die Ausführung von Codex- oder Claude-Workern
+Status: **Planung und Offline-Tests** (T-020). Die Ausführung von Codex- oder Claude-Workern
 ist technisch gesperrt. Aufrufe von `once` und `watch` ohne `--dry-run` brechen vor Login, Claims,
 Worktree-Erstellung und Worker-Start ab. GitHub-Labels und Konfiguration ändern diese Sperre nicht.
 
