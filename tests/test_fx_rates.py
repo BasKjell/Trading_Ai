@@ -175,3 +175,36 @@ class FileTests(unittest.TestCase):
         self.assertIn("EXR/D.USD.EUR.SP00.A", seen[0])
         self.assertIn("startPeriod=2025-10-27", seen[0])
         self.assertEqual(text, SAMPLE)
+
+
+class FetchCliTests(unittest.TestCase):
+    def test_fetch_fx_cannot_move_the_holdout_later(self) -> None:
+        # Regression (PR #29 review): --available-until moved the fixed boundary later.
+        import argparse
+        from unittest import mock
+
+        from localtrader import cli
+
+        calls: list[tuple[date, date]] = []
+
+        def fake_fetch(start: date, end: date) -> str:
+            calls.append((start, end))
+            return SAMPLE
+
+        with tempfile.TemporaryDirectory() as tmp:
+
+            def args(until: str | None, end: str | None = None) -> argparse.Namespace:
+                return argparse.Namespace(
+                    config="config/default.toml", start="2025-10-01", end=end, available_until=until,
+                    output=str(Path(tmp) / "fx.csv"),
+                )  # fmt: skip
+
+            with mock.patch("localtrader.fx_rates.fetch_ecb_csv", side_effect=fake_fetch):
+                for bad in (args("2026-06-01T00:00:00+00:00"), args(None, end="2025-11-05")):
+                    with self.assertRaises(SystemExit):
+                        cli.run_fetch_fx(bad)
+                self.assertEqual(calls, [])  # nothing requested
+                cli.run_fetch_fx(args(None))
+                cli.run_fetch_fx(args("2025-10-29T00:00:00+00:00"))  # an earlier limit is fine
+        self.assertEqual(calls[0][1], date(2025, 10, 31))
+        self.assertEqual(calls[1][1], date(2025, 10, 28))

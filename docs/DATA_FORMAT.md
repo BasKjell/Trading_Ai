@@ -59,7 +59,7 @@ Das reicht für technische Prüfungen, aber **nicht** für belastbare Aussagen z
 
 | Feld | Wert |
 |---|---|
-| Abruf | `python3 -m localtrader fetch-fx` (ab 2015-12-01 bis **vor** den Holdout-Start aus `[holdout]` oder `--available-until`; ein späteres Ende wird abgelehnt) |
+| Abruf | `python3 -m localtrader fetch-fx` (ab 2015-12-01 bis **vor** den im Code festen Holdout-Start `localtrader/holdout.py`; `--available-until` und `--end` dürfen nur früher liegen, eine abweichende Konfiguration wird abgelehnt) |
 | Quelle | EZB Data Portal, Serie `EXR.D.USD.EUR.SP00.A` (USD je EUR, tägliche Referenzkurse), frei zugänglich, ohne Schlüssel |
 | Datei | `data/EURUSD_ecb.csv` (`date,usd_per_eur,available_at`) + `.manifest.json` (Quelle, Hash, Qualitätsbericht), nicht versioniert |
 | Verfügbarkeit | ab 16:00 Europe/Berlin am Kurstag (EZB legt die Kurse gegen 14:10 fest und veröffentlicht sie gegen 16:00); frühere Nutzung wäre Look-ahead |
