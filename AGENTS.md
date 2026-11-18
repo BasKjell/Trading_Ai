@@ -38,12 +38,19 @@ verbrauchter Holdout, echte Orders), und weniger Runden für alles andere.
 
 | Klasse | Umfang | Vorgehen |
 |---|---|---|
-| **K – kritisch** | Holdout und Datenverfügbarkeit, Kausalität/Engine, Orderausführung und Broker, Risikoregeln, Buchhaltung, Kosten- und Dividendenbuchung, statistische Validierung und Auswahl, Live-Sperren und Sicherheitsregeln (§5), Rechte automatischer Agenten | unabhängiges Review **vor** dem Merge, Label `needs-independent-review` (wie bisher) |
-| **U – unkritisch** | Dokumentation, Anzeige/Dashboard, Werkzeuge ohne Daten-, Order- oder Holdoutzugriff, reine Testergänzungen, Konfiguration außerhalb von Risiko/Kosten/Holdout | Merge durch einen Integrationsagenten einer anderen Agentenart nach **Klassenprüfung** (Einstufung stimmt, CI grün am Head, keine Konflikte); inhaltliches Review danach, gesammelt; Befunde als Folge-Issues |
+| **K – kritisch** | Holdout und Datenverfügbarkeit, Kausalität/Engine, Orderausführung und Broker, Risikoregeln, Buchhaltung, Kosten- und Dividendenbuchung, statistische Validierung und Auswahl, Live-Sperren und Sicherheitsregeln (§5), Rechte automatischer Agenten. **Außerdem:** mögliche Offenlegung von Zugangsdaten, geschützten Daten oder Ergebnissen (Zugriffskontrollen, Artefakt- und Reportveröffentlichung, auch lesende Dashboards mit Holdout- oder Kontodaten); dauerhafter Zustand (Migration, Restore, Retention oder Löschung von Order-, Audit-, Versuchs- und Holdoutjournalen sowie der Modellregistry); Kontrollmechanismen (CI-Pflichtprüfungen, Branch-Schutz, Deployment- und Mergebefugnisse, normative Projektregeln wie AGENTS.md und Spec) | unabhängiges Review **vor** dem Merge, Label `needs-independent-review` (wie bisher) |
+| **U – unkritisch** | Dokumentation ohne normative Regeln, Anzeige ohne Zugriff auf geschützte Daten, Werkzeuge ohne Daten-, Order- oder Holdoutzugriff, reine Testergänzungen und Sammel-PRs, die weder Schutzwirkung noch normative Regeln ändern, Konfiguration außerhalb von Risiko/Kosten/Holdout | Merge durch einen Integrationsagenten einer anderen Agentenart nach **Klassenprüfung** (Einstufung stimmt, CI grün am Head, keine Konflikte); inhaltliches Review danach, gesammelt; Befunde als Folge-Issues |
 
 - **Nur P1/P2 blockieren einen Merge.** P3-Befunde werden als Issue mit Label `follow-up` erfasst und im
   Review verlinkt; sie lösen keine weitere Review-Runde aus.
 - **Gleicher Befund nach zwei Runden nicht geschlossen:** Benutzer informieren; ggf. stärkeres Modell (§3).
+- **Übergang:** Diese Regeln gelten ab dem Merge-Commit des PRs, der sie einführt (#32), für alle PRs,
+  die danach geöffnet oder neu freigegeben werden. #32 selbst wird nach der vorher geltenden Regel
+  integriert (unabhängiges Review vor dem Merge, Integrationsstand im PR). Die zu diesem Zeitpunkt offenen
+  PRs #20, #21, #28, #29 und #31 sind Klasse K; ihre offenen Befunde, Abhängigkeiten sowie Head- und
+  Zielbindung bleiben bestehen, und sie dürfen ihre vorhandenen `CHANGELOG.md`-/`docs/STATUS.md`-Einträge
+  behalten. Die fachliche Freigabe von #31 gilt nur gegen den Branch von #21; nach dem Umstellen auf
+  `main` braucht #31 eine neue zielgebundene Freigabe am neuen Head und grüne CI.
 
 **Unabhängigkeit und Form des Reviews**
 - Herkunft und Unabhängigkeit richten sich nach der dokumentierten tatsächlichen Bearbeitung (Feld
@@ -62,9 +69,12 @@ verbrauchter Holdout, echte Orders), und weniger Runden für alles andere.
 - Eine Freigabe gilt nur für den genannten Head-SHA und Zielbranch. Nach jedem neuen **inhaltlichen**
   Commit, Rebase oder Umstellen des Zielbranches ist sie verfallen; Review der Änderungen und CI sind
   erneut nötig. **Ausnahme:** Kommt nach der Freigabe nur ein Merge von `main` hinzu, ohne Konflikt in
-  Code- oder Testdateien des PRs, genügt eine **Merge-Diff-Prüfung** (Diff des PRs gegen `main` enthält
-  außer dem bereits geprüften Inhalt nichts Neues; CI grün am neuen Head). Sie wird als kurzes Review mit
-  dem neuen Head-SHA dokumentiert.
+  Code- oder Testdateien des PRs, genügt eine **Merge-Diff-Prüfung**: (a) der Diff des PRs gegen `main`
+  enthält außer dem bereits geprüften Inhalt nichts Neues; (b) die neue Basis wird darauf geprüft, ob sie
+  Verträge, Schnittstellen, gemeinsam genutzte Grenzen (z. B. Holdout-Cutoff, Datenformate),
+  Schutzmechanismen oder Pflichtprüfungen ändert, von denen der PR abhängt – betroffene Teile werden
+  erneut inhaltlich geprüft; (c) CI grün am neuen Head. Sie wird als kurzes Review mit neuem Head-SHA und
+  demselben Zielbranch dokumentiert.
 
 ## 1. Einstieg (vor jeder Änderung)
 

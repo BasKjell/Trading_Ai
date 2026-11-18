@@ -15,7 +15,7 @@ T-xxx (Issue #nn) · Agent/Modell/Denkstufe: …
 
 ## Review
 Risikoklasse (AGENTS.md §0): **K** / **U** – Begründung: …
-- [ ] Klasse K (Holdout/Daten, Engine, Orders, Risiko, Buchhaltung/Kosten, Validierung, Live-Sperren, Agentenrechte) → unabhängiges Review vor dem Merge, Label `needs-independent-review`
+- [ ] Klasse K (Holdout/Daten, Engine, Orders, Risiko, Buchhaltung/Kosten, Validierung, Live-Sperren, Agentenrechte, Offenlegung geschützter Daten/Zugangsdaten, dauerhafter Zustand/Journale, Kontrollmechanismen wie CI/Branch-Schutz/Regeln) → unabhängiges Review vor dem Merge, Label `needs-independent-review`
 - [ ] Klasse U → Merge nach Klassenprüfung, Review danach gesammelt
 - [ ] `changelog.d/T-xxx.md` und `docs/handoffs/T-xxx.md` aktualisiert; **keine** Änderung an `CHANGELOG.md`/`docs/STATUS.md` (Sammel-PR)
 - [ ] Merge nur durch Benutzer oder Integrationsagent einer anderen Agentenart nach Review (AGENTS.md §2a)
