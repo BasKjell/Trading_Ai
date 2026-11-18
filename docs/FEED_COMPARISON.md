@@ -1,5 +1,7 @@
 # Datenfeed für den Paper-Betrieb: IEX gegen SIP (T-012)
 
+**Entscheidung 2026-11-18 (Benutzer):** Option C, SIP mit 15 Minuten Verzögerung. Siehe [ADR 0006](decisions/0006-paper-feed-delayed-sip.md).
+
 Befehl:
 
 ```bash
