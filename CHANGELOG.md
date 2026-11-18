@@ -2,6 +2,26 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – T-011 (Datenteil): EUR/USD-Referenzkurse der EZB (PR #25)
+
+**Anlass/Ziel:** Voraussetzung für Ergebnisse in EUR (T-011, T-008). Nur Daten, keine Buchhaltung.
+
+**Änderungen**
+- `localtrader/fx_rates.py`: Abruf, Prüfung und Speicherung der EZB-Referenzkurse; Verfügbarkeit ab
+  16:00 Europe/Berlin; kausale Abfrage mit maximalem Kursalter (5 Tage, fail closed); Holdout-Schnitt
+  nach Verfügbarkeit; Digest der Reihe.
+- CLI `fetch-fx`; Abschnitt in `docs/DATA_FORMAT.md`.
+
+- Nach Review (`552ae42`): Holdout-Zeilen werden vor dem Parsen übersprungen (ein Defekt im Holdout
+  bricht den Forschungsimport nicht ab); leerer `OBS_STATUS` wird verworfen.
+
+**Tests:** `tests/test_fx_rates.py`: Veröffentlichungszeit (MEZ/MESZ), Verwerfungsgründe, Konflikt-
+abbruch, Sprünge/Lücken, Nutzung erst nach Veröffentlichung, Wochenende, veralteter/fehlender Kurs,
+Umrechnung, Dateirundlauf mit Manifest, Holdout-Schnitt, manipulierte Verfügbarkeit, Abruf-URL.
+
+**Nicht enthalten (T-011, High):** Decimal-Buchhaltung, Umrechnung von Fills, Bewertung, Dividenden und
+Kosten, getrennter Währungseffekt, Export.
+
 ## 2026-11-18 – T-005 Persistenter Orderzustand und Fake-Broker-Abgleich (PR #26)
 
 Ein SQLite-Journal sichert Client-ID, Orderzustand, kumulierte Ausführungen und Abgleichalarme im Fake-Broker-Pfad. Offene Verkäufe reservieren Bestand. Nach einem Timeout oder einer Abweichung sperrt der Manager neue Orders. Der Wiederanlauf gleicht offene und abgeschlossene Orders, Cash und Bestände ab. Der Risikoprüfer kann den Abgleichstatus lesen. Tests umfassen doppelte und ungeordnete Meldungen, konkurrierende Aufrufer und einen echten Prozessabbruch mit simuliertem Broker.
