@@ -16,6 +16,7 @@ from localtrader.cost_schedule import (
     sample_bar_opens,
     validate,
 )
+from localtrader.holdout import HoldoutError
 
 REPO = Path(__file__).resolve().parent.parent
 SCHEDULE = REPO / "config" / "cost_schedule.json"
@@ -162,18 +163,24 @@ class ReviewRegressionTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             bars = Path(tmp) / "bars.csv"
-            rows = ["timestamp", "2025-10-31T19:45:00+00:00", "2025-11-03T14:30:00+00:00", "2025-10-31T23:59:59+00:00"]
+            rows = [
+                "timestamp",
+                "2025-10-31T19:45:00+00:00",
+                "2025-11-03T14:30:00+00:00",
+                "2025-10-31T23:59:59+00:00",
+                "2025-10-31T23:59:58+00:00",  # window ends exactly at the cutoff: still excluded (review 2)
+            ]
             bars.write_text("\n".join(rows) + "\n", encoding="utf-8")
-            config = Path(tmp) / "config.toml"
-            config.write_text(
-                (REPO / "config" / "default.toml").read_text(encoding="utf-8")
-                + '\n[holdout]\nstart = "2025-11-01T00:00:00+00:00"\n',
+            config = REPO / "config" / "default.toml"
+            moved = Path(tmp) / "moved.toml"  # an alternative configuration trying to move the boundary later
+            moved.write_text(
+                config.read_text(encoding="utf-8") + '\n[holdout]\nstart = "2026-06-01T00:00:00+00:00"\n',
                 encoding="utf-8",
             )
 
-            def args(before: str | None) -> argparse.Namespace:
+            def args(before: str | None, config_path: Path = config) -> argparse.Namespace:
                 return argparse.Namespace(
-                    config=str(config), bars=str(bars), samples=10, before=before, symbol="SPY",
+                    config=str(config_path), bars=str(bars), samples=10, before=before, symbol="SPY",
                     output=str(Path(tmp) / "out.json"), env="unused",
                 )  # fmt: skip
 
@@ -182,6 +189,8 @@ class ReviewRegressionTests(unittest.TestCase):
             ):
                 with self.assertRaises(SystemExit):
                     cli.run_measure_spreads(args("2025-12-01T00:00:00+00:00"))  # cannot move the limit later
+                with self.assertRaises(HoldoutError):
+                    cli.run_measure_spreads(args(None, moved))  # nor through another configuration file
                 self.assertEqual(requested, [])
                 cli.run_measure_spreads(args(None))
         self.assertEqual(len(requested), 1)  # only 2025-10-31 19:45; the 23:59:59 window would cross the cutoff

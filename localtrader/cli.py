@@ -133,13 +133,13 @@ def run_measure_spreads(args: argparse.Namespace) -> int:
 
     with Path(args.bars).open(newline="", encoding="utf-8") as handle:
         starts = [datetime.fromisoformat(row["timestamp"]) for row in csv.DictReader(handle)]
-    holdout = load_config(args.config).raw.get("holdout", {}).get("start")
-    if not holdout:
-        raise SystemExit("config has no [holdout] start: spreads are only measured before the holdout")
-    cutoff = datetime.fromisoformat(str(holdout))
-    before = datetime.fromisoformat(args.before) if args.before else cutoff
-    if before > cutoff:
-        raise SystemExit(f"--before {before.isoformat()} reaches into the holdout ({cutoff.isoformat()})")
+    from .holdout import HoldoutError, research_limit
+
+    load_config(args.config)  # rejects a configuration that tries to move the holdout boundary
+    try:
+        before = research_limit(datetime.fromisoformat(args.before) if args.before else None)
+    except HoldoutError as error:
+        raise SystemExit(f"--before not allowed: {error}") from None
     moments = sample_bar_opens(starts, args.samples, before)
     downloader = AlpacaDatasetDownloader.from_env(args.env)
     result = measure_spreads(downloader._request_page, args.symbol, moments)

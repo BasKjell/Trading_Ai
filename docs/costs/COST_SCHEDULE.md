@@ -28,8 +28,9 @@ Jede Zeile ist genau einer Art zugeordnet:
 ## Spread-Messung
 
 `python3 -m localtrader measure-spreads --symbol SPY --bars data/SPY_15m.csv` zieht mit festem Seed 400
-Bar-Eröffnungen (dort führt die Engine aus) aus dem Forschungszeitraum. Die Obergrenze ist fest der
-`[holdout] start`; `--before` darf sie nur vorverlegen, und das ganze Anfragefenster muss davor liegen –
+Bar-Eröffnungen (dort führt die Engine aus) aus dem Forschungszeitraum. Die Obergrenze ist der im Code feste
+Holdout-Start (`localtrader/holdout.py`; eine abweichende Konfiguration wird abgelehnt); `--before` darf
+sie nur vorverlegen, und das ganze Anfragefenster muss **strikt** davor enden –
 der Holdout wird nie abgefragt. Je Zeitpunkt wird je Zeitpunkt die erste gültige SIP-Quote der folgenden 2 Sekunden (gekreuzte,
 gesperrte oder leere Quotes werden übersprungen). Ergebnis je Jahr:
 

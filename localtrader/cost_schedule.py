@@ -159,9 +159,9 @@ def sample_bar_opens(
     seed: int = 20261106,
     window: timedelta = timedelta(seconds=2),
 ) -> list[datetime]:
-    """Deterministic random sample of bar opens whose whole quote window ends by ``before`` (holdout never
-    queried)."""
-    eligible = sorted(start for start in bar_starts if start + window <= before)
+    """Deterministic random sample of bar opens whose whole quote window ends strictly before ``before``
+    (the request end is never the cutoff itself, so the holdout is never queried)."""
+    eligible = sorted(start for start in bar_starts if start + window < before)
     if count >= len(eligible):
         return eligible
     return sorted(random.Random(seed).sample(eligible, count))
