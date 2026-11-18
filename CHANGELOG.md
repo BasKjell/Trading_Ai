@@ -17,6 +17,58 @@ Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
 **Tests:** `tests/test_cost_schedule.py`.
 
+## 2026-11-18 – T-008 Zeitfenster der Walk-forward-Prüfung (PR #30)
+
+Die Forschungsrollen verwenden die im Protokoll festgelegten Sitzungsgrenzen, Purge, Embargo und das separate Einstiegsverbot am Ende des Bewertungsfensters. Pro Rolle und ETF stehen zeitlich verfügbare Viertelstunden und vollständige lokale Uhrstunden für den Warm-up bereit. Synthetische Tests prüfen auch verzögerte Daten, Frühschlüsse und die Frist bis zur tatsächlichen Glattstellung.
+
+## 2026-11-18 – T-019 Verbindliche Betriebsregeln
+
+**Anlass/Ziel:** Spec §18.7: Handelszeiten, Verhalten vor Handelsschluss, Übernacht/Wochenende,
+Unterbrechungen, Splits/Dividenden/Delistings, manuelle Orders und fremde Positionen ausdrücklich festlegen.
+
+**Änderungen**
+- `docs/OPERATING_RULES.md` mit Status je Regel (implementiert im Backtest / in den Daten / geplant).
+- `[operating_rules]` in `config/default.toml`, geprüft von `localtrader/operating_rules.py` beim Laden
+  der Konfiguration; „fremde Positionen nie liquidieren“ und „eigenes Konto für Live“ sind fest.
+
+**Tests:** `tests/test_operating_rules.py`: gültige Standardregeln, Abschwächungen/Tippfehler/fehlende/
+unbekannte/inkonsistente Werte werden abgelehnt; Verhaltenstests in der Engine für Handelszeiten,
+letzte Bar vor Schluss, Übernacht/Wochenende und Datenlücke; nicht durchgesetzte Alternativen werden beim
+Start abgelehnt (Test über `load_config`).
+
+## 2026-11-18 – T-008 Bausteine: Protokollprüfung, Versuchsjournal, Modellregistry (PR #23)
+
+**Anlass/Ziel:** Aus dem Auftrag in PR #22 die klar abgegrenzten Bausteine umsetzen (Benutzerauftrag,
+Denkstufe medium). Die kritische Validierungslogik (Datums-/Verfügbarkeitssplits, Purge/Embargo,
+Holdout-Zugriff, Auswahl- und Bootstrap-Statistik) ist **nicht** enthalten und bleibt für High geplant.
+
+**Änderungen**
+- `localtrader/research_protocol.py`: Struktur- und Text/JSON-Konsistenzprüfung des T-008-Protokolls
+  (Falten, Holdout-Grenze, Kandidaten gegen die Strategiefactory, Nachbarschaften, Budgetarithmetik,
+  Zeitstopps, Bootstrap-Angaben); `assert_startable` sperrt den Start bei jeder Abweichung, solange der
+  Zustand nicht `frozen` ist oder kein Freeze-Beleg existiert; SHA-256-Belege über exakte Dateibytes
+  ohne Selbstbezug.
+- `localtrader/attempt_journal.py`: append-only Versuchsjournal mit Hash-Kette, exklusiver Reservierung
+  je Versuchs-ID, erlaubten Statusübergängen, Gründen für Fehler/Abbruch, Budgets aus dem Protokoll
+  (39/195/1) und getrennter Zählung von Forschung und zentraler Auswertung. Reservierung ist atomar nur
+  innerhalb eines Dateisystems (keine globale Sperre).
+- `localtrader/model_registry.py`: unveränderliche Modellversionen mit Pflichtfeldern, Cash-Champion
+  `CASH-EUR-v1`, Aktivierung nur in Shadow und nur nach bestandenen Gates, Rücknahme nur nach bestätigtem
+  kontrolliertem Abbau, atomarer Zeigerwechsel, Audit-Log. Paper/Live sind hier nicht aktivierbar.
+
+- Nach Review (`2c72d7f`): Freeze-Beleg wird geladen und gegen Protokoll-/Planbytes, Pflichtbindungen
+  und Laufinputs geprüft; Journal erkennt ein abgeschnittenes Ende (Head + einmalige Statusmarker) und
+  verhindert Neustarts; Registry-Zeigerwechsel als Intent/Commit-Transaktion mit `recover()`.
+
+- Nach Review 2 (`0ba43f6`): Wiederherstellung idempotent auf den letzten bestätigten Zustand.
+
+- Nach Review 3 (`4c834f5`): Budget kann auch bei gleichzeitigen Instanzen und verschiedenen IDs nicht
+  überschritten werden (Dateisperre + exklusive Budget-Slots); `central` nur mit kanonischer Slot-ID.
+
+**Tests:** `tests/test_t008_infrastructure.py` (19 Tests): echtes Protokoll konsistent und nicht startbar;
+Abweichungen in Faltendaten, Zeitstopp, Seed, Blocklänge und Kandidaten-ID sperren; Strukturfehler;
+Holdout-Abgleich; Belege; Journal-Lebenszyklus, Budget, Eindeutigkeit, Manipulation; Registry.
+
 ## 2026-11-18 – T-008 Walk-forward-Forschungsdesign (PR #22)
 
 **Anlass/Ziel:** Forschungsplan und maschinenlesbares Protokoll für US-Index-ETFs, einen Vergleich mit Cash und Exposure-Benchmark sowie einen kontrollierten finalen Test.
