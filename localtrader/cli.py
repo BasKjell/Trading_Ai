@@ -494,7 +494,11 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.set_defaults(func=run_fetch_intraday)
     fx = sub.add_parser("fetch-fx", help="download ECB EUR/USD reference rates into data/")
     fx.add_argument("--start", default="2015-12-01")
-    fx.add_argument("--end", default=None, help="default: today")
+    fx.add_argument(
+        "--end",
+        default=None,
+        help="default: last day before the effective cutoff (holdout start or --available-until); never later",
+    )
     fx.add_argument("--output", default="data/EURUSD_ecb.csv")
     fx.add_argument(
         "--available-until", default=None, help="optional earlier limit; never after the fixed holdout start"
