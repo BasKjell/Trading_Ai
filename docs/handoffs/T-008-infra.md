@@ -14,6 +14,9 @@
 - `model_registry.py`: Zeigerwechsel als Transaktion (Intent → Zeiger → Commit); unbestätigter Zeiger
   wird von `active()` verweigert, `recover()` stellt den vorherigen Zeiger her.
 - Review 1 (`2c72d7f`): alle drei Befunde mit Regressionen behoben.
+- Review 2 (`0ba43f6`): `recover()` stellt den letzten bestätigten Zeiger aus dem Audit-Log mit seiner
+  ursprünglichen Transaktions-ID wieder her (nie einen Intent-`previous`); idempotent auch bei
+  wiederholten Abstürzen während der Wiederherstellung.
 
 ## Grenzen (bewusst, dokumentiert)
 - Kein externer Anker: Wer Journal, Marker und Head konsistent umschreibt, wird nicht erkannt.

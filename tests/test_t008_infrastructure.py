@@ -384,6 +384,38 @@ class RegistryTests(unittest.TestCase):
             registry.activate("T12-F3-v1", "shadow", "user")
             self.assertEqual(registry.active()["mode"], "shadow")
 
+    def test_repeated_crashes_during_recovery_restore_the_last_committed_state(self) -> None:
+        # Regression (PR #23 review 2): a crashed recover() let a second recover() confirm the aborted model.
+        for action in ("activate", "rollback"):
+            with self.subTest(action), tempfile.TemporaryDirectory() as tmp:
+                registry = ModelRegistry(tmp, clock=_clock())
+                registry.register(model())
+                if action == "rollback":
+                    registry.activate("T12-F3-v1", "shadow", "user")
+                committed = registry.active()
+                original = registry._audit
+
+                def fail_after_pointer(entry: dict[str, Any], original: Any = original) -> None:
+                    if entry.get("phase") == "commit" or entry.get("action") == "recover":
+                        raise OSError("disk full")
+                    original(entry)
+
+                registry._audit = fail_after_pointer  # type: ignore[method-assign]
+                with self.assertRaises(OSError):
+                    if action == "activate":
+                        registry.activate("T12-F3-v1", "shadow", "user")
+                    else:
+                        registry.rollback("drift", CONFIRMED)
+                with self.assertRaises(OSError):  # recovery crashes while auditing ...
+                    registry.recover()
+                # ... but the pointer is already the committed state, so repeated attempts converge on it
+                self.assertEqual(registry.recover(), committed)
+                self.assertEqual(registry.recover(), committed)
+                registry._audit = original  # type: ignore[method-assign]
+                self.assertEqual(registry.recover(), committed)
+                self.assertEqual(registry.active(), committed)
+                self.assertEqual(registry.recover(), committed)  # idempotent
+
     def test_rollback_requires_confirmed_wind_down_and_is_audited(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             registry = ModelRegistry(tmp, clock=_clock())

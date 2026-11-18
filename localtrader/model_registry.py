@@ -111,16 +111,32 @@ class ModelRegistry:
         return pointer
 
     def recover(self) -> dict[str, Any]:
-        """Undo an uncommitted pointer change by restoring the pointer recorded in its intent."""
+        """Restore the last *committed* pointer after an interrupted change. Idempotent.
+
+        The target is resolved from the audit log (the newest commit and the pointer its intent wrote),
+        never from an intent's ``previous`` field, which may itself be an uncommitted intermediate state.
+        The committed pointer is written back unchanged, with its original transaction id, so repeated
+        crashes during recovery always converge on the same state and no intermediate pointer is ever
+        confirmed. The audit note is written after the pointer; if it fails, the state is already safe.
+        """
         pointer = self._read_pointer()
-        if pointer.get("txn") in self._committed():
+        committed = self._committed()
+        if pointer.get("txn") in committed:
             return pointer
-        intent = next(
-            (e for e in self.audit() if e.get("phase") == "intent" and e.get("txn") == pointer.get("txn")), None
-        )
-        if intent is None or intent.get("previous") is None:
-            raise RegistryError("no intent to recover from; manual review required")
-        return self._switch(dict(intent["previous"]), "recover", {"undone": pointer.get("txn")}, pointer)
+        target = self._last_committed_pointer()
+        self._write_pointer(target)
+        self._audit({"action": "recover", "undone": pointer.get("txn"), "restored": target["txn"]})
+        return target
+
+    def _last_committed_pointer(self) -> dict[str, Any]:
+        entries = self.audit()
+        last_commit = next((e for e in reversed(entries) if e.get("phase") == "commit"), None)
+        if last_commit is None:
+            raise RegistryError("no committed state to recover; manual review required")
+        intent = next((e for e in entries if e.get("phase") == "intent" and e.get("txn") == last_commit["txn"]), None)
+        if intent is None or not isinstance(intent.get("to"), dict) or intent["to"].get("txn") != last_commit["txn"]:
+            raise RegistryError("committed transaction without its intent; manual review required")
+        return dict(intent["to"])
 
     def activate(self, model_id: str, mode: str, approved_by: str) -> dict[str, Any]:
         """Point to a registered version in shadow mode; only if its gates made it shadow-eligible."""

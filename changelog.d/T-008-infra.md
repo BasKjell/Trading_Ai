@@ -22,6 +22,8 @@ Holdout-Zugriff, Auswahl- und Bootstrap-Statistik) ist **nicht** enthalten und b
   und Laufinputs geprüft; Journal erkennt ein abgeschnittenes Ende (Head + einmalige Statusmarker) und
   verhindert Neustarts; Registry-Zeigerwechsel als Intent/Commit-Transaktion mit `recover()`.
 
+- Nach Review 2 (`0ba43f6`): Wiederherstellung idempotent auf den letzten bestätigten Zustand.
+
 **Tests:** `tests/test_t008_infrastructure.py` (19 Tests): echtes Protokoll konsistent und nicht startbar;
 Abweichungen in Faltendaten, Zeitstopp, Seed, Blocklänge und Kandidaten-ID sperren; Strukturfehler;
 Holdout-Abgleich; Belege; Journal-Lebenszyklus, Budget, Eindeutigkeit, Manipulation; Registry.
