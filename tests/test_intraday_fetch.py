@@ -140,6 +140,26 @@ class DividendTests(unittest.TestCase):
         with self.assertRaises(CorporateActionError):
             derive_dividends(raw, adjusted)
 
+    def test_cent_rounding_of_low_priced_adjusted_series_is_tolerated(self) -> None:
+        # T-021 regression (EFA 2016-01-05): adjusted ~42 USD rounded to cents moves adjusted/raw by ~2.4e-4
+        starts = [OPEN + timedelta(minutes=15 * i) for i in range(4)]
+        raw = [bar("EFA", s, p) for s, p in zip(starts, (57.72, 57.55, 57.35, 57.68), strict=True)]
+        adjusted = [replace(b, close=c) for b, c in zip(raw, (42.12, 42.0, 41.85, 42.1), strict=True)]
+        self.assertEqual(derive_dividends(raw, adjusted), {})
+
+    def test_daily_median_damps_rounding_noise_in_the_derived_amount(self) -> None:
+        # T-021 (TLT 2020-11-02): a noisy first bar must not move the derived amount by several percent
+        starts = _days(2)
+        day = [s + timedelta(minutes=15 * i) for s in starts for i in range(5)]
+        raw = [bar("TLT", s, 160.0) for s in day]
+        factor = 1 - 0.17 / 160.0
+        noisy = [factor * 120.0 / 160.0 * (1 + (6e-5 if i == 0 else 0.0)) for i in range(5)]
+        ratios = noisy + [120.0 / 160.0] * 5
+        adjusted = [replace(b, close=b.close * r) for b, r in zip(raw, ratios, strict=True)]
+        derived = derive_dividends(raw, adjusted)
+        self.assertEqual(list(derived), [US_REGULAR_SESSION.local_date(starts[1])])
+        self.assertAlmostEqual(derived[US_REGULAR_SESSION.local_date(starts[1])], 0.17, delta=0.002)
+
     def test_adjustment_changing_within_a_day_is_rejected(self) -> None:
         raw = [bar("SPY", OPEN, 100.0), bar("SPY", OPEN + timedelta(minutes=15), 100.0)]
         adjusted = [raw[0], replace(raw[1], close=99.0)]
@@ -231,26 +251,6 @@ class FetchTests(unittest.TestCase):
         self.assertIn("explained", explained[0])
         self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 1.0405}, {ex: 1})[0])
         self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 1.6}, {ex: 2})[0])
-
-    def test_reviewed_mismatch_is_accepted_only_for_its_exact_amounts(self) -> None:
-        from localtrader.intraday_fetch import REVIEWED_DIVIDEND_MISMATCHES, crosscheck_dividends
-
-        ex = date(2020, 11, 2)
-        reviewed = REVIEWED_DIVIDEND_MISMATCHES["TLT"]
-        official = {ex: (date(2020, 11, 6), 0.169451)}
-        accepted = crosscheck_dividends(official, {ex: 0.1604}, None, reviewed)
-        self.assertEqual(len(accepted), 1)
-        self.assertIn("(reviewed)", accepted[0])
-        self.assertNotIn(" vs derived ", accepted[0])
-        # T-021: any other derived amount, provider amount, date or symbol still aborts (fail closed)
-        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.15}, None, reviewed)[0])
-        changed = {ex: (date(2020, 11, 6), 0.18)}
-        self.assertIn(" vs derived ", crosscheck_dividends(changed, {ex: 0.1604}, None, reviewed)[0])
-        other = date(2020, 12, 1)
-        moved = {other: (date(2020, 12, 7), 0.169451)}
-        self.assertIn(" vs derived ", crosscheck_dividends(moved, {other: 0.1604}, None, reviewed)[0])
-        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.1604}, None, None)[0])
-        self.assertNotIn("SPY", REVIEWED_DIVIDEND_MISMATCHES)
 
     def test_missing_payment_dates_use_the_longest_observed_lag(self) -> None:
         from localtrader.intraday_fetch import fill_missing_pay_dates
