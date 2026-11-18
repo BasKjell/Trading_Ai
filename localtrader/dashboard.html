@@ -153,6 +153,25 @@
         </table>
       </div>
     </section>
+    <section class="card" style="margin-top:16px">
+      <div class="card-head"><div><h2>Experimentregister</h2><div class="muted" id="experimentSummary">Alle registrierten Versuche aller Agenten</div></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Experiment</th><th>Task / Agent</th><th class="num">Varianten</th><th class="num">verworfen</th><th>Entscheidung</th><th>Holdout</th></tr></thead>
+          <tbody id="experimentRows"><tr><td colspan="6"><div class="empty">Lade Register …</div></td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <div class="card-head"><div><h2>Intraday-Reports</h2><div class="muted">Backtests und Stresstests aus <code>reports/</code> – Testfenster, Kosten- und Parametersensitivität</div></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Lauf</th><th>Art</th><th>Instrument / Strategie</th><th class="num">Rendite</th><th class="num">Monat (geom.)</th><th class="num">Max. DD</th><th class="num">Trades</th><th>Szenarien / Phasen</th><th>Holdout</th></tr></thead>
+          <tbody id="reportRows"><tr><td colspan="9"><div class="empty">Lade Reports …</div></td></tr></tbody>
+        </table>
+      </div>
+    </section>
     <footer id="updatedAt">Noch nicht aktualisiert</footer>
   </main>
 
@@ -247,6 +266,35 @@
       $('candidateRows').innerHTML=items.length ? items.map(x=>`<tr><td><div class="candidate-name">${esc(x.name)}</div><div class="muted">${date(x.evaluated_at)}</div></td><td>${esc(x.model)}${x.iteration?`<div class="muted">Iteration ${x.iteration}</div>`:''}</td><td>${esc(x.family)}<div class="muted">${esc(x.timeframe)} · ${esc(x.dataset_source)}</div></td><td><div class="symbols" title="${esc(x.universe.join(', '))}">${esc(x.universe.join(', '))}</div></td><td class="num">${number(x.score,4)}</td><td class="num">${percent(x.return)}</td><td class="num">${number(x.sharpe,2)}</td><td class="num">${percent(x.drawdown)}</td><td class="num">${number(x.trades,0)}</td><td><span class="badge ${x.eligible?'good':'bad'}">${x.eligible?'geeignet':'abgelehnt'}</span>${x.reasons.length?`<div class="muted" title="${esc(x.reasons.map(reasonLabel).join(', '))}">${esc(reasonLabel(x.reasons[0]))}</div>`:''}</td></tr>`).join('') : '<tr><td colspan="10"><div class="empty">Keine Treffer für diese Filter</div></td></tr>';
     }
 
+    const holdoutBadge = used => used ? '<span class="badge bad">Holdout genutzt</span>' : '<span class="badge good">unberührt</span>';
+    function renderExperiments(x) {
+      if (!x.available || !x.entries.length) { $('experimentRows').innerHTML='<tr><td colspan="6"><div class="empty">Kein Experimentregister gefunden</div></td></tr>'; return; }
+      $('experimentSummary').textContent=`${x.experiments} Experimente · ${x.total_variants_tested} Varianten insgesamt · Holdout ${x.holdout_uses}× genutzt`;
+      $('experimentRows').innerHTML=x.entries.map(e=>`<tr><td><div class="candidate-name">${esc(e.id)}</div><div class="muted">${date(e.created_at)}${e.synthetic_data?' · synthetisch':''}</div></td><td>${esc(e.task)}<div class="muted">${esc(e.agent)}</div></td><td class="num">${number(e.variants,0)}</td><td class="num">${number(e.rejected_variants,0)}</td><td>${esc(e.decision)}</td><td>${holdoutBadge(e.holdout_used)}</td></tr>`).join('');
+    }
+    function renderReports(x) {
+      const rows=(x.reports||[]).map(r=>{
+        if (r.kind==='backtest') {
+          const m=r.metrics;
+          return `<tr><td><div class="candidate-name">${esc(r.name)}</div><div class="muted">${date(r.modified*1000)}</div></td><td>Backtest${r.synthetic?' <span class="badge bad">synthetisch</span>':''}</td><td>${esc(r.symbols.join(', '))}<div class="muted">${esc(r.strategies.join(', '))}</div></td><td class="num">${percent(m.total_return)}</td><td class="num">${percent(m.geometric_monthly_return)}</td><td class="num">${percent(m.max_drawdown)}</td><td class="num">${number(m.trades,0)}</td><td class="muted">${r.benchmark.buy_and_hold_total_return!=null?'Buy-and-hold '+percent(r.benchmark.buy_and_hold_total_return):'–'}</td><td>${holdoutBadge(r.holdout_used)}</td></tr>`;
+        }
+        const s=r.scenarios, base=s.baseline||{};
+        const list=Object.entries(s).filter(([k])=>k!=='baseline').map(([k,v])=>`${esc(k)}: ${percent(v.total_return)}`).join('<br>');
+        return `<tr><td><div class="candidate-name">${esc(r.name)}</div><div class="muted">${date(r.modified*1000)}</div></td><td>Stresstest</td><td class="muted">${r.phases.length} Phasen</td><td class="num">${percent(base.total_return)}</td><td class="num">–</td><td class="num">${percent(base.max_drawdown)}</td><td class="num">${number(base.trades,0)}</td><td class="muted">${list}</td><td>${holdoutBadge(r.holdout_used)}</td></tr>`;
+      });
+      const errors=(x.errors||[]).map(e=>`<tr><td colspan="9" class="muted">Nicht lesbar: ${esc(e)}</td></tr>`);
+      $('reportRows').innerHTML=rows.length||errors.length ? [...rows,...errors].join('') : '<tr><td colspan="9"><div class="empty">Keine Reports unter reports/</div></td></tr>';
+    }
+    async function loadReports() {
+      try {
+        const response=await fetch('/api/reports',{cache:'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data=await response.json(); renderExperiments(data.experiments); renderReports(data.intraday);
+      } catch (error) {
+        $('reportRows').innerHTML=`<tr><td colspan="9" class="muted">${esc(String(error))}</td></tr>`;
+      }
+    }
+
     async function load() {
       try {
         const response=await fetch('/api/dashboard',{cache:'no-store'});
@@ -262,6 +310,7 @@
     $('familyFilter').addEventListener('change',e=>{state.family=e.target.value;renderCandidates();});
     $('statusFilter').addEventListener('change',e=>{state.status=e.target.value;renderCandidates();});
     load(); setInterval(load,5000);
+    loadReports(); setInterval(loadReports,30000);
   </script>
 </body>
 </html>
