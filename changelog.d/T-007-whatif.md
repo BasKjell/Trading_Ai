@@ -1,0 +1,20 @@
+## 2026-11-18 – T-007 (#3): Dashboard-Regler für Kosten, Startkapital und Fixkosten
+
+- **Anlass:** Wunsch des Benutzers, im Dashboard zu sehen, wie Kosten, Startkapital sowie Server- und Datenkosten das Ergebnis je Testlauf und je Strategie verändern.
+- **Änderungen:**
+  - Neu ist `localtrader/whatif.py`. Es rechnet einen vorhandenen Backtest (`trades.csv`, `equity.csv`, `summary.json`) mit anderen Annahmen neu ab: Gebühr in bp, Mindestgebühr pro Order, Spread, Slippage, Startkapital, Server- und Datenkosten pro Jahr. Signale und Trades bleiben unverändert, es läuft keine Strategie. Damit entsteht kein Versuch im T-008-Inventar.
+  - Neu ist der API-Endpunkt `/api/whatif`.
+  - Neu ist der Dashboard-Abschnitt „Was wäre wenn“ mit Reglern. Er zeigt Basis und Variante für das Gesamtergebnis und für jede Strategie.
+  - `intraday-backtest` speichert jetzt die verwendeten Kostenannahmen je Instrument (`cost_profiles`) in `summary.json`. Ältere Reports nutzen die aktuelle Config und werden als Näherung markiert.
+- **Modell und Grenzen:**
+  - Das Startkapital skaliert alle Stückzahlen linear. Mindestorder, Stückelung und Volumengrenze werden nicht neu angewendet.
+  - Der Drawdown ist auf abgeschlossene Trades bezogen.
+  - Fixkosten werden anteilig je Kalendertag berechnet.
+  - Regler für Risiko pro Trade und maximalen Drawdown gibt es bewusst nicht, weil sie die Trades selbst ändern (erst nach dem T-008-Forschungsurteil).
+- **Tests:** `tests/test_whatif.py`:
+  - Mit den Report-Annahmen ergibt die Nachrechnung genau das Report-Ergebnis.
+  - Höhere Kosten senken das Ergebnis.
+  - Fixkosten werden anteilig je Tag berechnet.
+  - Bei Mindestgebühr hat ein größeres Konto einen geringeren Kostenanteil.
+  - Ungültige Eingaben, Pfad-Tricks und Risikoparameter werden abgelehnt.
+  - Fallback für alte Reports und Endpunkt.

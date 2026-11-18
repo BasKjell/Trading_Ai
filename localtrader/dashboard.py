@@ -9,13 +9,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from statistics import median
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .config import AppConfig, load_config
 from .report_index import experiments_overview, reports_overview
 from .research_db import ResearchDB
 from .strategy_dsl import STRATEGY_FAMILY_CATALOG
 from .strategy_lab import robustness_reasons
+from .whatif import evaluate_named, report_names
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -343,6 +344,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 ).encode()
                 self._send(200, "application/json; charset=utf-8", payload)
                 return
+            if path == "/api/whatif":
+                self._send(200, "application/json; charset=utf-8", self._whatif())
+                return
             if path == "/health":
                 self._send(200, "application/json", b'{"status":"ok"}')
                 return
@@ -353,6 +357,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except Exception as error:
             payload = json.dumps({"error": str(error)[:500]}).encode()
             self._send(500, "application/json; charset=utf-8", payload)
+
+    def _whatif(self) -> bytes:
+        """Recompute costs, capital and fixed annual costs of an existing report (no strategy run)."""
+        query = parse_qs(urlparse(self.path).query)
+        root = self.server.reports_dir
+        name = (query.pop("report", [""]) or [""])[0]
+        if not name:
+            return json.dumps({"reports": report_names(root)}).encode()
+        values = {}
+        for key, items in query.items():
+            try:
+                values[key] = float(items[-1])
+            except ValueError:
+                return json.dumps({"error": f"{key[:40]} must be a number"}).encode()
+        fallback = {
+            symbol: {k: float(raw.get(k, 0.0)) for k in ("fee_bps", "spread_bps", "slippage_bps", "min_fee")}
+            for symbol, raw in self.server.config.raw.get("instruments", {}).items()
+        }
+        try:
+            result = evaluate_named(root, name, values, fallback)
+        except (ValueError, KeyError, OSError) as error:
+            return json.dumps({"error": str(error)[:300]}).encode()
+        return json.dumps(result, allow_nan=False, default=str).encode()
 
     def log_message(self, format: str, *args: Any) -> None:
         return
