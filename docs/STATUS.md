@@ -11,7 +11,7 @@ Stand: 2026-11-18. Kennzeichnung: **geplant / implementiert / getestet / integri
 | `agent/T-009-agent-collaboration` | T-009 (#16): AGENTS.md, Spec, Register, Vorlagen | **integriert** (PR #18) |
 | `agent/T-005-order-state` | T-005 (#1): Persistenter Orderzustandsautomat und Fake-Broker-Abgleich | **integriert (PR #26)** – gilt nach dessen Merge |
 | `agent/T-018-alpaca-etf-data` | T-018 (#13): SPY/QQQ 2016–2026 (Rohkurse, Dividenden mit Zahltag, NYSE-Halbtage), Holdout ab 2025-11-01 | **integriert (PR #21)** – gilt nach dessen Merge |
-| `agent/T-008-nyse-calendar` | Vollständiger NYSE-Kalender + Slot-Inventur (Vorbedingung T-008) | **integriert (PR folgt)** – gilt nach dessen Merge; Basis #21 |
+| `agent/T-008-nyse-calendar` | Vollständiger NYSE-Kalender + Slot-Inventur (Vorbedingung T-008) | **integriert (PR #31)** – gilt nach dessen Merge; Basis #21 |
 | `agent/T-011-fx-data` | T-011 Datenteil (#6): EZB EUR/USD, kausale Abfrage, Holdout-Schnitt | **integriert (PR #25)** – gilt nach dessen Merge; Buchhaltung in EUR offen |
 | `agent/T-007-report-view` | T-007 Report-Teil (#3): Experimentregister und Intraday-Reports im Dashboard | **integriert** (PR #24); Betriebsansicht offen (T-006) |
 | `agent/T-008-research-design` | T-008 Forschungsdesign (#4) | **integriert (PR #22)** – gilt nach dessen Merge. Forschungsdesign im Entwurf, Implementierung und Freeze ausstehend |
