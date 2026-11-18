@@ -2,6 +2,21 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – Vollständiger NYSE-Handelskalender und Slot-Inventur (Vorbedingung T-008)
+
+**Anlass/Ziel:** Methodenreview #22, P2-Punkt 3: Feiertag und Datenlücke müssen unterscheidbar sein.
+
+**Änderungen**
+- `localtrader/calendars.py`: NYSE-Feiertage nach Regeln (Rule 7.2: Samstag → Freitag außer Neujahr,
+  Sonntag → Montag; Juneteenth ab 2022; Karfreitag) plus Sonderschließungen (2018-12-05, 2025-01-09);
+  `is_trading_day`, `trading_days`, `expected_bar_starts` (Halbtage, Sommerzeit), `inventory` (fehlende und
+  unerwartete Slots); außerhalb 2016–2026 fail closed.
+- Gegenprobe mit den Forschungsdaten: Handelstage stimmen exakt (2.473); echte Lücken SPY 1 Slot, QQQ 2 Slots.
+- Nach Review: Intervallbreiten, die die Sitzung des Tages nicht glatt teilen (z. B. 60 Minuten), oder ≤ 0
+  werden abgelehnt.
+
+**Tests:** `tests/test_calendars.py`.
+
 ## 2026-11-18 – Kostentabelle SPY/QQQ mit gemessenen Spreads (Vorbedingung T-008)
 
 **Änderungen**
