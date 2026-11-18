@@ -125,4 +125,7 @@ def load_config(path: str | Path = "config/default.toml") -> AppConfig:
     from .holdout import check_config
 
     check_config(raw)  # the holdout boundary is fixed in code; a configuration cannot move it
+    from .operating_rules import load_operating_rules
+
+    load_operating_rules(raw)  # rejects missing or weakened operating rules at start-up
     return AppConfig(raw=raw, risk=risk, costs=costs, research=research)
