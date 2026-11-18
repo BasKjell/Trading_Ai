@@ -18,11 +18,16 @@ identical to a backtest over the same bars with the same arrival times (no secon
 received before ``trade_from`` are warm-up history only. Every tick also checks that everything booked
 earlier is still reproduced unchanged; a divergence (changed config, code or data) halts the runtime.
 
-Data rules: a bar is stored once per (symbol, start); a re-delivered identical bar is ignored, a changed
-one halts the runtime. Incomplete bars (end after now) are not read. Bars before the end of the central
-holdout window are refused before any price is parsed. During a session, if the newest bar is older than
-``max_bar_age``, the tick books nothing (stale data -> no new orders); the engine itself later refuses
-entries that follow a gap or whose signal has become too old.
+Data rules: each tick reads a feed file exactly once into a private snapshot; the holdout, source and
+duplicate checks and the import all use that snapshot, so a file replaced between check and import cannot
+slip unchecked rows in. Every row must name ``feed=sip`` (ADR 0006: only delayed SIP drives signals). A bar
+is stored once per (symbol, start); a re-delivered identical bar is ignored, a changed one halts the
+runtime. Bars ending less than ``feed_delay`` (at least 15 minutes, ADR 0006) ago are not read. Bars before
+the end of the central holdout window are refused before any price is parsed, again before they are
+persisted and again when stored bars are loaded. A session bar is overdue once ``max_bar_age - 15 min``
+have passed since its end (exchange calendar with holidays and early closes, closing bar included); while
+any overdue bar is missing, the tick books nothing (stale data -> no new orders). The engine itself later
+refuses entries that follow a gap or whose signal has become too old.
 """
 
 from __future__ import annotations
@@ -35,14 +40,16 @@ import subprocess
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
+from .calendars import NYSE_COVERED_UNTIL, NYSE_EARLY_CLOSES, CalendarError, is_trading_day
 from .config import AppConfig
 from .domain import Bar, Fill
-from .intraday_data import CsvImportSpec, DatasetManifest, ImportedDataset, import_csv, scan_gaps
+from .intraday_data import CsvImportSpec, DatasetManifest, ImportedDataset, SessionSpec, import_csv, scan_gaps
 from .intraday_engine import EngineResult, InstrumentSpec, IntradayEngine
 from .intraday_strategies import IntradayStrategy
 
@@ -50,6 +57,10 @@ from .intraday_strategies import IntradayStrategy
 # and shadow runtime never reads bars before it, so running the service cannot expose the holdout.
 PAPER_DATA_START = datetime(2026, 11, 1, tzinfo=UTC)
 BAR = timedelta(minutes=15)
+# ADR 0006: paper and shadow use delayed SIP. A bar is final at the provider only 15 minutes after its end, and
+# only SIP bars may feed signals (IEX volume is 1-2 % of SIP). Neither can be relaxed in the operating modes.
+MIN_FEED_DELAY = timedelta(minutes=15)
+REQUIRED_FEED = "sip"
 
 
 class Mode(StrEnum):
@@ -188,18 +199,28 @@ def _bar_payload(bar: Bar) -> str:
     return json.dumps([bar.end.isoformat(), bar.open, bar.high, bar.low, bar.close, bar.volume], separators=(",", ":"))
 
 
-def check_feed(path: Path) -> None:
-    """First pass over the timestamp column only: any bar before ``PAPER_DATA_START`` stops the feed before a
-    price is parsed. Second pass: a re-delivered row must be identical; conflicting duplicates stop the feed."""
+def check_feed(path: Path, label: str | None = None) -> None:
+    """First pass over the timestamp and feed columns only: any bar before ``PAPER_DATA_START`` or any row not
+    marked as SIP stops the feed before a price is parsed. Second pass: a re-delivered row must be identical;
+    conflicting duplicates stop the feed. ``path`` must be the snapshot that is imported afterwards."""
+    name = label or path.name
     with path.open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
+        reader = csv.DictReader(handle)
+        if "feed" not in [(field or "").strip().lower() for field in reader.fieldnames or []]:
+            raise RuntimeHalted(f"{name}: feed file has no 'feed' column (ADR 0006 requires SIP provenance)")
+        for row in reader:
             raw = (row.get("timestamp") or "").strip()
             try:
                 start = datetime.fromisoformat(raw)
             except ValueError:
-                continue  # rejected later by the regular import checks
-            if start.tzinfo is None or start < PAPER_DATA_START:
-                raise RuntimeHalted(f"{path.name}: feed contains bars before {PAPER_DATA_START.isoformat()}")
+                start = None  # rejected later by the regular import checks
+            if start is not None and (start.tzinfo is None or start < PAPER_DATA_START):
+                raise RuntimeHalted(f"{name}: feed contains bars before {PAPER_DATA_START.isoformat()}")
+            source = next(((v or "").strip().lower() for k, v in row.items() if (k or "").strip().lower() == "feed"))
+            if source != REQUIRED_FEED:
+                raise RuntimeHalted(
+                    f"{name}: row {raw!r} comes from feed {source!r}; only {REQUIRED_FEED!r} may drive signals"
+                )
     seen: dict[str, dict[str, str]] = {}
     with path.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
@@ -207,6 +228,33 @@ def check_feed(path: Path) -> None:
             if key in seen and seen[key] != row:
                 raise RuntimeHalted(f"{path.name}: conflicting rows for {key}")
             seen[key] = row
+
+
+def _is_session_day(session: SessionSpec, day: date) -> bool:
+    if day.weekday() >= 5 or (session.calendar_until is not None and day > session.calendar_until):
+        return False
+    if session.calendar_until == NYSE_COVERED_UNTIL and session.early_closes == NYSE_EARLY_CLOSES:
+        try:
+            return is_trading_day(day)  # NYSE: full holidays and special closures
+        except CalendarError:
+            return False
+    return True
+
+
+def last_session_bar_end(session: SessionSpec, moment: datetime, lookback_days: int = 14) -> datetime | None:
+    """End of the newest regular-session 15-minute bar that ends at or before ``moment`` (early closes and,
+    for NYSE, holidays respected); ``None`` if there is none since ``PAPER_DATA_START``."""
+    zone = ZoneInfo(session.timezone)
+    day = moment.astimezone(zone).date()
+    for _ in range(lookback_days):
+        if _is_session_day(session, day):
+            opens = datetime.combine(day, session.start, zone)
+            closes = datetime.combine(day, session.close_on(day), zone)
+            if moment >= opens + BAR:
+                end = min(closes, opens + ((moment - opens) // BAR) * BAR)
+                return end if end - BAR >= PAPER_DATA_START else None
+        day -= timedelta(days=1)
+    return None
 
 
 class PaperRuntime:
@@ -241,8 +289,10 @@ class PaperRuntime:
         self.clock = clock
         # ADR 0006: delayed SIP. A bar is complete at the provider only ``feed_delay`` after its end (a newer row
         # may still be running), and a normal newest bar is then 15-30 minutes old.
-        if feed_delay < timedelta(0) or max_bar_age <= feed_delay:
-            raise ValueError("max_bar_age must exceed the feed delay")
+        if feed_delay < MIN_FEED_DELAY:
+            raise ValueError(f"feed_delay must be at least {MIN_FEED_DELAY} (ADR 0006: delayed SIP)")
+        if max_bar_age < feed_delay + BAR:
+            raise ValueError("max_bar_age must leave at least one bar after the feed delay")
         self.max_bar_age = max_bar_age
         self.feed_delay = feed_delay
         self.sink: OrderSink = sink or (SimulatedPaperBroker() if mode == Mode.PAPER else ShadowLog())
@@ -329,6 +379,8 @@ class PaperRuntime:
         ).fetchall()
         output = []
         for start, payload, received in rows:
+            if datetime.fromisoformat(start) < PAPER_DATA_START:
+                raise RuntimeHalted(f"{symbol}: stored bar {start} lies before {PAPER_DATA_START.isoformat()}")
             end, o, h, low, c, v = json.loads(payload)
             output.append(
                 Bar(
@@ -348,23 +400,43 @@ class PaperRuntime:
             )
         return output
 
+    def _snapshot(self, symbol: str, path: Path) -> tuple[Path, str] | None:
+        """Read the feed once into a private copy; every later check and the import use only this copy."""
+        try:
+            content = path.read_bytes()
+        except FileNotFoundError:
+            return None
+        snapshots = self.state_dir / "feed-snapshots"
+        snapshots.mkdir(exist_ok=True)
+        snapshot = snapshots / f"{symbol}.csv"
+        snapshot.write_bytes(content)
+        return snapshot, hashlib.sha256(content).hexdigest()
+
     def ingest(self, now: datetime) -> dict[str, int]:
         """Store newly completed bars once, stamped with the time they were first seen."""
         counts = {"new": 0, "duplicate": 0, "incomplete": 0}
         for symbol, path in self.feeds.items():
-            if not path.exists():
+            taken = self._snapshot(symbol, path)
+            if taken is None:
                 continue
-            check_feed(path)
+            snapshot, digest = taken
+            check_feed(snapshot, path.name)
             spec = self.instruments[symbol]
             data = import_csv(
-                CsvImportSpec(str(path), symbol, spec.market, spec.venue, "paper-feed", "UTC", 15), spec.session
+                CsvImportSpec(str(snapshot), symbol, spec.market, spec.venue, "paper-feed", "UTC", 15), spec.session
             )
+            if data.manifest.file_sha256 != digest:
+                raise RuntimeHalted(f"{symbol}: feed snapshot changed between check and import")
             # identical re-delivered rows were verified by check_feed; the import keeps the first copy
             reported = data.manifest.quality.get("rejected")
             rejected = {k: v for k, v in (reported if isinstance(reported, dict) else {}).items() if k != "duplicate"}
             if rejected:
                 raise RuntimeHalted(f"{symbol}: invalid feed rows {rejected}")
             for bar in data.bars:
+                if bar.start < PAPER_DATA_START:  # defence in depth: never persist a holdout bar
+                    raise RuntimeHalted(
+                        f"{symbol}: bar {bar.start.isoformat()} lies before {PAPER_DATA_START.isoformat()}"
+                    )
                 if bar.end > now - self.feed_delay:
                     counts["incomplete"] += 1
                     continue
@@ -384,15 +456,21 @@ class PaperRuntime:
                     raise RuntimeHalted(f"{symbol} {bar.start.isoformat()}: bar changed after it was stored")
         return counts
 
+    def overdue_bar_end(self, symbol: str, now: datetime) -> datetime | None:
+        """End of the newest session bar that must have arrived by ``now``: a bar is overdue once
+        ``max_bar_age - BAR`` has passed since its end (in a session: the newest bar may be at most
+        ``max_bar_age`` old). The closing bar stays due after the close, over nights, weekends and holidays."""
+        return last_session_bar_end(self.instruments[symbol].session, now - (self.max_bar_age - BAR))
+
     def stale_symbols(self, now: datetime) -> list[str]:
         stale = []
         for symbol in self.feeds:
-            session = self.instruments[symbol].session
-            if not session.contains(now - self.max_bar_age):
-                continue  # market closed or first bar not yet due: no bar is expected
+            due = self.overdue_bar_end(symbol, now)
+            if due is None:
+                continue  # no session bar of the paper period is due yet
             row = self.db.execute("SELECT max(start) FROM bars WHERE symbol=?", (symbol,)).fetchone()
             newest_end = datetime.fromisoformat(row[0]) + BAR if row and row[0] else None
-            if newest_end is None or now - newest_end > self.max_bar_age:
+            if newest_end is None or newest_end < due:
                 stale.append(symbol)
         return stale
 
@@ -439,7 +517,11 @@ class PaperRuntime:
             return {"status": "stale", "symbols": stale, "bars": counts, "new_orders": 0}
         if not self.db.execute("SELECT 1 FROM bars LIMIT 1").fetchone():
             return {"status": "waiting", "bars": counts, "new_orders": 0}
-        result = self.replay()
+        try:
+            result = self.replay()
+        except RuntimeHalted as error:
+            self.halt(str(error))
+            return {"status": "halted", "reason": str(error)}
         booked = [json.loads(row[0]) for row in self.db.execute("SELECT detail FROM fills ORDER BY seq")]
         replayed = [_fill_record(fill) for fill in result.fills]
         if replayed[: len(booked)] != booked:

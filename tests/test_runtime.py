@@ -4,6 +4,7 @@ import json
 import math
 import tempfile
 import unittest
+import unittest.mock
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,6 +25,7 @@ from localtrader.runtime import (
     PaperRuntime,
     RuntimeHalted,
     SimulatedPaperBroker,
+    last_session_bar_end,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,9 +75,15 @@ def bar_rows(days: int = 4) -> list[tuple[datetime, float, float, float, float, 
     return rows
 
 
-def write_feed(path: Path, rows: list[tuple[datetime, float, float, float, float, float]]) -> None:
-    lines = ["timestamp,open,high,low,close,volume"]
-    lines += [f"{t.isoformat()},{o},{h},{low},{c},{v}" for t, o, h, low, c, v in rows]
+def write_feed(
+    path: Path, rows: list[tuple[datetime, float, float, float, float, float]], feed: str | None = "sip"
+) -> None:
+    if feed is None:
+        lines = ["timestamp,open,high,low,close,volume"]
+        lines += [f"{t.isoformat()},{o},{h},{low},{c},{v}" for t, o, h, low, c, v in rows]
+    else:
+        lines = ["timestamp,open,high,low,close,volume,feed"]
+        lines += [f"{t.isoformat()},{o},{h},{low},{c},{v},{feed}" for t, o, h, low, c, v in rows]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -242,9 +250,133 @@ class RuntimeTests(unittest.TestCase):
             )
 
     def test_market_closed_is_not_stale(self) -> None:
+        write_feed(self.feed, bar_rows(5))  # Monday..Friday complete
         runtime = self.runtime()
         self.clock.now = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)  # Saturday
         self.assertNotEqual(runtime.tick()["status"], "stale")
+
+    # ------------------------------------------------------------------ review #39 regressions
+    def test_feed_swapped_between_check_and_import_cannot_store_holdout_bars(self) -> None:
+        """P1: the checked and the imported data must be the same bytes."""
+        import localtrader.runtime as runtime_module
+
+        original = runtime_module.check_feed
+        holdout = [(datetime(2026, 10, 30, 19, 45, tzinfo=UTC), 1.0, 1.0, 1.0, 1.0, 1.0), *self.rows]
+
+        def swap_source_after_check(path: Path, label: str | None = None) -> None:
+            original(path, label)
+            write_feed(self.feed, holdout)  # atomic replacement of the operator's feed file
+
+        runtime = self.runtime()
+        self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+        with unittest.mock.patch.object(runtime_module, "check_feed", swap_source_after_check):
+            status = runtime.tick()
+        self.assertEqual(status["status"], "ok")
+        first = runtime.db.execute("SELECT min(start) FROM bars").fetchone()[0]
+        self.assertGreaterEqual(datetime.fromisoformat(first), PAPER_DATA_START)
+        self.assertGreaterEqual(datetime.fromisoformat(str(status["as_of"])), PAPER_DATA_START)
+        # the replaced file is checked on the next tick and halts before anything is stored
+        self.clock.now += BAR
+        self.assertEqual(runtime.tick()["status"], "halted")
+        first = runtime.db.execute("SELECT min(start) FROM bars").fetchone()[0]
+        self.assertGreaterEqual(datetime.fromisoformat(first), PAPER_DATA_START)
+
+    def test_snapshot_changed_after_check_halts_without_storing(self) -> None:
+        import localtrader.runtime as runtime_module
+
+        original = runtime_module.check_feed
+        holdout = [(datetime(2026, 10, 30, 19, 45, tzinfo=UTC), 1.0, 1.0, 1.0, 1.0, 1.0), *self.rows]
+
+        def tamper_snapshot_after_check(path: Path, label: str | None = None) -> None:
+            original(path, label)
+            write_feed(path, holdout)
+
+        runtime = self.runtime()
+        self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+        with unittest.mock.patch.object(runtime_module, "check_feed", tamper_snapshot_after_check):
+            status = runtime.tick()
+        self.assertEqual(status["status"], "halted")
+        self.assertIsNone(runtime.db.execute("SELECT min(start) FROM bars").fetchone()[0])
+
+    def test_holdout_bar_in_stored_state_halts_replay(self) -> None:
+        runtime = self.runtime()
+        self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+        self.assertEqual(runtime.tick()["status"], "ok")
+        with runtime._tx():
+            runtime.db.execute(
+                "INSERT INTO bars(symbol, start, payload, received_at) VALUES('SPY', ?, ?, ?)",
+                ("2026-10-30T19:45:00+00:00", '["2026-10-30T20:00:00+00:00",1,1,1,1,1]', self.clock.now.isoformat()),
+            )
+        self.clock.now += BAR
+        status = runtime.tick()
+        self.assertEqual(status["status"], "halted")
+        self.assertIn("before", status["reason"])
+
+    def test_feed_delay_below_adr_minimum_is_refused(self) -> None:
+        """P2: the operating modes cannot run with less than the ADR 0006 delay."""
+        for minutes in (0, 14):
+            with self.assertRaises(ValueError):
+                self.runtime(state=f"d{minutes}", feed_delay=timedelta(minutes=minutes))
+
+    def test_only_sip_rows_may_drive_signals(self) -> None:
+        """P2: an IEX file or a file without provenance halts before a bar is stored."""
+        for feed in ("iex", None):
+            with self.subTest(feed=feed):
+                write_feed(self.feed, self.rows, feed=feed)
+                self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+                runtime = self.runtime(state=f"feed-{feed}")
+                status = runtime.tick()
+                self.assertEqual(status["status"], "halted")
+                self.assertIn("feed", status["reason"])
+                self.assertIsNone(runtime.db.execute("SELECT 1 FROM bars").fetchone())
+        mixed = self.dir / "mixed.csv"
+        write_feed(mixed, self.rows[:5])
+        with mixed.open("a", encoding="utf-8") as handle:
+            start, o, h, low, c, v = self.rows[5]
+            handle.write(f"{start.isoformat()},{o},{h},{low},{c},{v},iex\n")
+        self.feed = mixed
+        self.assertEqual(self.runtime(state="mixed").tick()["status"], "halted")
+
+    def test_missing_closing_bar_stays_stale_after_the_close(self) -> None:
+        """P3-style gap at the close (review P2): time alone must not make a missing bar disappear."""
+        close_bar = datetime(2026, 11, 3, 20, 45, tzinfo=UTC)  # last bar of Tue Nov 3 (16:00 New York)
+        write_feed(self.feed, [r for r in self.rows if r[0] != close_bar])
+        runtime = self.runtime()
+        for moment in (
+            datetime(2026, 11, 3, 21, 36, tzinfo=UTC),  # the review's example
+            datetime(2026, 11, 4, 3, 0, tzinfo=UTC),  # overnight
+            datetime(2026, 11, 4, 14, 31, tzinfo=UTC),  # next open, first bar not yet due
+        ):
+            self.clock.now = moment
+            self.assertEqual(runtime.stale_symbols(moment), ["SPY"], moment)
+        complete = self.runtime(state="complete")
+        write_feed(self.feed, self.rows)
+        self.clock.now = datetime(2026, 11, 3, 21, 36, tzinfo=UTC)
+        complete.ingest(self.clock.now)
+        self.assertEqual(complete.stale_symbols(self.clock.now), [])
+
+    def test_saturday_with_missing_friday_is_stale(self) -> None:
+        runtime = self.runtime()  # the feed covers Monday..Thursday only
+        self.clock.now = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
+        self.assertEqual(runtime.tick()["status"], "stale")
+
+    def test_due_bar_follows_holidays_and_early_closes(self) -> None:
+        session = INSTRUMENTS["SPY"].session
+        # Thanksgiving (Thu Nov 26, 2026) is closed; Wednesday's close is the newest due bar
+        self.assertEqual(
+            last_session_bar_end(session, datetime(2026, 11, 26, 18, 0, tzinfo=UTC)),
+            datetime(2026, 11, 25, 21, 0, tzinfo=UTC),
+        )
+        # Fri Nov 27 closes early at 13:00 New York (18:00 UTC)
+        self.assertEqual(
+            last_session_bar_end(session, datetime(2026, 11, 27, 20, 0, tzinfo=UTC)),
+            datetime(2026, 11, 27, 18, 0, tzinfo=UTC),
+        )
+        self.assertEqual(
+            last_session_bar_end(session, datetime(2026, 11, 3, 15, 7, tzinfo=UTC)),
+            datetime(2026, 11, 3, 15, 0, tzinfo=UTC),
+        )
+        self.assertIsNone(last_session_bar_end(session, datetime(2026, 11, 1, 12, 0, tzinfo=UTC)))
 
     # ------------------------------------------------------------------ shadow
     def test_shadow_logs_the_same_decisions_but_never_submits(self) -> None:
@@ -335,3 +467,30 @@ class CliTests(unittest.TestCase):
         self.assertTrue(json.loads(out.getvalue())["locked"])
         with self.assertRaises(SystemExit):
             main(["run", "--mode", "paper", "--feed", "SPY=x.csv"])
+
+    def test_run_paper_refuses_short_delay_and_non_sip_feed(self) -> None:
+        """Review #39 P2 through the production entry point."""
+        import contextlib
+        import io
+
+        from localtrader.cli import build_parser
+
+        def main(argv: list[str]) -> int:
+            args = build_parser().parse_args(argv)
+            return int(args.func(args))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = Path(tmp) / "SPY.csv"
+            write_feed(feed, bar_rows(1), feed="iex")
+            base = ["run", "--mode", "paper", "--feed", f"SPY={feed}", "--trade-from", TRADE_FROM.isoformat()]
+            base += ["--once", "--strategies", "intraday_trend"]
+            with self.assertRaises(SystemExit) as short:
+                main([*base, "--state-dir", str(Path(tmp) / "a"), "--feed-delay-minutes", "0"])
+            self.assertIn("feed_delay", str(short.exception))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main([*base, "--state-dir", str(Path(tmp) / "b")])
+            self.assertEqual(code, 0)
+            status = json.loads(out.getvalue().splitlines()[-1])
+            self.assertEqual(status["status"], "halted")
+            self.assertIn("'iex'", status["reason"])

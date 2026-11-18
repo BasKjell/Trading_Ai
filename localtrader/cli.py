@@ -317,17 +317,20 @@ def run_runtime(args: argparse.Namespace) -> int:
         return 0
     if not args.trade_from:
         raise SystemExit("--trade-from is required for paper and shadow")
-    runtime = PaperRuntime(
-        config,
-        instruments,
-        strategies,
-        args.state_dir or f"state/runtime-{mode.value}",
-        mode,
-        feeds,
-        datetime.fromisoformat(args.trade_from),
-        max_bar_age=timedelta(minutes=args.max_bar_age_minutes),
-        feed_delay=timedelta(minutes=args.feed_delay_minutes),
-    )
+    try:
+        runtime = PaperRuntime(
+            config,
+            instruments,
+            strategies,
+            args.state_dir or f"state/runtime-{mode.value}",
+            mode,
+            feeds,
+            datetime.fromisoformat(args.trade_from),
+            max_bar_age=timedelta(minutes=args.max_bar_age_minutes),
+            feed_delay=timedelta(minutes=args.feed_delay_minutes),
+        )
+    except ValueError as error:  # e.g. a feed delay below ADR 0006
+        raise SystemExit(f"run --mode {mode.value}: {error}") from error
     try:
         if args.halt:
             runtime.halt(args.halt)
@@ -596,7 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     runtime.add_argument("--state-dir", default=None, help="default state/runtime-<mode>")
     runtime.add_argument("--trade-from", default=None, help="aware ISO time; earlier bars are warm-up only")
     runtime.add_argument("--once", action="store_true", help="one tick, then exit")
-    runtime.add_argument("--feed-delay-minutes", type=float, default=15.0, help="ADR 0006: delayed SIP")
+    runtime.add_argument("--feed-delay-minutes", type=float, default=15.0, help="ADR 0006: delayed SIP, at least 15")
     runtime.add_argument("--max-bar-age-minutes", type=float, default=35.0)
     runtime.add_argument("--interval-seconds", type=float, default=60.0)
     runtime.add_argument("--halt", default=None, help="latch a halt with this reason")
