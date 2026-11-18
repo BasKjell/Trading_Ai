@@ -20,6 +20,7 @@ from .data_requests import (
     DataWorker,
 )
 from .domain import Market
+from .holdout import HOLDOUT_START, HoldoutError, research_limit
 from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, synthetic_intraday
 from .intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics, instruments_from_config
 from .intraday_fetch import dividends_digest, output_paths, read_dividends
@@ -70,7 +71,6 @@ def _load_intraday(
     data_file: str | None,
     synthetic_days: int | None,
     symbol: str | None = None,
-    use_holdout: bool = False,
 ) -> tuple[AppConfig, dict[str, InstrumentSpec], dict[str, ImportedDataset], dict[str, object]]:
     config = load_config(config_path)
     instruments = instruments_from_config(config)
@@ -80,15 +80,12 @@ def _load_intraday(
         raise SystemExit(f"no [instruments.{symbol}] in the config")
     spec = instruments[symbol]
     raw = config.raw["instruments"][symbol]
-    holdout: dict[str, object] = {"start": None, "excluded_bars": 0, "used": use_holdout}
+    # The research path never reads the holdout; the boundary is fixed in code (localtrader/holdout.py).
+    holdout: dict[str, object] = {"start": HOLDOUT_START.isoformat(), "excluded_bars": 0, "used": False}
     if synthetic_days:
         data = synthetic_intraday(symbol, synthetic_days, config.seed, 15000.0, spec.session)
         return config, instruments, {symbol: data}, holdout
-    holdout_start = config.raw.get("holdout", {}).get("start")
-    cutoff = None
-    if holdout_start:
-        holdout["start"] = str(holdout_start)
-        cutoff = None if use_holdout else datetime.fromisoformat(str(holdout_start))
+    cutoff = research_limit()
     data = import_csv(
         CsvImportSpec(
             data_file or str(raw.get("data_file", settings["data_file"])),
@@ -134,9 +131,7 @@ def _strategy_names(value: str) -> list[str]:
 
 
 def run_intraday_backtest(args: argparse.Namespace) -> int:
-    config, instruments, datasets, holdout = _load_intraday(
-        args.config, args.data, args.synthetic_days, args.symbol, args.use_holdout
-    )
+    config, instruments, datasets, holdout = _load_intraday(args.config, args.data, args.synthetic_days, args.symbol)
     strategies = strategies_from_config(config, _strategy_names(args.strategies))
     engine = IntradayEngine(
         config,
@@ -161,9 +156,7 @@ def run_intraday_backtest(args: argparse.Namespace) -> int:
 
 
 def run_intraday_stress(args: argparse.Namespace) -> int:
-    config, instruments, datasets, holdout = _load_intraday(
-        args.config, args.data, args.synthetic_days, args.symbol, args.use_holdout
-    )
+    config, instruments, datasets, holdout = _load_intraday(args.config, args.data, args.synthetic_days, args.symbol)
     output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets)
     output["holdout"] = holdout
     path = Path(args.output)
@@ -177,13 +170,12 @@ def run_fetch_intraday(args: argparse.Namespace) -> int:
     from .data_requests import AlpacaDatasetDownloader
     from .intraday_fetch import default_end, fetch_intraday_csv
 
-    holdout = load_config(args.config).raw.get("holdout", {}).get("start")
-    if not holdout:
-        raise SystemExit("config has no [holdout] start: research data must stop before the holdout")
-    cutoff = datetime.fromisoformat(str(holdout))
-    end = datetime.fromisoformat(args.end) if args.end else min(default_end(), cutoff)
-    if end > cutoff:
-        raise SystemExit(f"--end {end.isoformat()} reaches into the holdout ({cutoff.isoformat()}); not allowed")
+    load_config(args.config)  # also rejects a configuration that tries to move the holdout boundary
+    cutoff = research_limit()
+    try:
+        end = research_limit(datetime.fromisoformat(args.end)) if args.end else min(default_end(), cutoff)
+    except HoldoutError as error:
+        raise SystemExit(f"--end not allowed: {error}") from None
     downloader = AlpacaDatasetDownloader.from_env(args.env)
     summary = fetch_intraday_csv(
         downloader,
@@ -441,11 +433,6 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--synthetic-days", type=int, default=None, help="use labelled synthetic data")
         command.add_argument("--output", default=default_out)
         command.add_argument("--symbol", default=None, help="instrument from [instruments.*]; default [intraday]")
-        command.add_argument(
-            "--use-holdout",
-            action="store_true",
-            help="include the final test period from [holdout]; only for the central holdout evaluation",
-        )
         if name == "intraday-backtest":
             command.add_argument("--cost-multiplier", type=float, default=1.0)
             command.add_argument("--spread-multiplier", type=float, default=1.0)
