@@ -29,6 +29,8 @@ class Direction(StrEnum):
 
 class OrderStatus(StrEnum):
     NEW = "new"
+    SUBMITTED = "submitted"
+    UNKNOWN = "unknown"
     PARTIALLY_FILLED = "partially_filled"
     FILLED = "filled"
     REJECTED = "rejected"
