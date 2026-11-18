@@ -108,10 +108,8 @@ def _load_intraday(
         dividends_path = output_paths(data_file or str(raw["data_file"]))["dividends"]
         if not dividends_path.exists():
             raise SystemExit(f"{dividends_path} missing: run fetch-intraday --symbol {symbol}")
-        dividends = read_dividends(dividends_path)
-        if cutoff is not None:
-            # an ex-date is known from its morning on; only dates before the holdout day are kept
-            dividends = {day: v for day, v in dividends.items() if day < spec.session.local_date(cutoff)}
+        # withheld rows are skipped on their ex-date before any other field is parsed or validated
+        dividends = read_dividends(dividends_path, cutoff)
         # bind the corporate actions actually used into the dataset version (changes are visible)
         digest = dividends_digest(dividends)
         manifest = replace(
@@ -179,8 +177,14 @@ def run_fetch_intraday(args: argparse.Namespace) -> int:
     from .data_requests import AlpacaDatasetDownloader
     from .intraday_fetch import default_end, fetch_intraday_csv
 
+    holdout = load_config(args.config).raw.get("holdout", {}).get("start")
+    if not holdout:
+        raise SystemExit("config has no [holdout] start: research data must stop before the holdout")
+    cutoff = datetime.fromisoformat(str(holdout))
+    end = datetime.fromisoformat(args.end) if args.end else min(default_end(), cutoff)
+    if end > cutoff:
+        raise SystemExit(f"--end {end.isoformat()} reaches into the holdout ({cutoff.isoformat()}); not allowed")
     downloader = AlpacaDatasetDownloader.from_env(args.env)
-    end = datetime.fromisoformat(args.end) if args.end else default_end()
     summary = fetch_intraday_csv(
         downloader,
         args.symbol,
@@ -189,6 +193,7 @@ def run_fetch_intraday(args: argparse.Namespace) -> int:
         args.output or f"data/{args.symbol}_15m.csv",
         args.feed,
         progress=lambda message: print(message, file=sys.stderr),
+        available_until=cutoff,
     )
     print(json.dumps(summary, indent=2))
     return 0

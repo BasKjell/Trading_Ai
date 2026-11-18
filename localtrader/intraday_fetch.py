@@ -27,6 +27,7 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 from .calendars import NYSE_COVERED_UNTIL, NYSE_EARLY_CLOSE, NYSE_EARLY_CLOSES
 from .domain import Bar
@@ -131,7 +132,11 @@ def dividend_gaps(dividends: dict[date, float], first: date, last: date, max_day
 
 
 def dividends_from_actions(
-    actions: dict[str, list[dict[str, Any]]], symbol: str, first: date, last: date
+    actions: dict[str, list[dict[str, Any]]],
+    symbol: str,
+    first: date,
+    last: date,
+    available_until: datetime | None = None,
 ) -> dict[date, Dividend]:
     """Cash dividends with ex-date in [first, last]; any split in that window aborts."""
     for kind, items in actions.items():
@@ -147,6 +152,8 @@ def dividends_from_actions(
         ex = date.fromisoformat(str(item["ex_date"]))
         if not first <= ex <= last:
             continue
+        if available_until is not None and not ex_date_known_before(ex, available_until):
+            continue  # never let a holdout action influence research data (e.g. the payment-lag estimate)
         pay = date.fromisoformat(str(item["payable_date"])) if item.get("payable_date") else None
         amount = float(item["rate"])
         if ex in raw and raw[ex] != (pay, amount):
@@ -163,10 +170,15 @@ def dividends_from_actions(
     return dividends
 
 
-def duplicate_pay_dates(actions: dict[str, list[dict[str, Any]]], symbol: str) -> list[str]:
-    """Ex-dates listed more than once with different payment dates (for the manifest)."""
+def duplicate_pay_dates(
+    actions: dict[str, list[dict[str, Any]]], symbol: str, first: date | None = None, last: date | None = None
+) -> list[str]:
+    """Ex-dates within [first, last] listed more than once with different payment dates (for the manifest)."""
     by_ex: dict[str, set[str]] = {}
     for item in actions.get("cash_dividends", []):
+        ex = date.fromisoformat(str(item["ex_date"]))
+        if (first is not None and ex < first) or (last is not None and ex > last):
+            continue
         if item.get("symbol", symbol) == symbol:
             by_ex.setdefault(str(item["ex_date"]), set()).add(str(item.get("payable_date")))
     return [f"{ex}: {sorted(pays)}" for ex, pays in sorted(by_ex.items()) if len(pays) > 1]
@@ -232,19 +244,31 @@ def write_dividends(
     return hashlib.sha256(target.read_bytes()).hexdigest()
 
 
-def read_dividends(path: str | Path) -> dict[date, Dividend]:
-    """Read and validate; duplicate ex-dates, non-positive or non-finite amounts abort."""
+def ex_date_known_before(ex: date, cutoff: datetime) -> bool:
+    """An ex-date belongs to the research period if its session opens before the cutoff (consistent with
+    bars: a 00:00 UTC cutoff keeps the last US trading day, whose New York date is the day before)."""
+    return datetime.combine(ex, US_REGULAR_SESSION.start, ZoneInfo(US_REGULAR_SESSION.timezone)) < cutoff
+
+
+def read_dividends(path: str | Path, available_until: datetime | None = None) -> dict[date, Dividend]:
+    """Read and validate. With a cutoff, a row is skipped on its ex-date alone, before anything else is
+    parsed, so a withheld row can neither abort nor leak; error messages name the line, never its values."""
     dividends: dict[date, Dividend] = {}
     with Path(path).open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
+        for line, row in enumerate(csv.DictReader(handle), start=2):
             try:
                 ex = date.fromisoformat(row["ex_date"])
+            except (KeyError, TypeError, ValueError):
+                raise CorporateActionError(f"unreadable ex_date in line {line}") from None
+            if available_until is not None and not ex_date_known_before(ex, available_until):
+                continue
+            try:
                 pay = date.fromisoformat(row["pay_date"])
                 amount = float(row["amount"])
-            except (KeyError, TypeError, ValueError) as error:
-                raise CorporateActionError(f"invalid dividend row {row}") from error
+            except (KeyError, TypeError, ValueError):
+                raise CorporateActionError(f"unreadable dividend in line {line}") from None
             if ex in dividends:
-                raise CorporateActionError(f"duplicate ex-date {ex}")
+                raise CorporateActionError(f"duplicate ex-date in line {line}")
             dividends[ex] = (pay, amount)
     validate_dividends(dividends)
     return dividends
@@ -275,9 +299,17 @@ def fetch_intraday_csv(
     output: str | Path,
     feed: str = "sip",
     progress: Callable[[str], None] | None = None,
+    available_until: datetime | None = None,
 ) -> dict[str, Any]:
+    """Download and write the research files. With ``available_until`` (the holdout start) nothing at or
+    after the cutoff is requested, read or written: research files physically contain no holdout rows."""
     from .data_requests import DataRequestSpec
 
+    if available_until is not None:
+        if available_until.tzinfo is None:
+            raise ValueError("available_until must be timezone-aware")
+        if end > available_until:
+            raise ValueError(f"end {end.isoformat()} reaches into the holdout (starts {available_until.isoformat()})")
     paths = output_paths(output)
     series: dict[str, list[Bar]] = {}
     requests: dict[str, dict[str, Any]] = {}
@@ -295,7 +327,9 @@ def fetch_intraday_csv(
             adjustment=adjustment,
         )
         bars, manifest, _ = downloader.download(request, progress)
-        series[adjustment] = regular_session_bars([b for b in bars if b.symbol == symbol])
+        series[adjustment] = regular_session_bars(
+            [b for b in bars if b.symbol == symbol and (available_until is None or b.end <= available_until)]
+        )
         requests[adjustment] = {
             "request_id": manifest.get("request_id"),
             "downloaded_at": manifest.get("downloaded_at"),
@@ -305,8 +339,12 @@ def fetch_intraday_csv(
     first_day = US_REGULAR_SESSION.local_date(raw_bars[0].start) if raw_bars else start.date()
     last_day = US_REGULAR_SESSION.local_date(raw_bars[-1].start) if raw_bars else end.date()
     derived = derive_dividends(series["raw"], series["all"])  # raises before any file is written
-    actions = downloader.corporate_actions(symbol, first_day - timedelta(days=120), last_day + timedelta(days=120))
-    dividends = dividends_from_actions(actions, symbol, first_day, last_day)
+    actions_end = last_day + timedelta(days=120)
+    if available_until is not None:  # never query corporate actions processed inside the holdout
+        # the endpoint's end date is inclusive and in UTC calendar days: last full UTC day before the cutoff
+        actions_end = min(actions_end, (available_until.astimezone(UTC) - timedelta(microseconds=1)).date())
+    actions = downloader.corporate_actions(symbol, first_day - timedelta(days=120), actions_end)
+    dividends = dividends_from_actions(actions, symbol, first_day, last_day, available_until)
     assumed = sorted(
         date.fromisoformat(str(i["ex_date"]))
         for i in actions.get("cash_dividends", [])
@@ -339,7 +377,8 @@ def fetch_intraday_csv(
         "dividends": len(dividends),
         "dividend_crosscheck": mismatches,
         "pay_dates_assumed": [ex.isoformat() for ex in assumed],
-        "duplicate_pay_dates_later_used": duplicate_pay_dates(actions, symbol),
+        "duplicate_pay_dates_later_used": duplicate_pay_dates(actions, symbol, first_day, last_day),
+        "available_until": available_until.isoformat() if available_until else None,
         "dividend_gaps": dividend_gaps(
             {ex: amount for ex, (_, amount) in dividends.items()},
             US_REGULAR_SESSION.local_date(raw_bars[0].start),

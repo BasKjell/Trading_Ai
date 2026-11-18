@@ -245,6 +245,39 @@ class FetchTests(unittest.TestCase):
         with self.assertRaises(CorporateActionError):
             fill_missing_pay_dates({date(2019, 3, 15): (None, 1.2)})
 
+    def test_holdout_actions_never_change_the_assumed_payment_lag(self) -> None:
+        # Regression (PR #21 review 3): a 30-day holdout lag moved a 2019 assumed payment date.
+        from localtrader.intraday_fetch import dividends_from_actions
+
+        cutoff = datetime(2025, 11, 1, tzinfo=UTC)
+        actions = {
+            "cash_dividends": [
+                {"ex_date": "2019-03-01", "payable_date": None, "rate": 1.0},
+                {"ex_date": "2024-03-15", "payable_date": "2024-03-25", "rate": 1.0},  # 10-day lag
+                {"ex_date": "2025-11-03", "payable_date": "2025-12-03", "rate": 1.0},  # holdout, 30 days
+            ]
+        }
+        with_cut = dividends_from_actions(actions, "SPY", date(2016, 1, 4), date(2026, 1, 1), cutoff)
+        self.assertEqual(with_cut[date(2019, 3, 1)], (date(2019, 3, 11), 1.0))
+        self.assertNotIn(date(2025, 11, 3), with_cut)
+
+    def test_withheld_dividend_rows_are_skipped_before_parsing_and_never_echoed(self) -> None:
+        cutoff = datetime(2025, 11, 1, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.csv"
+            path.write_text(
+                "ex_date,pay_date,amount,source\n"
+                "2025-10-31,2025-11-28,1.11,t\n"  # last US trading day before a 00:00 UTC cutoff: research
+                "2025-12-19,not-a-date,9.87654,t\n",  # withheld and defective
+                encoding="utf-8",
+            )
+            self.assertEqual(read_dividends(path, cutoff), {date(2025, 10, 31): (date(2025, 11, 28), 1.11)})
+            with self.assertRaises(CorporateActionError) as caught:
+                read_dividends(path)  # without a cutoff the defect is reported - by line only
+        self.assertIn("line 3", str(caught.exception))
+        self.assertNotIn("9.87654", str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
+
     def test_invalid_dividend_files_are_rejected(self) -> None:
         cases = {
             "negative": "2024-03-05,2024-04-30,-1.0",
@@ -261,6 +294,40 @@ class FetchTests(unittest.TestCase):
                 )
                 with self.assertRaises(CorporateActionError):
                     read_dividends(path)
+
+    def test_research_fetch_never_reaches_the_holdout(self) -> None:
+        # User decision 2026-11-18: research files physically contain no holdout rows.
+        starts = _days(3)
+        cutoff = starts[1] + timedelta(minutes=15)  # end of the second day's first bar
+        raw = [bar("SPY", s, 100.0) for s in starts]
+        late_dividend = {
+            "ex_date": str(US_REGULAR_SESSION.local_date(starts[2])),
+            "payable_date": "2024-04-30",
+            "rate": 1.0,
+        }
+        downloader = FakeDownloader(raw, actions={"cash_dividends": [late_dividend]})
+        seen: list[Any] = []
+        original = downloader.corporate_actions
+
+        def record(symbol: str, start: date, end: date) -> dict[str, Any]:
+            seen.append(end)
+            return original(symbol, start, end)
+
+        downloader.corporate_actions = record  # type: ignore[method-assign]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "SPY_15m.csv"
+            with self.assertRaises(ValueError):
+                fetch_intraday_csv(downloader, "SPY", starts[0], starts[2], path, available_until=cutoff)
+            summary = fetch_intraday_csv(downloader, "SPY", starts[0], cutoff, path, available_until=cutoff)
+            data = import_csv(CsvImportSpec(str(path), "SPY", Market.ETF, "t", "s", "UTC"), US_REGULAR_SESSION)
+            dividends = read_dividends(output_paths(path)["dividends"])
+        self.assertTrue(all(b.end <= cutoff for b in data.bars))
+        self.assertEqual(len(data.bars), 2)
+        self.assertEqual(dividends, {})  # ex-date inside the holdout is never written
+        # query ends on the last UTC day before the cutoff, inclusive (Regression: the New York date of a
+        # 00:00 UTC cutoff is one day earlier and payments processed on the last research day were lost)
+        self.assertEqual(seen[0], (cutoff - timedelta(microseconds=1)).astimezone(UTC).date())
+        self.assertEqual(summary["available_until"], cutoff.isoformat())
 
     def test_default_end_is_old_enough_and_aligned(self) -> None:
         now = datetime(2026, 11, 17, 19, 52, 13, tzinfo=UTC)
