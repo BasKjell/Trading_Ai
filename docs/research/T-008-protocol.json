@@ -1,0 +1,328 @@
+{
+  "schema": "T008-preregistration/1",
+  "version": "1.1.0-draft",
+  "state": "proposed_unrun",
+  "task": "T-008",
+  "issue": 4,
+  "design_basis": "fb5498e38e36e4d62cef5bb20742ef5f24f351f1",
+  "agent": "Codex / GPT-6.2 Astra / high",
+  "executions": 0,
+  "freeze": {
+    "required": [
+      "independent_method_review",
+      "reviewed_preregistration_commit",
+      "verified_integrated_code_sha",
+      "dependency_lock_digest",
+      "risk_config_digest",
+      "separate_research_only_manifest_digest",
+      "calendar_digest",
+      "point_in_time_corporate_actions_and_fx_digests",
+      "complete_cost_schedule_digest",
+      "prior_experiment_inventory_digest",
+      "custodian_research_only_storage_and_exposure_attestation_digest",
+      "central_single_journal_and_release_procedure_digest",
+      "eligibility_and_target_snapshot",
+      "verified_all_synthetic_gates"
+    ],
+    "experiment_id": "EXP-T008-001",
+    "binding_receipt": null,
+    "digest": "sha256 of exact committed protocol bytes, companion plan bytes and binding receipts in an external manifest; no self-reference"
+  },
+  "universe": [
+    "QQQ",
+    "SPY"
+  ],
+  "simultaneous_order_priority": [
+    "QQQ",
+    "SPY"
+  ],
+  "account": {
+    "initial_eur": 10000,
+    "cash_rate": 0,
+    "leverage": false,
+    "risk_config": "unchanged reviewed repository snapshot",
+    "mode": "historical_offline"
+  },
+  "interval_minutes": 15,
+  "units": {
+    "fold_dates": "inclusive first day / exclusive last day, America/New_York regular exchange sessions",
+    "holdout": "UTC instants",
+    "returns": "decimal fractions",
+    "session_weights": "equal over scheduled scored sessions"
+  },
+  "folds": [
+    {
+      "id": "F1",
+      "train": [
+        "2016-02-01",
+        "2018-02-01"
+      ],
+      "validation": [
+        "2018-02-01",
+        "2018-08-01"
+      ],
+      "test": [
+        "2018-08-01",
+        "2019-05-01"
+      ]
+    },
+    {
+      "id": "F2",
+      "train": [
+        "2019-05-01",
+        "2021-05-01"
+      ],
+      "validation": [
+        "2021-05-01",
+        "2021-11-01"
+      ],
+      "test": [
+        "2021-11-01",
+        "2022-08-01"
+      ]
+    },
+    {
+      "id": "F3",
+      "train": [
+        "2022-08-01",
+        "2024-08-01"
+      ],
+      "validation": [
+        "2024-08-01",
+        "2025-02-01"
+      ],
+      "test": [
+        "2025-02-01",
+        "2025-11-01"
+      ]
+    }
+  ],
+  "boundary": {
+    "purge_last_complete_scheduled_sessions": 6,
+    "embargo_first_complete_scheduled_sessions": 6,
+    "entry_blackout_before_scored_end_sessions": 6,
+    "max_entry_to_flat_sessions_inclusive": 5,
+    "max_entry_signal_to_flat_sessions_inclusive": 5,
+    "pending_entry_ttl_scheduled_eligible_opens": 2,
+    "first_score_requires_feature_only_warmup": true,
+    "minimum_observed_completed_15m_bars_per_symbol": 33,
+    "minimum_observed_full_completed_hourly_bars_per_symbol": 50,
+    "warmup_source": "earlier bars within same role only including embargo; extend warmup inside role if needed, retain zero-exposure sessions in returns",
+    "custody_partition_rule": "research records require start < cutoff AND end <= cutoff AND received_at < cutoff; research manifest depends only on eligible prefix",
+    "unclosed_or_overdue": "invalid; no terminal close assumption, no boundary transfer",
+    "minimum_scheduled_scored_sessions": {
+      "train": 450,
+      "validation": 105,
+      "test": 155,
+      "central": 200
+    },
+    "full_hour_definition": "Exchange-local clock hour wholly inside one scheduled regular session, exactly four complete consecutive 15m intervals, all available at decision time. Partial opening/closing buckets never count or feed the trend filter."
+  },
+  "candidates": [
+    {
+      "id": "T12",
+      "family": "intraday_trend",
+      "parameters": {
+        "trend_window_hours": 50,
+        "breakout_bars": 12,
+        "exit_bars": 8,
+        "atr_bars": 14,
+        "stop_atr": 2.5,
+        "max_hold_bars": 32
+      }
+    },
+    {
+      "id": "T16",
+      "family": "intraday_trend",
+      "parameters": {
+        "trend_window_hours": 50,
+        "breakout_bars": 16,
+        "exit_bars": 8,
+        "atr_bars": 14,
+        "stop_atr": 2.5,
+        "max_hold_bars": 32
+      }
+    },
+    {
+      "id": "M175",
+      "family": "mean_reversion",
+      "parameters": {
+        "reference_bars": 20,
+        "entry_z": 1.75,
+        "trend_filter_bars": 32,
+        "max_efficiency": 0.3,
+        "atr_bars": 14,
+        "stop_atr": 2,
+        "max_hold_bars": 16
+      }
+    },
+    {
+      "id": "M200",
+      "family": "mean_reversion",
+      "parameters": {
+        "reference_bars": 20,
+        "entry_z": 2,
+        "trend_filter_bars": 32,
+        "max_efficiency": 0.3,
+        "atr_bars": 14,
+        "stop_atr": 2,
+        "max_hold_bars": 16
+      }
+    }
+  ],
+  "train": "no fitted feature transforms; compute one pair of time-average EUR notional weights by candidate from completed trading intervals for later matched benchmark; no outcome-based pruning",
+  "validation_selection": {
+    "eligibility": {
+      "net_total_return_gt": 0,
+      "mean_daily_log_excess_vs_cash_gt": 0,
+      "mean_daily_log_excess_vs_matched_gt": 0,
+      "min_round_trips": 10,
+      "max_observed_mark_to_market_drawdown_lt": 0.08,
+      "kill_or_breach_allowed": false
+    },
+    "maximize": "mean paired daily log excess versus frozen training-exposure passive",
+    "tie": "rounded to 12 decimals, then ASCII ascending candidate ID",
+    "on_empty": "cash/no advancement"
+  },
+  "nomination": "predeclare selection rule; lock F3 validation winner before viewing ANY fold test returns; identical ID selected by validation at least twice; three noncash fold winners required",
+  "benchmarks": [
+    "cash_champion",
+    "buy_hold_SPY_100pct",
+    "buy_hold_QQQ_100pct",
+    "buy_hold_20pct_each_plus_cash",
+    "buy_hold_train_matched_weights_plus_cash"
+  ],
+  "passive": "one initial purchase per sleeve at feasible raw regular opens with volume cap and frozen evidenced or explicitly modeled costs; target weights fixed then drift, orderly liquidation within same score window; 100% single-instrument portfolios descriptive only",
+  "scenarios": [
+    {
+      "id": "base",
+      "variable_cost_multiple": 1,
+      "spread_multiple": 1,
+      "extra_eligible_opens": 0
+    },
+    {
+      "id": "cost2",
+      "variable_cost_multiple": 2,
+      "spread_multiple": 1,
+      "extra_eligible_opens": 0
+    },
+    {
+      "id": "spread3",
+      "variable_cost_multiple": 1,
+      "spread_multiple": 3,
+      "extra_eligible_opens": 0
+    },
+    {
+      "id": "delay1",
+      "variable_cost_multiple": 1,
+      "spread_multiple": 1,
+      "extra_eligible_opens": 1
+    },
+    {
+      "id": "neighbor",
+      "costs": "base",
+      "candidate": {
+        "T12": "T16",
+        "T16": "T12",
+        "M175": "M200",
+        "M200": "M175"
+      }
+    }
+  ],
+  "aggregation": "chain within-fold normalized observed event-level equity paths in chronological order without resetting the high-water mark; carry cash plus its bound operating costs through gaps; gates on both fold and chained drawdown; inference uses paired scored test sessions only",
+  "outer_accept_all": {
+    "min_positive_base_excess_folds_each_comparator": 2,
+    "last_fold_base_excess_both_positive": true,
+    "pooled_base_net_total_return_gt": 0,
+    "base_round_trips_per_fold_min": 15,
+    "base_round_trips_total_min": 60,
+    "base_active_entry_months_total_min": 12,
+    "observed_drawdown_all_scenarios_lt": 0.08,
+    "all_three_adverse_stress_scenarios_pooled_net_and_excess_both_gt": 0,
+    "neighbor_pooled_net_and_excess_vs_cash_gt": 0,
+    "risk_kill_overdue_or_data_violation_allowed": false,
+    "require_unadjusted_one_sided_95pct_lower_bounds_on_both_excess_gt": 0
+  },
+  "inference": {
+    "unit": "one common US session; portfolio-level paired daily log returns; no symbol/trade resampling",
+    "bootstrap": "nonoverlapping folds, within each fold circular moving blocks, synchronized across comparators, truncate final block, pool sessions by count",
+    "block_sessions": 20,
+    "replicates": 1000000,
+    "seed": 20261106,
+    "rng": "Python random.Random(seed).randrange(n) per block, fold/date in ascending order",
+    "lower_bound": "basic one-sided: 2*observed_mean - empirical_quantile(bootstrap_means,1-alpha); quantile is sorted nearest rank ceil(p*B)",
+    "alpha": "Shadow gate: unadjusted alpha 0.05 on each paired excess, requiring both one-sided lower bounds > 0 in addition to all other research gates.",
+    "additional": "Exploratory inference on pre-exposed history. Shadow eligibility additionally requires the unchanged confirmatory central gates.",
+    "adjusted_reporting": {
+      "alpha": "0.05 / (2 * (prior_unique_attempted_strategy_slots_in_family + 39))",
+      "research_strategy_slots": 39,
+      "exclude_reference_slots": 195,
+      "minimum_expected_tail_draws": 25,
+      "insufficient_resolution": "report adjusted LCB as unresolved; never changes the Shadow gate",
+      "inventory": "Unique attempted same-family US-index-ETF intraday strategy slots across all agents, seeds and versions, including failed or rejected attempts and disclosed unregistered attempts. Record out-of-family exclusions, including DAX and Ollama daily research. Unresolved same-family gaps block freeze."
+    },
+    "power_illustration": {
+      "scored_sessions": 527,
+      "approx_years": 2.09,
+      "sessions_per_year": 252,
+      "prior_strategy_slots_example": 108,
+      "example_annualized_paired_excess_sharpe": 0.72,
+      "method": "Normal independent-session planning approximation only, not empirical power. Report alpha, approximate Sharpe for 50% and 80% power, and power at the illustrative Sharpe for the unadjusted, adjusted and central bounds. Dependence and the paired comparator can reduce actual power."
+    }
+  },
+  "budget": {
+    "local_only": true,
+    "new_spend_eur": 0,
+    "wall_clock_hours_max": 8,
+    "workers_max": 1,
+    "max_active_strategy_evaluations": 39,
+    "max_reference_evaluations": 195,
+    "max_accounted_research_variant_slots": 234,
+    "max_central_candidate_bundles": 1,
+    "additional_trials_or_reseeding": false,
+    "accounting": "3*(4 training+4 validation+5 test) times (1 strategy+5 references); log gaps and unexecuted grid cells distinctly; forecasts/previous records count once by identity, one record for each attempted cell including failures; central counted separately"
+  },
+  "central": {
+    "start_inclusive": "2025-11-01T00:00:00Z",
+    "end_exclusive": "2026-11-01T00:00:00Z",
+    "max_read_attempts_all_candidates_for_snapshot": 1,
+    "baseline": "cash and fixed F3 train-matched passive",
+    "candidate": "locked F3 validation ID, parameters and exposure calibration",
+    "disclose": "single fixed aggregate verdict and prelisted metrics to independent decision maker, no interactive queries",
+    "criteria": {
+      "min_round_trips": 20,
+      "min_active_entry_months": 4,
+      "absolute_net_and_both_excess_gt": 0,
+      "unadjusted_basic_block_bootstrap_97_5pct_one_sided_lower_bounds_on_both_excess_gt": 0,
+      "max_drawdown_lt": 0.08,
+      "risk_or_custody_breach_allowed": false
+    },
+    "access": {
+      "custodian": "repository owner/user",
+      "research_files": "Physical research-only export; fetch-intraday and fetch-fx reject an end after [holdout].start. Custodian verifies and records removal of existing local full copies, raw pages, dividends and FX from the research environment and research-only reload. Standard research commands have no authorized path to retrieve the locked suffix.",
+      "authorization": "Separate explicit user release after development gates and exposure attestation. Bind candidate, benchmark, period, inputs, costs and exact code hashes before access.",
+      "journal": "Use one custodian-controlled authoritative durable journal from #23, kind central, budget 1 across all worktrees and invocations. All callers use the same canonical central slot ID fixed in the freeze receipt across invocations. Atomically reserve before any provider request or holdout metadata/payload read. Deny a missing, divergent or unreadable journal. Every reservation consumes the slot, including crash, error, empty data or lost response.",
+      "retrieval": "Only the authorized central batch fetches fresh Alpaca data for the fixed period, plus required window-bound FX from its approved source, after reservation. Never expose raw files to research; no interactive requests.",
+      "output": "Only predeclared aggregate metrics and verdict. Retain authorization, access, hashes and terminal status in the custodian audit without raw market values."
+    },
+    "historical_exposure": {
+      "source": "Claude Code method review of PR #22, 2026-11-18",
+      "disclosed": "Local full copies included the held-out suffix. Reported exposure: SPY/QQQ dividend amounts and dates from 2025-12 to 2026-09, relative half-session volumes on 2025-11-28 and 2025-12-24, last-bar timestamps and traversal of timestamps for FX coverage.",
+      "not_reported_as_seen": "No holdout prices, returns, performance metrics or strategy outcomes reported as seen or computed. This is reported scope, not independently verified custody.",
+      "effect": "Custodian must attest the scope and check sources, copies, artifacts, backups and logs. Outcome/selection exposure or unresolved material provenance blocks the central test. Refreshing data does not reset exposure or the budget."
+    }
+  },
+  "registry": {
+    "cash_champion": "CASH-EUR-v1",
+    "successful_outcome": "shadow_eligible_only",
+    "paper_activation": "subsequent independent paper operational decision under separately frozen shadow criteria",
+    "rollback": "disable new entries, reconcile orders and fills, preserve owner/version and protective exits until flat, audit atomic pointer reversal to cash/last approved version",
+    "live": false
+  },
+  "data_requirements": {
+    "calendar": "Bind a historical regular-session calendar for both instruments with full holidays, DST and early closes. Inventory every expected 15-minute slot, fail closed on missing calendar coverage or unexplained discrepancies.",
+    "provider_exceptions": "Before freeze record symbol, dates, source, evidence, conservative treatment and effect in a manifest. Known SPY dividend gaps 2016-03 and 2018-06 must be independently verified or conservatively treated under an evidenced policy, consistently for candidates and references. Missing pre-2020 payout dates use a fixed documented conservative allowance or a no-cash-until-evidenced policy, independent of held-out data. Document and reconcile the duplicated QQQ ex-date 2022-09-19 without double credit. Unexplained or materially unresolved exceptions block evaluation.",
+    "fx": "Use causal daily ECB EUR/USD reference mid (#25), maximum age 5 days, fail closed if unavailable or stale, plus separately accounted FX conversion costs from the frozen cost schedule (#28) only on actual modeled conversions. Preserve timestamp, raw mid, age and cost separately.",
+    "candidate_evidence": "T12/T16 with a 32-bar time stop are untested variants; prior evidence from T-018 used trend without that stop. No candidate parameters or folds changed."
+  }
+}

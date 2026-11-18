@@ -2,6 +2,17 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – T-008 Walk-forward-Forschungsdesign (PR #22)
+
+**Anlass/Ziel:** Forschungsplan und maschinenlesbares Protokoll für US-Index-ETFs, einen Vergleich mit Cash und Exposure-Benchmark sowie einen kontrollierten finalen Test.
+
+- Vier vorab definierte Varianten, drei chronologische Falten, unveränderte zentral-konfirmatorische Gates.
+- Benutzerentscheidungen aus dem Methodenreview: Shadow-Gate mit unadjustierter einseitiger 95-%-Untergrenze je Vergleich. Adjustierte Schranke als Bericht mit ausgewiesener Trennschärfe. Aktualisierte Vergleichsfamilie und Budgetabgrenzung.
+- Physische Forschungsexporte vor dem Holdout. Der Benutzer verwahrt die Freigabe und das Journal für maximal einen reservierten zentralen Abruf. Teilweise frühere Exposition dokumentiert.
+- Vollständiger Börsenkalender, Umgang mit Anbieterausnahmen, kausaler EZB-Mittelkurs mit separaten Umtauschkosten und Definition vollständiger Stundenkerzen vorgegeben.
+
+**Stand:** Design überarbeitet. Freeze, Implementierung und Auswertung ausstehend.
+
 ## 2026-11-18 – T-011 (Datenteil): EUR/USD-Referenzkurse der EZB (PR #25)
 
 **Anlass/Ziel:** Voraussetzung für Ergebnisse in EUR (T-011, T-008). Nur Daten, keine Buchhaltung.
