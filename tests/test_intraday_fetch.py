@@ -324,6 +324,9 @@ class FetchTests(unittest.TestCase):
             dividends = read_dividends(output_paths(path)["dividends"])
         self.assertTrue(all(b.end <= cutoff for b in data.bars))
         self.assertEqual(len(data.bars), 2)
+        # Regression (PR #21 review 5): Alpaca's end is inclusive, so the provider request ends one bar
+        # before the cutoff (the last allowed bar starts there and ends exactly at the cutoff)
+        self.assertTrue(all(r.end == cutoff - timedelta(minutes=15) for r in downloader.requests[-2:]))
         self.assertEqual(dividends, {})  # ex-date inside the holdout is never written
         # query ends on the last UTC day before the cutoff, inclusive (Regression: the New York date of a
         # 00:00 UTC cutoff is one day earlier and payments processed on the last research day were lost)

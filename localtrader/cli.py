@@ -5,7 +5,7 @@ import hashlib
 import json
 import sys
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .alpaca_check import AlpacaCheckError, checker_from_env
@@ -166,6 +166,31 @@ def run_intraday_stress(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_measure_spreads(args: argparse.Namespace) -> int:
+    import csv
+
+    from .cost_schedule import measure_spreads, sample_bar_opens
+    from .data_requests import AlpacaDatasetDownloader
+
+    with Path(args.bars).open(newline="", encoding="utf-8") as handle:
+        starts = [datetime.fromisoformat(row["timestamp"]) for row in csv.DictReader(handle)]
+
+    load_config(args.config)  # rejects a configuration that tries to move the holdout boundary
+    try:
+        before = research_limit(datetime.fromisoformat(args.before) if args.before else None)
+    except HoldoutError as error:
+        raise SystemExit(f"--before not allowed: {error}") from None
+    moments = sample_bar_opens(starts, args.samples, before)
+    downloader = AlpacaDatasetDownloader.from_env(args.env)
+    result = measure_spreads(downloader._request_page, args.symbol, moments)
+    result.update({"bars_file": args.bars, "sampled_before": before.isoformat(), "seed": 20261106})
+    output = Path(args.output or f"data/spreads_{args.symbol}.json")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def run_fetch_intraday(args: argparse.Namespace) -> int:
     from .data_requests import AlpacaDatasetDownloader
     from .intraday_fetch import default_end, fetch_intraday_csv
@@ -194,11 +219,22 @@ def run_fetch_intraday(args: argparse.Namespace) -> int:
 def run_fetch_fx(args: argparse.Namespace) -> int:
     from datetime import date
 
-    from .fx_rates import ECB_URL, fetch_ecb_csv, parse_ecb_csv, write_fx_file
+    from .fx_rates import ECB_URL, fetch_ecb_csv, parse_ecb_csv, research_series, write_fx_file
 
+    load_config(args.config)  # rejects a configuration that tries to move the holdout boundary
+    try:  # fixed boundary from localtrader/holdout.py; --available-until may only be earlier
+        cutoff = research_limit(datetime.fromisoformat(args.available_until) if args.available_until else None)
+    except (HoldoutError, ValueError) as error:
+        raise SystemExit(f"--available-until not allowed: {error}") from None
     start = date.fromisoformat(args.start)
-    end = date.fromisoformat(args.end) if args.end else datetime.now(UTC).date()
-    series, report = parse_ecb_csv(fetch_ecb_csv(start, end))
+    last_allowed = cutoff.date() - timedelta(days=1)
+    end = date.fromisoformat(args.end) if args.end else last_allowed
+    if end > last_allowed:
+        raise SystemExit(f"--end {end} reaches into the holdout ({cutoff.isoformat()}); not allowed")
+    # rows published at/after the cutoff are dropped before validation, so the manifest's quality report
+    # cannot describe the holdout either; research_series is a second, independent guard
+    series, report = parse_ecb_csv(fetch_ecb_csv(start, end), available_before=cutoff)
+    series = research_series(series, cutoff)
     if not series:
         raise SystemExit("ECB returned no usable rates")
     manifest = write_fx_file(series, args.output, report, ECB_URL)
@@ -438,6 +474,14 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--spread-multiplier", type=float, default=1.0)
             command.add_argument("--delay-bars", type=int, default=0)
         command.set_defaults(func=func)
+    spreads = sub.add_parser("measure-spreads", help="sample quoted SIP spreads at bar opens (research period only)")
+    spreads.add_argument("--symbol", required=True)
+    spreads.add_argument("--bars", required=True, help="raw 15-minute CSV whose bar opens are sampled")
+    spreads.add_argument("--samples", type=int, default=400)
+    spreads.add_argument("--before", default=None, help="optional earlier limit; never after [holdout] start")
+    spreads.add_argument("--output", default=None, help="default: data/spreads_<SYMBOL>.json")
+    spreads.add_argument("--env", default=".env")
+    spreads.set_defaults(func=run_measure_spreads)
     fetch = sub.add_parser("fetch-intraday", help="download 15-minute ETF bars from Alpaca into data/")
     fetch.add_argument("--symbol", required=True)
     fetch.add_argument("--start", default="2016-01-01T00:00:00+00:00")
@@ -452,6 +496,9 @@ def build_parser() -> argparse.ArgumentParser:
     fx.add_argument("--start", default="2015-12-01")
     fx.add_argument("--end", default=None, help="default: today")
     fx.add_argument("--output", default="data/EURUSD_ecb.csv")
+    fx.add_argument(
+        "--available-until", default=None, help="optional earlier limit; never after the fixed holdout start"
+    )
     fx.set_defaults(func=run_fetch_fx)
     register = sub.add_parser("experiments", help="show the shared experiment register and total variants tested")
     register.add_argument("--directory", default="experiments")

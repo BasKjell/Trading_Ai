@@ -59,9 +59,18 @@ def available_at(day: date) -> datetime:
     return datetime.combine(day, PUBLICATION_TIME, PUBLICATION_ZONE).astimezone(UTC)
 
 
-def parse_ecb_csv(text: str) -> tuple[list[FxRate], dict[str, Any]]:
-    """Validated rates and a quality report from the ECB ``csvdata`` format."""
+def parse_ecb_csv(text: str, available_before: datetime | None = None) -> tuple[list[FxRate], dict[str, Any]]:
+    """Validated rates and a quality report from the ECB ``csvdata`` format.
+
+    With ``available_before`` every row whose rate would be published at or after that moment is dropped
+    **before** any validation, counting or jump check, so neither the series nor the quality report (which
+    ends up in the manifest) carries information from the withheld period.
+    """
+    if available_before is not None and available_before.tzinfo is None:
+        raise ValueError("available_before must be timezone-aware")
     rows = list(csv.DictReader(io.StringIO(text)))
+    if available_before is not None:
+        rows = [row for row in rows if not _published_from(row, available_before)]
     report: dict[str, Any] = {"rows_read": len(rows), "rejected": {}, "jumps": []}
 
     def reject(reason: str) -> None:
@@ -107,6 +116,15 @@ def parse_ecb_csv(text: str) -> tuple[list[FxRate], dict[str, Any]]:
     return series, report
 
 
+def _published_from(row: dict[str, str], moment: datetime) -> bool:
+    """True if the row's rate is published at or after ``moment`` (rows without a readable date stay)."""
+    try:
+        day = date.fromisoformat(row["TIME_PERIOD"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return available_at(day) >= moment
+
+
 def fetch_ecb_csv(start: date, end: date, opener: Callable[[Request], Any] = urlopen) -> str:
     query = urlencode({"format": "csvdata", "startPeriod": start.isoformat(), "endPeriod": end.isoformat()})
     request = Request(f"{ECB_URL}?{query}", headers={"Accept": "text/csv", "User-Agent": "local-paper-trader/0.1"})
@@ -134,6 +152,13 @@ def write_fx_file(series: list[FxRate], path: str | Path, report: dict[str, Any]
     }
     Path(str(target) + ".manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return manifest
+
+
+def research_series(series: list[FxRate], cutoff: datetime) -> list[FxRate]:
+    """Only rates published strictly before the holdout start (the research period ends exclusively)."""
+    if cutoff.tzinfo is None:
+        raise ValueError("cutoff must be timezone-aware")
+    return [rate for rate in series if rate.available_at < cutoff]
 
 
 def read_fx_file(path: str | Path, available_until: datetime | None = None) -> FxSeries:

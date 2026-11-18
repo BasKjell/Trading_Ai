@@ -793,7 +793,7 @@ Keine automatische Kapitalerhöhung und keine automatische Ausweitung von Instru
 
 Der Benutzer startet und wechselt die Agenten manuell, beispielsweise abhängig von verfügbaren Nutzungskontingenten.
 
-Implementiere keinen automatischen Agenten-Orchestrator.
+Für begrenzte Medium-Coding-Aufgaben ist ein Runner gemäß §22 vorgesehen. Im aktuellen Stand ist die Worker-Ausführung technisch gesperrt.
 
 Alle Projektinformationen müssen im Repository oder in zugehörigen GitHub Issues und Pull Requests verfügbar sein. Chatverläufe und das Gedächtnis einzelner Agenten sind keine verbindliche Projektquelle.
 
@@ -1059,8 +1059,30 @@ Forschungscode darf den laufenden Produktionsdienst nicht verändern. Experiment
 
 - Erster Schritt jeder Sitzung ist das Review offener Pull Requests anderer Agenten (Label `needs-independent-review` oder `review`). Eigene PRs werden nicht reviewt.
 - Offene Review-Befunde an eigenen PRs werden vorrangig auf dem bestehenden Branch behoben; das ist kein Selbstreview.
-- Eine Freigabe gilt nur für den geprüften Head-SHA und Zielbranch; Unabhängigkeit richtet sich nach der dokumentierten tatsächlichen Bearbeitung, nicht nach dem GitHub-Account.
-- Ein Agent darf einen PR als Integrationsagent nach main mergen, wenn: der PR von einer anderen Agentenart/Modellfamilie oder vom Benutzer stammt, ein unabhängiges Review mit Freigabe vorliegt, der aktuelle Stand von main einbezogen ist, die CI (führt `make check` mit gepinnten Werkzeugen aus) auf dem freigegebenen Head-SHA grün ist und keine offenen Blockaden, WIP-Commits oder Benutzerentscheidungen bestehen. Merge per Merge-Commit, kein Force-Push.
+- Eine Freigabe gilt nur für den geprüften Head-SHA und Zielbranch; Unabhängigkeit richtet sich nach der dokumentierten tatsächlichen Bearbeitung, nicht nach dem GitHub-Account. Kommt danach nur ein konfliktfreier Merge von main hinzu, genügt eine Merge-Diff-Prüfung, die auch prüft, ob die neue Basis abhängige Verträge, Schutzmechanismen oder Pflichtprüfungen ändert.
+- Review nach Risikoklasse (Benutzerentscheidung 2026-11-18): Klasse K (Holdout/Datenverfügbarkeit, Engine-Kausalität, Orders/Broker, Risiko, Buchhaltung/Kosten, statistische Validierung, Live-Sperren, Rechte automatischer Agenten, mögliche Offenlegung geschützter Daten oder Zugangsdaten, dauerhafter Zustand wie Journale und Modellregistry, Kontrollmechanismen wie CI-Pflichtprüfungen, Branch-Schutz und normative Regeln) benötigt ein unabhängiges Review vor dem Merge; Klasse U (Doku ohne normative Regeln, Anzeige ohne geschützte Daten, Werkzeuge ohne Daten-/Order-/Holdoutzugriff, reine Tests, unkritische Konfiguration) wird nach Klassenprüfung gemergt und danach gesammelt reviewt. Nur P1/P2-Befunde blockieren; P3 wird Folge-Issue. CHANGELOG/STATUS pflegt ein täglicher Sammel-PR.
+- Ein Agent darf einen PR als Integrationsagent nach main mergen, wenn: der PR von einer anderen Agentenart/Modellfamilie oder vom Benutzer stammt, ein unabhängiges Review mit Freigabe (Klasse K) bzw. eine dokumentierte Klassenprüfung (Klasse U) vorliegt, der aktuelle Stand von main einbezogen ist, die CI (führt `make check` mit gepinnten Werkzeugen aus) auf dem freigegebenen Head-SHA grün ist und keine offenen Blockaden, WIP-Commits oder Benutzerentscheidungen bestehen. Merge per Merge-Commit, kein Force-Push.
 - Eigene PRs werden nie selbst gemergt.
 - Integration in main ist keine Livefreigabe; §18 bleibt unverändert.
 - Die Einzelheiten stehen in AGENTS.md §0 und §2a.
+
+## 22. Lokaler Coding-Runner (T-020, technisch gesperrt)
+
+Die Benutzerentscheidung vom 2026-11-17 definiert den zulässigen Umfang einer späteren lokalen
+Automation. Aktuell sind Planung, Diagnose und Offline-Tests verfügbar. Automatische Worker-Läufe
+sind technisch gesperrt. Labels und Konfiguration erteilen keine Ausführungsfreigabe.
+
+Vor einer späteren Freischaltung sind unabhängig zu prüfen: isolierter Ausführungsbereich,
+beschränkte Werkzeuge, separater Clone ohne `.env` oder Broker-Zustand, getrennte GitHub-Rechte
+und Branch-Schutz für `main` mit verpflichtenden Pull Requests und Status-Checks. Worker besitzen
+keine GitHub-Schreibidentität. Veröffentlichung und GitHub-Mutationen liegen beim vertrauenswürdigen
+Steuerprozess. Der erste echte Lauf erfordert die ausdrückliche Freigabe des Benutzers.
+
+Für eine spätere freigegebene Ausführung gelten:
+
+- Nur ausdrücklich mit `auto-ready` und `effort:medium` freigegebene Aufgaben, neue Coding-Issues zusätzlich mit `work:coding`.
+- Reihenfolge: eigene Befunde, unabhängige Reviews, freie Coding-Aufgaben.
+- Ein Worker je Runner, dauerhafte Claims, isolierte Worktrees, Prozesssperren und kontrollierte Fortsetzung nach Nutzungslimits.
+- Unklare Abbrüche erfordern Prüfung. Kein automatischer Anbieterwechsel in aktiven Aufgaben oder Übernehmen wegen bloßen Zeitablaufs.
+- Forschung und kritische Aufgaben bleiben manuell. Automatische Merges, Liveorders, neue Experimente und bezahlte API-Fallbacks sind ausgeschlossen.
+- Betriebsanleitung und aktuelle Grenzen: [CODING_RUNNER.md](CODING_RUNNER.md).

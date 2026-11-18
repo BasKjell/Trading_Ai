@@ -308,7 +308,7 @@ class AlpacaDatasetDownloader:
         while True:
             page_number += 1
             url = f"{self._base_url(request)}?{urlencode(self._params(request, page_token))}"
-            payload, _ = self._request_page(url)
+            payload = self._within_request(request, self._request_page(url)[0])
             pages.append(payload)
             (raw_dir / f"page_{page_number:05d}.json").write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
             downloaded_bars = sum(len(items) for page in pages for items in page.get("bars", {}).values())
@@ -345,6 +345,26 @@ class AlpacaDatasetDownloader:
         }
         (raw_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
         return bars, manifest, normalized_path
+
+    @staticmethod
+    def _within_request(request: DataRequestSpec, payload: dict[str, Any]) -> dict[str, Any]:
+        """Drop rows outside the requested window (``start`` and ``end`` are inclusive at Alpaca) **before**
+        anything is persisted, hashed, counted or normalized. Fail closed on unreadable timestamps without
+        echoing the row (it may lie in a withheld period)."""
+        kept: dict[str, list[dict[str, Any]]] = {}
+        for api_symbol, items in (payload.get("bars") or {}).items():
+            rows = []
+            for item in items or []:
+                try:
+                    moment = datetime.fromisoformat(str(item["t"]).replace("Z", "+00:00"))
+                except (KeyError, TypeError, ValueError):
+                    raise DataRequestError("Alpaca returned a bar with an unreadable timestamp") from None
+                if moment.tzinfo is None:
+                    raise DataRequestError("Alpaca returned a bar without a time zone")
+                if request.start <= moment <= request.end:
+                    rows.append(item)
+            kept[api_symbol] = rows
+        return {**payload, "bars": kept}
 
     @staticmethod
     def _duration(timeframe: str) -> timedelta:

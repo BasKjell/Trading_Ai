@@ -57,6 +57,7 @@ class BarDownloader(Protocol):
 
 Dividend = tuple[date, float]  # (payment date, amount per share), keyed by ex-date
 MAX_CROSSCHECK_DEVIATION = 0.05
+BAR_WIDTH = timedelta(minutes=15)
 
 
 def regular_session_bars(bars: list[Bar], session: SessionSpec = US_REGULAR_SESSION) -> list[Bar]:
@@ -313,6 +314,9 @@ def fetch_intraday_csv(
     paths = output_paths(output)
     series: dict[str, list[Bar]] = {}
     requests: dict[str, dict[str, Any]] = {}
+    # Alpaca's ``end`` is inclusive and refers to the bar start: the last allowed bar starts one bar width
+    # before the cutoff (and ends exactly at it). Rows beyond the request are dropped before persisting.
+    provider_end = end if available_until is None else min(end, available_until - BAR_WIDTH)
     for adjustment in ("raw", "all"):
         request = DataRequestSpec(
             provider="alpaca",
@@ -320,7 +324,7 @@ def fetch_intraday_csv(
             symbols=(symbol,),
             timeframe="15Min",
             start=start,
-            end=end,
+            end=provider_end,
             feed=feed,
             purpose="research:T-018 multi-year 15-minute data",
             strategy_name="intraday",

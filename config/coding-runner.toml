@@ -1,0 +1,17 @@
+[runner]
+repository = "BasKjell/Trading_Ai"
+state_directory = ".coding-runner"
+poll_seconds = 300
+timeout_seconds = 1800
+# No reliable common remaining-usage API is assumed. Retry quota failures after 5 hours.
+cooldown_seconds = 18000
+
+[codex]
+enabled = true
+binary = "codex"
+model = "gpt-6.1-sol"
+
+[claude]
+enabled = true
+binary = "claude"
+model = "claude-opus-5-5"
