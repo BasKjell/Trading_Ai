@@ -3,7 +3,8 @@
 **Status: MVP implementiert und offline getestet.** Der bestehende T-020-Runner behält seine technische
 Sperre. Dieser separate Einstiegspunkt ist standardmäßig deaktiviert. Die Benutzeranforderung vom
 18.11.2026 sieht automatisches Mergen für unkritische Änderungen vor. In diesem MVP braucht es dafür
-eine separate Aktivierung im Controller und die Issue-Freigabe `auto-merge`. Die Betriebsfreigabe nach
+eine Änderung der Merge-Regeln in AGENTS.md §2a und Spec §21, eine separate Aktivierung im Controller
+und die Issue-Freigabe `auto-merge`. Die Betriebsfreigabe nach
 AGENTS.md §7, ein unabhängiges Review der Isolation und ein beaufsichtigter erster Lauf stehen aus.
 Änderungen am Orchestrator selbst sind Klasse K.
 
@@ -11,7 +12,9 @@ AGENTS.md §7, ein unabhängiges Review der Isolation und ein beaufsichtigter er
 
 Der Controller wählt ein unbeanspruchtes Issue mit `backlog`, `auto-ready`, `effort:medium` und
 `work:coding`. Die Aufgabennummer braucht einen Klasse-U-Eintrag in der lokalen YAML-Datei mit genauen
-Dateipfaden und Abhängigkeiten. Priorität ergibt sich aus `priority`, der Reihenfolge unter
+Dateipfaden und Abhängigkeiten. Die Positivliste im Controller enthält für den ersten Pilot
+ausschließlich `docs/REPORTS.md`. Jeder weitere Pfad erfordert eine unabhängige Prüfung seiner
+Funktion und Aufrufer. Priorität ergibt sich aus `priority`, der Reihenfolge unter
 „Nächste Ziele“ in STATUS.md und der Issue-Nummer. Der Controller zieht GitHub-Abhängigkeiten,
 `depends_on` in YAML und Issue-Zeilen wie `Abhängigkeiten: #12, #17` heran. Abhängigkeiten im Projekt
 müssen geschlossen und als `done` markiert sein. Offene PRs derselben Task-ID und bestehende Claims
@@ -57,8 +60,12 @@ Eine Dateiliste allein kann kritische Semantik nicht erkennen.
   Commit-Kandidatenversion erneut in einem frischen Offline-Container. Dateiverknüpfungen werden
   abgelehnt. Agenten erhalten weder Host-Home noch Docker-Socket, GitHub- oder Broker-Anmeldedaten.
 - Codex und Claude Code verwenden getrennte Subscription-Logins in separaten Docker-Volumes.
-  Diese Volumes enthalten ausschließlich die jeweilige Anmeldung und als vertrauenswürdig
-  geprüfte CLI-Einstellungen. Jedes Agentennetz ist eine interne Docker-Bridge mit einem separat
+  Die Volumes sind in Autoren- und Reviewläufen schreibgeschützt. Jeder Lauf startet mit einem
+  frischen Home im tmpfs und übernimmt ausschließlich `.codex/auth.json` bzw.
+  `.claude/.credentials.json`. Einstellungen, Hooks und Sitzungszustand aus dem Volume werden
+  nicht übernommen. Claude lädt keine User-, Project- oder Local-Settings. Ein Token-Refresh im
+  Container bleibt auf diesen Lauf beschränkt. Bei abgelaufener Anmeldung die CLI im separaten
+  Anmeldecontainer erneut anmelden. Jedes Agentennetz ist eine interne Docker-Bridge mit einem separat
   bereitgestellten, auf den jeweiligen Anbieter beschränkten Forward-Proxy. Den Proxy, Docker-Daemon
   und das unveränderlich per Digest referenzierte Image vor der Freigabe unabhängig prüfen. GitHub,
   Broker, andere Konten und Hostdienste dürfen über den Agentenproxy nicht erreichbar sein.
@@ -86,14 +93,20 @@ Eine Dateiliste allein kann kritische Semantik nicht erkennen.
 2. Architektur und Netz-/Rechte-Trennung unabhängig prüfen. Das Worker-Image aus
    [dev-orchestrator.Dockerfile](../config/dev-orchestrator.Dockerfile) mit geprüften CLI-Versionen
    bauen, in eine freigegebene Registry veröffentlichen und lokal laden. Beide CLIs in ihren
-   jeweiligen Volumes mit der späteren Container-UID interaktiv anmelden. CLI-Versionen, das
-   Gruppenverhalten der Git-Sandbox und die Testimage-Abhängigkeiten im beaufsichtigten Lauf prüfen.
+   jeweiligen Volumes mit der späteren Container-UID interaktiv anmelden. Den Dateispeicher für
+   Codex verwenden. Beim beaufsichtigten Lauf prüfen, ob beide CLIs diese Anmeldung aus dem frischen
+   Home erkennen, und ob die Codex-Sandbox unter `no-new-privileges` tatsächlich ihre Grenzen
+   durchsetzt: `workspace-write` darf nur im vorgesehenen Arbeitsbereich schreiben und
+   `read-only` muss Schreibversuche abweisen. Einen Fehler oder eine schwächere Isolation als
+   Blockade behandeln. Auch die Testimage-Abhängigkeiten prüfen.
 3. [YAML-Beispiel](../config/dev-orchestrator.yaml) außerhalb des Clones kopieren, private
    Zustandsablage, Image-Digest, Modelle, Netze und mindestens einen freigegebenen Scope setzen.
    `TRADING_DEV_STATE` und `TRADING_DEV_IMAGE` überschreiben die jeweiligen YAML-Werte.
 4. `plan` prüft die Auswahl lesend. Nach Freigabe zunächst lediglich `execution_enabled: true`
    setzen, einen harmlosen Pilot-Task markieren und den Dienst mit `start --execute` beaufsichtigen.
-   Nach erfolgreichem Pilot kann `merge_enabled` für explizit markierte Issues aktiviert werden.
+   `merge_enabled` bleibt bis zur ausdrücklichen Änderung von AGENTS.md §2a und Spec §21 auf
+   `false`. Diese Änderung selbst benötigt ein unabhängiges Klasse-K-Review. Ein erfolgreicher Pilot
+   und eine explizite Issue-Freigabe sind zusätzliche Voraussetzungen.
 
 ```bash
 python3.12 scripts/dev_orchestrator.py plan --config /absolute/pilot.yaml

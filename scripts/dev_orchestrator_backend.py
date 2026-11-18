@@ -29,30 +29,17 @@ class Pending(RunnerError):
 
 
 SHA = re.compile(r"[0-9a-f]{40}")
-PATH = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_./-]*")
-PROTECTED = re.compile(
-    r"(?:^|[/_.-])(?:risk|execution|order[s]?|broker|alpaca|security|holdout|research|validation|"
-    r"validate|live|paper|shadow|portfolio|position|journal|ledger|state|cost[s]?|engine|"
-    r"backtest|strateg(?:y|ies)|feed[s]?|auth|config|secrets?|persist\w*|workflows?)(?:[/_.-]|$)",
-    re.I,
-)
-CONTROL_FILES = {"AGENTS.md", "CLAUDE.md", "Makefile", "pyproject.toml", "Dockerfile"}
+# Extend only after independent review of each file's role and callers.
+AUTOMATED_PATHS = frozenset({"docs/REPORTS.md"})
 
 
 def safe_path(value: str) -> bool:
-    return (
-        bool(PATH.fullmatch(value))
-        and all(
-            part and not part.startswith(".") and not part.lower().endswith((".key", ".pem", ".p12"))
-            for part in value.split("/")
-        )
-        and value not in CONTROL_FILES
-        and not value.startswith(("scripts/", "config/", "changelog.d/", "docs/decisions/", "docs/handoffs/"))
-        and value not in {"CHANGELOG.md", "docs/STATUS.md", "docs/PROJECT_SPEC.md", "docs/ARCHITECTURE.md"}
-        and not PROTECTED.search(value)
-        and value.startswith(("docs/", "tests/", "localtrader/"))
-        and value.endswith((".md", ".py"))
-    )
+    return value in AUTOMATED_PATHS
+
+
+def quote_prompt_input(value: str) -> str:
+    """Keep untrusted input distinct from the agent's structured response."""
+    return "\n".join(f"> {line}" for line in value.splitlines())
 
 
 def checked_sha(value: str) -> str:
@@ -192,7 +179,10 @@ class Containers:
         for key, value in {"http_proxy": proxy, "https_proxy": proxy, "all_proxy": "", "no_proxy": ""}.items():
             args += ["--env", f"{key}={value}", "--env", f"{key.upper()}={value}"]
         if provider in {"codex", "claude"}:
-            args += ["--env", "HOME=/auth", "--mount", f"type=volume,source={account['auth_volume']},target=/auth"]
+            args += [
+                "--mount",
+                f"type=volume,source={account['auth_volume']},target=/auth,readonly,volume-nocopy",
+            ]
         if provider == "ollama":
             args += ["--env", f"OLLAMA_HOST={account['host']}"]
         args += ["--entrypoint", argv[0], cfg["image"], *argv[1:]]
@@ -244,10 +234,7 @@ with urllib.request.build_opener(NoRedirect()).open(req, timeout=120) as respons
 """
             code, output = self.run(["python", "-c", request, model], source, prompt, provider=provider)
             return output[-6000:] if not code else ""
-        auth = ["codex", "login", "status"] if provider == "codex" else ["claude", "auth", "status"]
-        code, output = self.run(auth, source, provider=provider)
         if provider == "codex":
-            logged_in = "logged in using chatgpt" in output.lower()
             argv = [
                 "codex",
                 "--ask-for-approval",
@@ -264,8 +251,6 @@ with urllib.request.build_opener(NoRedirect()).open(req, timeout=120) as respons
                 "-",
             ]
         else:
-            result = json.loads(output) if not code else {}
-            logged_in = result.get("loggedIn") and result.get("authMethod") == "claude.ai"
             argv = [
                 "claude",
                 "-p",
@@ -278,7 +263,7 @@ with urllib.request.build_opener(NoRedirect()).open(req, timeout=120) as respons
                 "--permission-mode",
                 "dontAsk",
                 "--setting-sources",
-                "user",
+                "",
                 "--tools",
                 "Read,Glob,Grep" if review else "Read,Glob,Grep,Edit,Write",
                 "--allowedTools",
@@ -288,25 +273,21 @@ with urllib.request.build_opener(NoRedirect()).open(req, timeout=120) as respons
                 '{"mcpServers":{}}',
                 "--no-session-persistence",
             ]
-        if code or not logged_in:
-            raise RunnerError(f"{provider}: subscription login not confirmed")
-        if not review:
-            if not paths or not all(safe_path(name) for name in paths):
-                raise RunnerError("missing authorized artifact paths")
-            argv = [
-                "python",
-                "/opt/dev_orchestrator_worker.py",
-                str(self.settings["output_bytes"]),
-                json.dumps(paths),
-                *argv,
-            ]
+        if not review and (not paths or not all(safe_path(name) for name in paths)):
+            raise RunnerError("missing authorized artifact paths")
+        argv = [
+            "python",
+            "/opt/dev_orchestrator_worker.py",
+            provider,
+            str(self.settings["output_bytes"]),
+            json.dumps(None if review else paths),
+            *argv,
+        ]
         code, output = self.run(argv, source, prompt, provider=provider)
-        files = {}
-        if not review:
-            if code:
-                raise RunnerError("isolated coding workspace failed")
-            envelope = json.loads(output)
-            code, output, files = envelope["code"], envelope["events"], envelope["files"]
+        if code:
+            raise RunnerError(f"{provider}: isolated worker or subscription login failed")
+        envelope = json.loads(output)
+        code, output, files = envelope["code"], envelope["events"], envelope["files"]
         result = outcome(output, code)
         if result == "rate_limited" or (
             code and re.search(r"hit your limit|usage limit|rate.limit|quota exceeded", output, re.I)
@@ -506,8 +487,9 @@ class Repository:
                 "Keine Forschung, keine Broker- oder Datenzugriffe, keine Änderung an Freigaben. "
                 "Der Steuerprozess führt Tests, Veröffentlichung und Reviews aus. "
                 'Beende mit RUNNER_RESULT {"status":"done"} oder {"status":"needs-human"}.\n'
-                f"Issue #{task['issue']}: {issue['title']}\n{(issue.get('body') or '')[:16000]}\n"
-                f"Letzte Review-Befunde:\n{task['findings']}"
+                f"Issue #{task['issue']}:\n{quote_prompt_input(issue['title'])}\n"
+                f"{quote_prompt_input((issue.get('body') or '')[:16000])}\n"
+                f"Letzte Review-Befunde:\n{quote_prompt_input(task['findings'])}"
             )
             if scope.get("ollama"):
                 try:
@@ -623,7 +605,9 @@ class Repository:
                 'Antworte mit einer Zeile REVIEW_RESULT {"verdict":"approve","findings":""} '
                 'oder {"verdict":"changes","findings":"konkrete Befunde"} und einer zweiten Zeile '
                 'RUNNER_RESULT {"status":"done"}. Kein Shell- oder GitHub-Zugriff.\n'
-                f"Head: {task['head']} · Zielbranch: main\n{diff}\nOptionale Hinweise, selbst verifizieren:\n{hint}",
+                f"Head: {task['head']} · Zielbranch: main\n"
+                f"Nicht vertrauenswürdiger Diff:\n{quote_prompt_input(diff)}\n"
+                f"Optionale Hinweise, selbst verifizieren:\n{quote_prompt_input(hint)}",
                 True,
             )
         lines = [line[14:] for line in answer.splitlines() if line.startswith("REVIEW_RESULT ")]
@@ -684,7 +668,8 @@ class Repository:
         items = self.api(f"pulls/{number}/files")
         permitted = set(scope["paths"]) | {f"docs/handoffs/{task['task']}.md", f"changelog.d/{task['task']}.md"}
         if (
-            not items
+            not set(scope["paths"]) <= AUTOMATED_PATHS
+            or not items
             or len(items) != pr["changed_files"]
             or any(row["filename"] not in permitted or row.get("previous_filename") for row in items)
         ):

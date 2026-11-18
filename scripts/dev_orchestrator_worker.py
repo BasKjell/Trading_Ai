@@ -14,7 +14,7 @@ from contextlib import suppress
 from pathlib import Path
 
 
-def read_file(root: Path, name: str, limit: int) -> bytes | None:
+def read_file(root: Path, name: str, limit: int) -> bytes:
     path = root
     for part in name.split("/")[:-1]:
         path /= part
@@ -31,15 +31,52 @@ def read_file(root: Path, name: str, limit: int) -> bytes | None:
         return value
 
 
+def prepare_home(provider: str, auth: Path, home: Path) -> dict[str, str]:
+    """Copy only the provider's credential file into a fresh, private home."""
+    credential = {"codex": ".codex/auth.json", "claude": ".claude/.credentials.json"}[provider]
+    value = read_file(auth, credential, 1024 * 1024)
+    target = home / credential
+    target.parent.mkdir(parents=True, mode=0o700)
+    with target.open("xb") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(value)
+    env = {**os.environ, "HOME": str(home)}
+    env["CODEX_HOME"] = str(home / ".codex")
+    env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
+    return env
+
+
+def subscription_confirmed(provider: str, env: dict[str, str]) -> bool:
+    args = ["codex", "login", "status"] if provider == "codex" else ["claude", "auth", "status"]
+    result = subprocess.run(args, env=env, capture_output=True, text=True, check=False)
+    if result.returncode:
+        return False
+    if provider == "codex":
+        return "logged in using chatgpt" in (result.stdout + result.stderr).lower()
+    status = json.loads(result.stdout)
+    return status.get("loggedIn") is True and status.get("authMethod") == "claude.ai"
+
+
 def main() -> int:
-    maximum, names = int(sys.argv[1]), json.loads(sys.argv[2])
-    workspace = Path("/tmp/dev")
-    shutil.copytree("/work", workspace)
+    provider, maximum, names = sys.argv[1], int(sys.argv[2]), json.loads(sys.argv[3])
+    home = Path("/tmp/agent-home")
+    home.mkdir(mode=0o700)
+    try:
+        env = prepare_home(provider, Path("/auth"), home)
+        if not subscription_confirmed(provider, env):
+            return 1
+    except (OSError, ValueError):
+        return 1
+    workspace = Path("/work")
+    if names is not None:
+        workspace = Path("/tmp/dev")
+        shutil.copytree("/work", workspace)
     logfile = Path("/tmp/agent-events")
     with logfile.open("wb") as output:
         proc = subprocess.Popen(
-            sys.argv[3:],
+            sys.argv[4:],
             cwd=workspace,
+            env=env,
             stdout=output,
             stderr=output,
             start_new_session=True,
@@ -56,7 +93,7 @@ def main() -> int:
         return 1
     files = {}
     if code == 0:
-        for name in names:
+        for name in names or []:
             try:
                 value = read_file(workspace, name, remaining)
             except FileNotFoundError:

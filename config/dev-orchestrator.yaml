@@ -42,5 +42,5 @@ tasks: {}
 #     class: U
 #     priority: 10
 #     depends_on: [5]
-#     paths: [docs/REPORTS.md, localtrader/report_display.py, tests/test_report_display.py]
+#     paths: [docs/REPORTS.md]
 #     ollama: false

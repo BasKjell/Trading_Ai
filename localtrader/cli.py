@@ -143,7 +143,21 @@ def run_intraday_backtest(args: argparse.Namespace) -> int:
     )
     result = engine.run(datasets)
     benchmark = buy_and_hold(datasets, instruments, config, args.cost_multiplier)
-    output = write_intraday_report(result, args.output, benchmark, {"config_digest": config.digest, "holdout": holdout})
+    profiles = {
+        symbol: {
+            "fee_bps": instruments[symbol].costs.fee_bps,
+            "spread_bps": instruments[symbol].costs.spread_bps,
+            "slippage_bps": instruments[symbol].costs.slippage_bps,
+            "min_fee": instruments[symbol].costs.min_fee,
+        }
+        for symbol in datasets
+    }
+    output = write_intraday_report(
+        result,
+        args.output,
+        benchmark,
+        {"config_digest": config.digest, "holdout": holdout, "cost_profiles": profiles},  # what-if view (T-007)
+    )
     metrics = compute_metrics(result)
     print(
         json.dumps(
