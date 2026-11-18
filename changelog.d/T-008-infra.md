@@ -24,6 +24,9 @@ Holdout-Zugriff, Auswahl- und Bootstrap-Statistik) ist **nicht** enthalten und b
 
 - Nach Review 2 (`0ba43f6`): Wiederherstellung idempotent auf den letzten bestätigten Zustand.
 
+- Nach Review 3 (`4c834f5`): Budget kann auch bei gleichzeitigen Instanzen und verschiedenen IDs nicht
+  überschritten werden (Dateisperre + exklusive Budget-Slots); `central` nur mit kanonischer Slot-ID.
+
 **Tests:** `tests/test_t008_infrastructure.py` (19 Tests): echtes Protokoll konsistent und nicht startbar;
 Abweichungen in Faltendaten, Zeitstopp, Seed, Blocklänge und Kandidaten-ID sperren; Strukturfehler;
 Holdout-Abgleich; Belege; Journal-Lebenszyklus, Budget, Eindeutigkeit, Manipulation; Registry.

@@ -206,12 +206,64 @@ class JournalTests(unittest.TestCase):
             journal.reserve("x", "reference", {})
             with self.assertRaises(JournalError):
                 journal.reserve("x", "strategy", {})
-            journal.reserve("central-1", "central", {})
+            journal.reserve("EXP-T008-001-central", "central", {})
             with self.assertRaises(JournalError):
-                journal.reserve("central-2", "central", {})
+                journal.reserve("EXP-T008-001-central", "central", {})
             counts = journal.counts()
             self.assertEqual((counts["reference"]["used"], counts["central"]["used"]), (1, 1))
             self.assertEqual(counts["strategy"]["used"], 0)
+
+    def test_central_accepts_only_the_canonical_slot_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.journal(tmp)
+            with self.assertRaises(JournalError):
+                journal.reserve("my-own-central", "central", {})
+            self.assertEqual(journal.counts()["central"]["used"], 0)
+
+    def test_two_instances_with_stale_counts_cannot_exceed_the_budget(self) -> None:
+        # Regression (PR #23 review 3): instance B read a free count, A reserved, B reserved too (used=2).
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self.journal(tmp), self.journal(tmp)
+            stale = b.counts()
+            b.counts = lambda: stale  # type: ignore[method-assign]  # B acts on the count it read earlier
+            a.reserve("s1", "strategy", {})
+            a.reserve("s2", "strategy", {})  # budget 2 used up
+            with self.assertRaises(JournalError):
+                b.reserve("s3", "strategy", {})  # different ID, stale count: the budget slot decides
+            fresh = self.journal(tmp)
+            self.assertEqual(fresh.counts()["strategy"], {"used": 2, "remaining": 0})
+
+    def test_concurrent_reservations_never_exceed_the_budget(self) -> None:
+        import threading
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.journal(tmp)
+            results: list[str] = []
+            barrier = threading.Barrier(8)
+
+            def attempt(n: int) -> None:
+                journal = self.journal(tmp)
+                barrier.wait()
+                try:
+                    journal.reserve(f"t{n}", "strategy", {})
+                    results.append("ok")
+                except JournalError:
+                    results.append("refused")
+
+            threads = [threading.Thread(target=attempt, args=(n,)) for n in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(results.count("ok"), 2)
+            self.assertEqual(self.journal(tmp).counts()["strategy"]["used"], 2)  # chain and slots consistent
+
+    def test_claimed_slot_without_reservation_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.journal(tmp)
+            (journal.root / "budget" / "central-1").write_text("EXP-T008-001-central", encoding="utf-8")
+            with self.assertRaises(JournalError):  # crash between slot claim and reservation: fail closed
+                journal.status()
 
     def test_tampering_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -12,6 +12,13 @@ created only once, a failed or completed attempt can never be started again, eve
 Limit: someone who rewrites events, markers and head consistently is not detected; that needs an
 external anchor (planned with the central holdout service).
 
+Concurrency: every read-modify-write runs under an exclusive ``flock`` on ``journal.lock``, and each
+budget unit is a file ``budget/<kind>-<n>`` created exclusively before the reservation. So two processes
+can never exceed a budget, whatever IDs they request or how their reads interleave. A claimed budget
+slot without its reservation (crash in between) counts as consumed and blocks until reviewed. The
+central kind only accepts the canonical slot ID fixed for the journal (T-008 protocol). Atomicity holds
+within one local file system; the journal path itself is chosen and kept by the custodian.
+
 Reservation uses exclusive file creation (one file per attempt ID), which is atomic within one file
 system. Across machines or worktrees this is not a global lock; the central holdout service needs its
 own transactional reservation (planned, High).
@@ -22,11 +29,13 @@ Research and central use are counted separately.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -79,14 +88,32 @@ class AttemptJournal:
     """One directory per experiment: ``attempts/<id>.json`` (reservations) and ``events.jsonl``."""
 
     def __init__(
-        self, directory: str | Path, experiment_id: str, budget: Budget, clock: Callable[[], str] = _now
+        self,
+        directory: str | Path,
+        experiment_id: str,
+        budget: Budget,
+        clock: Callable[[], str] = _now,
+        central_slot_id: str | None = None,
     ) -> None:
         self.root = Path(directory) / experiment_id
         self.experiment_id = experiment_id
         self.budget = budget
         self.clock = clock
+        # canonical ID of the single central attempt (fixed in the freeze receipt)
+        self.central_slot_id = central_slot_id or f"{experiment_id}-central"
         (self.root / "attempts").mkdir(parents=True, exist_ok=True)
+        (self.root / "budget").mkdir(exist_ok=True)
         self.events_path = self.root / "events.jsonl"
+
+    @contextlib.contextmanager
+    def _locked(self) -> Iterator[None]:
+        """Exclusive lock for every read-modify-write (blocks other processes and threads)."""
+        with (self.root / "journal.lock").open("a") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     # ------------------------------------------------------------------ reading and verification
     def events(self) -> list[dict[str, Any]]:
@@ -145,6 +172,9 @@ class AttemptJournal:
         reserved_files = {path.stem for path in (self.root / "attempts").glob("*.json")}
         if reserved_files != set(state):
             raise JournalError("reservation files and journal disagree")
+        claimed = {path.read_text(encoding="utf-8") for path in (self.root / "budget").glob("*-*")}
+        if claimed != set(state):
+            raise JournalError("budget slots and reservations disagree (crash during reservation?)")
         seen: dict[str, set[str]] = {}
         for event in self.events():
             if event["status"] != "reserved":
@@ -186,18 +216,38 @@ class AttemptJournal:
             raise JournalError(f"unknown kind {kind!r}")
         if not ATTEMPT_ID.match(attempt_id):
             raise JournalError(f"invalid attempt id {attempt_id!r}")
-        if self.counts()[kind]["remaining"] <= 0:
-            raise JournalError(f"{kind} budget exhausted")
-        marker = self.root / "attempts" / f"{attempt_id}.json"
-        try:
-            with marker.open("x", encoding="utf-8") as handle:  # atomic: fails if already reserved
+        if kind == "central" and attempt_id != self.central_slot_id:
+            raise JournalError(f"central attempts must use the canonical slot id {self.central_slot_id!r}")
+        with self._locked():
+            if self.counts()[kind]["remaining"] <= 0:
+                raise JournalError(f"{kind} budget exhausted")
+            marker = self.root / "attempts" / f"{attempt_id}.json"
+            if marker.exists():
+                raise JournalError(f"attempt {attempt_id} already reserved")
+            self._claim_budget_slot(kind, attempt_id)  # atomic; consumed even if anything below fails
+            with marker.open("x", encoding="utf-8") as handle:
                 json.dump({"attempt_id": attempt_id, "kind": kind, "slot": slot}, handle, sort_keys=True)
-        except FileExistsError as error:
-            raise JournalError(f"attempt {attempt_id} already reserved") from error
-        return self._append({"attempt_id": attempt_id, "kind": kind, "slot": slot, "status": "reserved"})
+            return self._append({"attempt_id": attempt_id, "kind": kind, "slot": slot, "status": "reserved"})
+
+    def _claim_budget_slot(self, kind: str, attempt_id: str) -> None:
+        """Exclusively create the first free ``budget/<kind>-<n>``; independent of the counts read above."""
+        for number in range(1, self.budget.limit(kind) + 1):
+            try:
+                with (self.root / "budget" / f"{kind}-{number}").open("x", encoding="utf-8") as handle:
+                    handle.write(attempt_id)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                return
+            except FileExistsError:
+                continue
+        raise JournalError(f"{kind} budget exhausted")
 
     def transition(self, attempt_id: str, status: str, reason: str | None = None) -> dict[str, Any]:
         """Append a status change; terminal states are final. Failures and aborts need a reason."""
+        with self._locked():
+            return self._transition(attempt_id, status, reason)
+
+    def _transition(self, attempt_id: str, status: str, reason: str | None) -> dict[str, Any]:
         current = self.status().get(attempt_id)
         if current is None:
             raise JournalError(f"attempt {attempt_id} was never reserved")
