@@ -139,11 +139,16 @@ def trading_days(start: date, end: date) -> list[date]:
 
 def expected_bar_starts(day: date, minutes: int = 15) -> list[datetime]:
     """UTC start times of all regular-session bars of a trading day (early closes respected)."""
+    if type(minutes) is not int or minutes <= 0:
+        raise CalendarError("interval width must be a positive whole number of minutes")
     if not is_trading_day(day):
         return []
     close = NYSE_EARLY_CLOSE if day in NYSE_EARLY_CLOSES else NYSE_CLOSE
     moment = datetime.combine(day, NYSE_OPEN, NYSE_ZONE)
     end = datetime.combine(day, close, NYSE_ZONE)
+    if (end - moment) % timedelta(minutes=minutes):
+        # e.g. 60 minutes on a 6.5-hour session: the last slot would end after the close
+        raise CalendarError(f"{minutes}-minute slots do not tile the session of {day}")
     output = []
     while moment < end:
         output.append(moment.astimezone(UTC))

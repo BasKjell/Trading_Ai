@@ -12,6 +12,8 @@ Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
   `is_trading_day`, `trading_days`, `expected_bar_starts` (Halbtage, Sommerzeit), `inventory` (fehlende und
   unerwartete Slots); außerhalb 2016–2026 fail closed.
 - Gegenprobe mit den Forschungsdaten: Handelstage stimmen exakt (2.473); echte Lücken SPY 1 Slot, QQQ 2 Slots.
+- Nach Review: Intervallbreiten, die die Sitzung des Tages nicht glatt teilen (z. B. 60 Minuten), oder ≤ 0
+  werden abgelehnt.
 
 **Tests:** `tests/test_calendars.py`.
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from localtrader.calendars import (
     CalendarError,
@@ -64,3 +64,18 @@ class SlotTests(unittest.TestCase):
         complete = inventory(bars + [gap], date(2024, 12, 23), date(2024, 12, 28))
         self.assertEqual((complete["missing"], complete["unexpected"]), ([], []))
         self.assertEqual(complete["present_slots"], complete["expected_slots"])
+
+
+class IntervalWidthTests(unittest.TestCase):
+    def test_widths_that_do_not_tile_the_session_are_rejected(self) -> None:
+        # Regression (PR #31 review): a 60-minute width produced a slot ending after the 16:00 close.
+        for minutes in (60, 45, 0, -15):
+            with self.subTest(minutes), self.assertRaises(CalendarError):
+                expected_bar_starts(date(2024, 1, 3), minutes)
+        with self.assertRaises(CalendarError):  # 13:00 early close: 3.5 h is not a multiple of 60
+            expected_bar_starts(date(2024, 12, 24), 60)
+        for minutes in (1, 5, 15, 30):
+            slots = expected_bar_starts(date(2024, 12, 24), minutes)
+            self.assertLessEqual(slots[-1] + timedelta(minutes=minutes), datetime(2024, 12, 24, 18, 0, tzinfo=UTC))
+        with self.assertRaises(CalendarError):
+            inventory([], date(2024, 1, 3), date(2024, 1, 4), minutes=60)
