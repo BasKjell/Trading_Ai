@@ -125,6 +125,60 @@ class WhatIfTests(unittest.TestCase):
         (root / "syn" / "trades.csv").symlink_to(outside)
         self.assertEqual(report_names(root), [])
 
+    def _serve(self, root: Path) -> str:
+        server = DashboardServer(
+            ("127.0.0.1", 0),
+            Path(self.tmp.name) / "none.db",
+            Path(self.tmp.name) / "none.json",
+            ROOT / "localtrader" / "dashboard.html",
+            load_config(ROOT / "config" / "default.toml"),
+            reports_dir=root,
+        )
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}/api/whatif"
+
+    def _replace_cell(self, root: Path, file: str, row: int, column: str, value: str) -> None:
+        path = root / "syn" / file
+        lines = path.read_text().splitlines()
+        header = lines[0].split(",")
+        cells = lines[row].split(",")
+        cells[header.index(column)] = value
+        lines[row] = ",".join(cells)
+        path.write_text("\n".join(lines) + "\n")
+
+    def test_every_timestamp_is_checked_and_the_api_refuses_holdout_reports(self) -> None:
+        cases = {
+            "equity-middle": ("equity.csv", 5, "timestamp", "2025-11-05T15:00:00+00:00"),
+            "equity-first": ("equity.csv", 1, "timestamp", "2025-11-05T15:00:00+00:00"),
+            "trade-entry": ("trades.csv", 1, "entry_time", "2025-11-05T15:00:00+00:00"),
+            "trade-exit": ("trades.csv", 1, "exit_time", "2025-11-05T15:00:00+00:00"),
+            "naive-time": ("equity.csv", 3, "timestamp", "2024-01-03T15:00:00"),
+        }
+        for name, (file, row, column, value) in cases.items():
+            with self.subTest(name):
+                root = self._copy("ts-" + name)
+                self._replace_cell(root, file, row, column, value)
+                with self.assertRaises(ReportRefused):
+                    load_report(root / "syn")
+                api = self._serve(root)
+                listed = json.loads(urlopen(api).read())["reports"]
+                answer = json.loads(urlopen(api + "?report=syn&capital=20000").read())
+                self.assertIn("error", answer)
+                self.assertNotIn("2025-11-05", json.dumps(answer))
+                self.assertEqual(listed, [])
+        for name, change in {
+            "used": lambda s: s["holdout"].update(used=True),
+            "unmarked": lambda s: s.pop("holdout"),
+        }.items():
+            with self.subTest("api-" + name):
+                root = self._copy("api-" + name)
+                self._edit_summary(root, change)
+                api = self._serve(root)
+                self.assertEqual(json.loads(urlopen(api).read())["reports"], [])
+                self.assertIn("error", json.loads(urlopen(api + "?report=syn").read()))
+
     def test_each_instrument_keeps_its_own_costs_and_overrides_are_partial(self) -> None:
         root = self._copy("profiles")
         expensive = {"fee_bps": 3.0, "spread_bps": 4.0, "slippage_bps": 2.0, "min_fee": 10.0}

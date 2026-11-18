@@ -21,8 +21,8 @@ Model (stated in the dashboard):
   every trade exit and up to the end of the period, for baseline and variant alike.
 * Each instrument keeps its own cost profile from the report; a slider overrides only the field it sets.
 * Only research reports are admitted: ``holdout.used`` must be explicitly false, every dataset must end
-  before the holdout start (checked in ``summary.json`` before trades or equity are read), and no trade or
-  equity point may lie at or after it. Report files must be regular files inside the report directory.
+  before the holdout start (checked in ``summary.json`` before trades or equity are read), and no equity
+  point, trade entry or trade exit may lie at or after it. Report files must be regular files inside the report directory.
 """
 
 from __future__ import annotations
@@ -132,7 +132,27 @@ def admit(directory: str | Path) -> dict[str, Any]:
         moment = datetime.fromisoformat(last)
         if moment.tzinfo is None or moment + BAR > HOLDOUT_START:
             raise ReportRefused("dataset reaches into the holdout")
+    # only after the summary passed: every equity point and every trade entry/exit must be research time
+    with _file(path, "equity.csv").open(encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            _research_time(row.get("timestamp") or "", "equity curve")
+    with _file(path, "trades.csv").open(encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            _research_time(row.get("entry_time") or "", "trade entry")
+            if row.get("exit_time"):
+                _research_time(row["exit_time"], "trade exit")
     return summary
+
+
+def _research_time(value: str, what: str) -> datetime:
+    """Parse a report timestamp; anything at or after the holdout start (or without zone) refuses the report."""
+    try:
+        moment = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ReportRefused(f"{what}: unreadable timestamp") from None
+    if moment.tzinfo is None or moment >= HOLDOUT_START:
+        raise ReportRefused(f"{what} reaches into the holdout")
+    return moment
 
 
 def _impact_bps(profile: dict[str, float]) -> float:
@@ -162,10 +182,11 @@ def load_report(directory: str | Path, fallback_profiles: dict[str, dict[str, fl
         equity_rows = list(csv.DictReader(handle))
     if not equity_rows:
         raise ValueError("report has no equity curve")
-    start = datetime.fromisoformat(equity_rows[0]["timestamp"])
-    end = datetime.fromisoformat(equity_rows[-1]["timestamp"])
-    if end > HOLDOUT_START:
-        raise ReportRefused("equity curve reaches into the holdout")
+    # every point, not only the ends: an unordered or tampered curve must not carry a holdout timestamp
+    moments = [_research_time(row["timestamp"], "equity curve") for row in equity_rows]
+    start, end = min(moments), max(moments)
+    if moments != sorted(moments):
+        raise ReportRefused("equity curve is not in time order")
     final = float(equity_rows[-1]["equity"])
     trades = []
     with _file(path, "trades.csv").open(encoding="utf-8") as handle:
@@ -176,18 +197,20 @@ def load_report(directory: str | Path, fallback_profiles: dict[str, dict[str, fl
             if profile is None:
                 raise ValueError(f"no cost profile for {row['symbol']}")
             impact = _impact_bps(profile) / BPS
+            entry = _research_time(row["entry_time"], "trade entry")
+            leave = _research_time(row["exit_time"], "trade exit")
+            if not start <= entry <= leave <= end:
+                raise ReportRefused("trade lies outside the report period")
             trade = TradeRow(
                 row["strategy"],
                 row["symbol"],
-                datetime.fromisoformat(row["entry_time"]),
-                datetime.fromisoformat(row["exit_time"]),
+                entry,
+                leave,
                 float(row["quantity"]),
                 float(row["entry_price"]) / (1 + impact),
                 float(row["exit_price"]) / (1 - impact),
                 float(row["pnl"]),
             )
-            if trade.exit_time >= HOLDOUT_START:
-                raise ReportRefused("trades reach into the holdout")
             trades.append(trade)
     trades.sort(key=lambda t: (t.exit_time, t.entry_time, t.symbol))
     return Report(

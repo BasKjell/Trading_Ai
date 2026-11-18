@@ -8,7 +8,7 @@
   - `intraday-backtest` speichert jetzt die verwendeten Kostenannahmen je Instrument (`cost_profiles`) in `summary.json`. Ältere Reports nutzen die aktuelle Config und werden als Näherung markiert.
 - **Schutz (Review #43, Klasse K):**
   - Gezeigt und nachgerechnet werden nur Forschungsreports. Dafür muss `holdout.used` ausdrücklich `false` sein, und jedes Dataset muss vor dem Holdout-Start enden. Beides wird in `summary.json` geprüft, bevor Trades gelesen werden.
-  - Trades oder Equity im Holdout führen ebenfalls zur Ablehnung.
+  - Danach wird jeder Zeitstempel geprüft (jeder Punkt der Equity-Kurve, jeder Ein- und Ausstieg). Liegt einer davon im Holdout oder hat er keine Zeitzone, wird der Report weder gelistet noch nachgerechnet.
   - Reportdateien müssen reguläre Dateien im Reportverzeichnis sein.
 - **Modell und Grenzen:**
   - Jedes Instrument behält sein eigenes Kostenprofil. Ein Regler überschreibt nur das Feld, das er setzt.
