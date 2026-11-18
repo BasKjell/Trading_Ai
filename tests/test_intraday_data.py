@@ -67,6 +67,18 @@ class CsvImportTests(unittest.TestCase):
             },
         )
 
+    def test_non_finite_values_are_rejected_in_every_field(self) -> None:
+        # Regression (PR #17 review): NaN passes all comparison-based checks and was accepted.
+        valid = ["100", "101", "99", "100.5", "10"]
+        for field_index, field_name in enumerate(["open", "high", "low", "close", "volume"]):
+            for token in ("nan", "NaN", "inf", "-inf", "Infinity"):
+                with self.subTest(field=field_name, value=token):
+                    values = list(valid)
+                    values[field_index] = token
+                    data = self._import("2021.01.04,10:00," + ",".join(values) + "\n")
+                    self.assertEqual(data.bars, [])
+                    self.assertEqual(data.manifest.quality["rejected"], {"non_finite_value": 1})
+
     def test_intraday_gap_is_reported_and_not_filled(self) -> None:
         body = "2021.01.04,10:00,100,101,99,100,1\n2021.01.04,11:00,100,101,99,100,1\n"
         data = self._import(body)
