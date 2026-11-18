@@ -13,6 +13,27 @@ Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
 **Tests:** `tests/test_cost_schedule.py`.
 
+## 2026-11-18 – T-005 Persistenter Orderzustand und Fake-Broker-Abgleich (PR #26)
+
+Ein SQLite-Journal sichert Client-ID, Orderzustand, kumulierte Ausführungen und Abgleichalarme im Fake-Broker-Pfad. Offene Verkäufe reservieren Bestand. Nach einem Timeout oder einer Abweichung sperrt der Manager neue Orders. Der Wiederanlauf gleicht offene und abgeschlossene Orders, Cash und Bestände ab. Der Risikoprüfer kann den Abgleichstatus lesen. Tests umfassen doppelte und ungeordnete Meldungen, konkurrierende Aufrufer und einen echten Prozessabbruch mit simuliertem Broker.
+
+## 2026-11-18 – T-007 (Teil Reports): Experimentregister und Intraday-Reports im Dashboard (PR #24)
+
+**Anlass/Ziel:** Spec §13 / Issue #3, nur der von T-006 unabhängige Report-Teil (Denkstufe medium).
+
+**Änderungen**
+- `localtrader/report_index.py`: schreibgeschützte Übersicht über `experiments/` (alle Versuche aller
+  Agenten, Gesamtzahl der Varianten, Holdout-Nutzungen) und `reports/<lauf>/summary.json|scenarios.json`
+  (Backtests mit Kennzahlen und Buy-and-hold, Stresstests mit Kosten-, Verzögerungs-, Parameter- und
+  Phasenszenarien). Läufe mit Holdout-Nutzung werden markiert, unlesbare Dateien als Fehler gelistet.
+- Dashboard: Endpunkt `/api/reports` und zwei Tabellen (Experimentregister, Intraday-Reports).
+- Betriebsansicht (Modus, Positionen, Orders, Sperren …) bleibt offen bis T-006.
+
+- Nach Review (`83fae16`): falsch typisierte Reportdateien werden isoliert als Fehler gelistet.
+
+**Tests:** `tests/test_report_index.py`: Register-Zählung inkl. Holdout, fehlende Verzeichnisse,
+Backtest-/Stress-Einlesen inkl. NaN und kaputter Datei, HTTP-Endpunkt.
+
 ## 2026-11-17 – T-009 Zusammenarbeit mehrerer Agenten (PR #18)
 
 **Anlass/Ziel:** Projekt mit Claude und Codex abwechselnd fortsetzbar machen (Spec §19, §20).

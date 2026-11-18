@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config import AppConfig, load_config
+from .report_index import experiments_overview, reports_overview
 from .research_db import ResearchDB
 from .strategy_dsl import STRATEGY_FAMILY_CATALOG
 from .strategy_lab import robustness_reasons
@@ -292,12 +293,16 @@ class DashboardServer(ThreadingHTTPServer):
         champion_path: Path,
         html_path: Path,
         config: AppConfig,
+        experiments_dir: Path = Path("experiments"),
+        reports_dir: Path = Path("reports"),
     ) -> None:
         super().__init__(address, DashboardHandler)
         self.db_path = db_path
         self.champion_path = champion_path
         self.html_path = html_path
         self.config = config
+        self.experiments_dir = experiments_dir
+        self.reports_dir = reports_dir
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -322,6 +327,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/dashboard":
                 payload = json.dumps(
                     _read_dashboard(self.server.db_path, self.server.champion_path, self.server.config),
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode()
+                self._send(200, "application/json; charset=utf-8", payload)
+                return
+            if path == "/api/reports":
+                payload = json.dumps(
+                    {
+                        "experiments": experiments_overview(self.server.experiments_dir),
+                        "intraday": reports_overview(self.server.reports_dir),
+                    },
                     separators=(",", ":"),
                     allow_nan=False,
                 ).encode()
