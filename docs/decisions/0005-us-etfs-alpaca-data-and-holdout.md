@@ -18,14 +18,23 @@ sind, und es sollen mehr Daten ergänzt werden.
   15 Minuten. **Kein Datenkauf.**
 - **Handelbare und bereinigte Preise getrennt** (Spec §5): Die Engine nutzt ausschließlich Rohkurse
   (`adjustment=raw`, wie gehandelt) für Signale, Ausführung, Stops und Bewertung. Die bereinigte Serie
-  (`adjustment=all`) wird getrennt abgelegt und nur für Analysen verwendet. Bardividenden werden je
-  Ex-Tag aus beiden Serien abgeleitet und auf gehaltene Positionen gebucht, abzüglich 15 % US-Quellensteuer
-  (Annahme W-8BEN), ebenso im Buy-and-hold-Vergleich. Splits werden noch nicht unterstützt: Ein Split im
-  Abrufzeitraum bricht den Abruf ab (SPY/QQQ hatten 2016–2026 keinen).
+  (`adjustment=all`) wird getrennt abgelegt und nur für Analysen verwendet.
+- **Dividenden:** Quelle ist Alpacas Corporate-Actions-Endpunkt (Ex-Tag, Zahltag, Betrag je Anteil). Als
+  unabhängige Gegenprobe werden die Beträge zusätzlich aus Roh- und bereinigter Serie abgeleitet; eine
+  Abweichung über 5 % bricht den Abruf ab. Am Ex-Tag entsteht für eine gehaltene Position eine
+  **Forderung** abzüglich 15 % US-Quellensteuer (Annahme W-8BEN): Sie zählt zum Kontowert, ist aber kein
+  verfügbares Cash. Erst am Zahltag wird sie zu Cash, auch wenn die Position inzwischen geschlossen ist.
+  Am Datenende offene Forderungen werden ausgewiesen. Die tatsächlich verwendeten Dividenden fließen in
+  die Datenversion des Laufs ein. Buy-and-hold rechnet mit derselben Anspruchslogik. Splits werden noch
+  nicht unterstützt: Ein Split im Abrufzeitraum (aus einer der beiden Quellen) bricht den Abruf ab
+  (SPY/QQQ hatten 2016–2026 keinen).
+- **Lücken bei Alpaca:** Vor 2020 fehlen alle Zahltage; Annahme (gekennzeichnet): Ex-Tag + längste
+  beobachtete Verzögerung desselben ETFs (Cash eher später). Ein doppelt gelisteter Eintrag mit gleichem
+  Betrag (QQQ 2022-09-19) verwendet den späteren Zahltag; Alpacas bereinigte Serie rechnet ihn doppelt
+  ein, die Gegenprobe erkennt das. Abweichende Beträge brechen den Abruf ab.
 - Bekannte Datenlücke: Alpaca fehlen zwei SPY-Dividenden (Ex-Tage im März 2016 und Juni 2018), sowohl in den
   bereinigten Bars als auch im Corporate-Actions-Endpunkt. Der Abruf meldet solche Lücken im Manifest
-  (`dividend_gaps`). Die übrigen abgeleiteten Beträge stimmen mit dem Corporate-Actions-Endpunkt auf etwa
-  0,5 % überein (Stichprobe 2016–2018).
+  (`dividend_gaps`) und die Gegenprobe beider Quellen (`dividend_crosscheck`).
 - Nur Bars der **regulären Handelszeit des jeweiligen Tages**: 09:30–16:00 America/New_York, an
   NYSE-Halbtagen bis 13:00 (`localtrader/calendars.py`, für 2016–2025 gegen das Handelsvolumen in den
   Daten geprüft). Tage nach dem bekannten Kalenderende (2026-12-31) gelten als nicht handelbar.

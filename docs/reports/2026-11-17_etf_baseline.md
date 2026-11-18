@@ -2,13 +2,13 @@
 
 Erzeugt mit `intraday-backtest` und `intraday-stress` (`--symbol SPY|QQQ`) auf dem Stand nach dem
 Codex-Review zu PR #21. Rohdateien liegen lokal unter `reports/` und werden nicht versioniert.
-Experiment: **EXP-T018-002** (ersetzt EXP-T018-001, das bereinigte Kurse zur Ausführung nutzte und
-Nachbörsen-Bars an Halbtagen enthielt).
+Experiment: **EXP-T018-003** (ersetzt EXP-T018-001/-002; -001 nutzte bereinigte Kurse zur Ausführung und
+enthielt Nachbörsen-Bars an Halbtagen, -002 buchte Dividenden am Ex-Tag als Cash).
 
 **Daten:** Alpaca SIP, **handelbare Rohkurse** für Signale, Ausführung, Stops und Bewertung; Dividenden
-abgeleitet und abzüglich 15 % Quellensteuer gebucht; reguläre Handelszeit je Tag inkl. NYSE-Halbtagen
+aus Alpaca-Corporate-Actions als Forderung am Ex-Tag und Cash am Zahltag, abzüglich 15 % Quellensteuer; reguläre Handelszeit je Tag inkl. NYSE-Halbtagen
 (ADR 0005). Forschungszeitraum 2016-01-04 bis 2025-10-31 (2.473 Handelstage). **Holdout ab 2025-11-01
-beim Import verworfen** (6.784 bzw. 6.785 Zeilen, nur Anzahl gemeldet). SPY fehlen bei Alpaca zwei
+beim Import verworfen** (6.788 Zeilen je Symbol, nur Anzahl gemeldet). SPY fehlen bei Alpaca zwei
 Dividenden (März 2016, Juni 2018); Trend- und Buy-and-hold-Ergebnisse von SPY sind dadurch minimal zu niedrig.
 **Kosten (Annahme):** keine Kommission, 0,1 bp Gebühren, 0,5 bp Spread, 1,0 bp Slippage, keine Finanzierung.
 **Kapital/Risiko:** 10.000 (USD 1:1 als Kontowährung, T-011 offen), 0,20 % Risiko je Trade, max. 20 % je Instrument.
@@ -33,9 +33,9 @@ Dividenden (März 2016, Juni 2018); Trend- und Buy-and-hold-Ergebnisse von SPY s
 | Profit-Faktor | 1,14 | 1,23 | 0,76 | 0,75 |
 | Ø Haltedauer | 27 h | 27 h | 7,1 h | 6,7 h |
 | Kosten gesamt | 530 | 522 | 434 | 329 |
-| Erhaltene Dividenden (netto) | 67 | 23 | 24 | 8 |
+| Dividendenansprüche (netto) | 67 | 23 | 24 | 8 |
 | Ø Exposure / Zeit im Markt | 6,1 % / 31 % | 6,1 % / 31 % | 1,7 % / 9 % | 1,2 % / 7 % |
-| Buy-and-hold gleicher Zeitraum (mit Nettodividenden) | +263 % | +490 % | +263 % | +490 % |
+| Buy-and-hold gleicher Zeitraum (mit Nettodividenden) | +263 % | +489 % | +263 % | +489 % |
 
 Mean Reversion erreicht Ende 2021 die 8-%-Drawdown-Grenze; danach lehnt die Risiko-Engine alle neuen
 Einstiege ab. Ergebnisse ab 2022 enthalten deshalb keine Trades mehr. Am Sitzungsende entstandene Signale
@@ -64,6 +64,7 @@ werden verworfen statt am Folgetag ausgeführt.
 - **Mean Reversion** ist durchgehend negativ (Profit-Faktor < 1, Intervall vollständig unter null) und
   wird verworfen.
 - Die Korrektur (Rohkurse, Dividenden, Halbtage) ändert die Strategieergebnisse kaum; der
-  Buy-and-hold-Vergleich sinkt, weil bereinigte Kurse Dividenden brutto reinvestiert hatten.
+  Buy-and-hold-Vergleich sinkt, weil bereinigte Kurse Dividenden brutto reinvestiert hatten. Die Buchung
+  am Zahltag statt am Ex-Tag (EXP-T018-003) verändert die Ergebnisse praktisch nicht.
 - Nächster Schritt ist die Walk-forward-Validierung nach dem Protokoll in T-008 (#22), nicht weitere
   Parametervarianten auf diesem Zeitraum. Der Holdout bleibt unberührt.
