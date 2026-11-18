@@ -8,10 +8,11 @@ Stand: 2026-11-18. Kennzeichnung: **geplant / implementiert / getestet / integri
 | Branch | Inhalt | Zustand |
 |---|---|---|
 | `main` | T-001–T-004: localtrader-Basis, korrigierte Kosten/Risikolimits, 15-Minuten-Import, kausale Intraday-Engine (geprüfte Codebasis `1dfb421`) | **integriert** (PR #17) |
-| `agent/T-009-agent-collaboration` | T-009 (#16): AGENTS.md, Spec, Register, Vorlagen | **integriert (PR #18)** – gilt nach dessen Merge |
+| `agent/T-009-agent-collaboration` | T-009 (#16): AGENTS.md, Spec, Register, Vorlagen | **integriert** (PR #18) |
+| `agent/T-005-order-state` | T-005 (#1): Persistenter Orderzustandsautomat und Fake-Broker-Abgleich | **integriert (PR #26)** – gilt nach dessen Merge |
 | `agent/T-018-alpaca-etf-data` | T-018 (#13): SPY/QQQ-Daten, Holdout, Dividenden | review, PR #21 |
 | `agent/T-011-fx-data` | T-011 Datenteil (#6): EZB EUR/USD, kausale Abfrage, Holdout-Schnitt | **integriert (PR #25)** – gilt nach dessen Merge; Buchhaltung in EUR offen |
-| `agent/T-007-report-view` | T-007 Report-Teil (#3) | review, PR #24 (nach #18 auf `main` umstellen) |
+| `agent/T-007-report-view` | T-007 Report-Teil (#3): Experimentregister und Intraday-Reports im Dashboard | **integriert** (PR #24); Betriebsansicht offen (T-006) |
 | `agent/T-008-research-design` | T-008 Forschungsdesign (#4) | Draft, PR #22 – wartet auf Methodenreview |
 | `agent/T-008-journal-registry` | T-008 Bausteine (Protokollprüfung, Journal, Registry) | review, PR #23 (Basis #22) |
 
@@ -27,9 +28,10 @@ Stand: 2026-11-18. Kennzeichnung: **geplant / implementiert / getestet / integri
 | Intraday-Engine, Trendfolge, Mean Reversion, Benchmarks, Stressszenarien | getestet | `tests/test_intraday_engine.py`; Beispielreport `docs/reports/` |
 | Experimentregister | getestet | `tests/test_experiment_registry.py`, EXP-0001; IDs je Aufgabe (`EXP-T009-001`) |
 | Offline-Paper-Demo mit Neustart und Kill-Switch | implementiert | nur Demo-Ereignisse, kein 15-Minuten-Betrieb |
-| Persistenter Orderzustandsautomat, Brokerabgleich | geplant | T-005 (#1), beansprucht von Codex |
+| Persistenter Orderzustandsautomat und Fake-Broker-Abgleich | getestet | T-005 (#1), PR #26; `tests/test_order_manager.py`. Periodischer Abgleich im Paper-Dienst folgt mit T-006. |
 | Paper-Betrieb 15 min, Modi backtest/paper/shadow/live | geplant | T-006 (#2) |
 | Live-Trading | **gesperrt** | kein Live-Transport im Code; `mode = "offline"` wird erzwungen |
+| Dashboard: Experimentregister und Intraday-Reports | integriert mit PR #24 | `tests/test_report_index.py` |
 | Dashboard Betriebsansicht | geplant | T-007 (#3) (Research-Dashboard vorhanden) |
 | Walk-forward + Champion-Challenger 15 min, Holdout-Kontrolle | geplant | T-008 (#4) |
 | Dezimalbuchhaltung, FX | geplant | T-011 (#6) |
@@ -52,7 +54,7 @@ ADR 0005); grüne CI am geprüften Head-SHA gilt als `make check`-Nachweis (AGEN
 
 ## Nächste Ziele (Reihenfolge)
 
-1. Integration von #18, danach #21, #25, #24 (auf `main` umstellen).
+1. Integration von #21 und #25 nach Behebung der offenen Review-Befunde.
 2. Methodenreview von #22, danach T-008-Implementierung (High) auf den ETF-Daten.
-3. T-005 Orderzustandsautomat (Codex), T-011 Buchhaltung in EUR (High).
+3. T-011 Buchhaltung in EUR (High).
 4. T-006 Paper-Betrieb, danach T-007 Betriebsansicht, T-010 (#5) Abnahme.
