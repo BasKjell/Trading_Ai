@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import copy
+import tempfile
 import unittest
 from datetime import UTC, datetime, time, timedelta
+from pathlib import Path
 from typing import Any
 
 from localtrader.config import load_config
@@ -12,6 +14,8 @@ from localtrader.intraday_data import DatasetManifest, ImportedDataset, SessionS
 from localtrader.intraday_engine import InstrumentSpec, IntradayEngine
 from localtrader.intraday_strategies import StrategyContext
 from localtrader.operating_rules import OperatingRulesError, load_operating_rules
+
+DEFAULT = Path(__file__).resolve().parent.parent / "config" / "default.toml"
 
 # Session 09:00-10:00 UTC on weekdays: four 15-minute bars per day.
 SESSION = SessionSpec("UTC", time(9, 0), time(10, 0))
@@ -86,21 +90,29 @@ class ValidationTests(unittest.TestCase):
                 with self.assertRaises(OperatingRulesError):
                     load_operating_rules(raw)
 
-    def test_missing_unknown_and_inconsistent_rules_are_rejected(self) -> None:
+    def test_missing_and_unknown_rules_are_rejected(self) -> None:
         missing = copy.deepcopy(self.raw)
         del missing["operating_rules"]["manual_orders"]
         unknown = copy.deepcopy(self.raw)
         unknown["operating_rules"]["auto_liquidate"] = True
-        inconsistent = copy.deepcopy(self.raw)
-        inconsistent["operating_rules"]["overnight_positions"] = "forbidden"
-        for raw in (missing, unknown, inconsistent, {"operating_rules": None}):
+        for raw in (missing, unknown, {"operating_rules": None}):
             with self.assertRaises(OperatingRulesError):
                 load_operating_rules(raw)
 
-    def test_flatten_before_close_disables_overnight(self) -> None:
-        raw = copy.deepcopy(self.raw)
-        raw["operating_rules"]["before_close"] = "flatten_all"
-        self.assertFalse(load_operating_rules(raw).allows_overnight)
+    def test_unenforced_alternatives_are_rejected_at_start(self) -> None:
+        # Regression (PR #27 review): flatten_all and the holding bans were accepted but not enforced.
+        for key, value in (
+            ("before_close", "flatten_all"),
+            ("overnight_positions", "forbidden"),
+            ("weekend_positions", "forbidden"),
+        ):
+            with self.subTest(key), tempfile.TemporaryDirectory() as tmp:
+                text = DEFAULT.read_text(encoding="utf-8")
+                line = next(row for row in text.splitlines() if row.startswith(f"{key} = "))
+                path = Path(tmp) / "config.toml"
+                path.write_text(text.replace(line, f'{key} = "{value}"'), encoding="utf-8")
+                with self.assertRaisesRegex(OperatingRulesError, "planned but not enforced"):
+                    load_config(path)  # through the real configuration entry point
 
 
 class EnforcedInBacktestTests(unittest.TestCase):
