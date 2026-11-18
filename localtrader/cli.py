@@ -351,6 +351,27 @@ def run_runtime(args: argparse.Namespace) -> int:
         runtime.close()
 
 
+def compare_feeds(args: argparse.Namespace) -> int:
+    """T-012: data-only comparison of two bar feeds (no strategy, no returns)."""
+    from .feed_compare import compare_files, summary
+
+    results = []
+    for symbol in args.symbols.split(","):
+        symbol = symbol.strip()
+        results.append(
+            (
+                symbol,
+                compare_files(
+                    Path(args.reference_dir) / f"{symbol}_15m.csv", Path(args.candidate_dir) / f"{symbol}_15m.csv"
+                ),
+            )
+        )
+    print(summary(results))
+    if args.json:
+        print(json.dumps(dict(results), indent=2, default=str))
+    return 0
+
+
 def kill_switch(args: argparse.Namespace) -> int:
     session = PaperSession(load_config(args.config), args.state, args.audit)
     session.set_kill_switch(args.action == "on")
@@ -607,6 +628,12 @@ def build_parser() -> argparse.ArgumentParser:
     runtime.add_argument("--release", default=None, help="live release file (live stays locked in this build)")
     runtime.add_argument("--env-file", default=".env")
     runtime.set_defaults(func=run_runtime)
+    feeds = sub.add_parser("compare-feeds", help="compare two 15-minute feeds (e.g. SIP vs IEX), data only")
+    feeds.add_argument("--reference-dir", default="data")
+    feeds.add_argument("--candidate-dir", default="data/iex")
+    feeds.add_argument("--symbols", default="SPY,QQQ")
+    feeds.add_argument("--json", action="store_true")
+    feeds.set_defaults(func=compare_feeds)
     kill = sub.add_parser("kill-switch")
     kill.add_argument("action", choices=["on", "off"])
     kill.add_argument("--state", default="state/paper_state.json")
