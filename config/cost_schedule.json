@@ -5,6 +5,10 @@
     "SPY",
     "QQQ"
   ],
+  "coverage": {
+    "from": "2016-01-01",
+    "to": "2027-01-01"
+  },
   "entries": [
     {
       "id": "commission",
@@ -171,9 +175,9 @@
       "kind": "measurement",
       "valid_from": "2016-01-01",
       "valid_to": null,
-      "reference": "python3 -m localtrader measure-spreads --symbol SPY --bars data/SPY_15m.csv (Alpaca SIP-Quotes, erste gültige Quote je Bar-Eröffnung, Seed 20261106, nur vor 2025-11-01)",
+      "reference": "python3 -m localtrader measure-spreads --symbol SPY --bars data/SPY_15m.csv (Alpaca SIP-Quotes, erste gültige Quote je Bar-Eröffnung, Seed 20261106, nur vor dem [holdout] start, Anfragefenster vollständig davor)",
       "sample": 400,
-      "note": "90. Perzentil des halben Spreads als konservativer Kostenwert; Median 0.1765 bp, p99 0.5666 bp; Sitzungseröffnung Median 0.2034 bp, p90 0.5003 bp (n=34)"
+      "note": "90. Perzentil des halben Spreads als konservativer Kostenwert; Median 0.1765 bp, p99 0.5666 bp; Sitzungseröffnung 09:30 New York (DST-korrekt) Median 0.2837 bp, p90 0.5768 bp (n=14)"
     },
     {
       "id": "spread-qqq",
@@ -186,9 +190,9 @@
       "kind": "measurement",
       "valid_from": "2016-01-01",
       "valid_to": null,
-      "reference": "python3 -m localtrader measure-spreads --symbol QQQ --bars data/QQQ_15m.csv (Alpaca SIP-Quotes, erste gültige Quote je Bar-Eröffnung, Seed 20261106, nur vor 2025-11-01)",
+      "reference": "python3 -m localtrader measure-spreads --symbol QQQ --bars data/QQQ_15m.csv (Alpaca SIP-Quotes, erste gültige Quote je Bar-Eröffnung, Seed 20261106, nur vor dem [holdout] start, Anfragefenster vollständig davor)",
       "sample": 400,
-      "note": "90. Perzentil des halben Spreads als konservativer Kostenwert; Median 0.2792 bp, p99 0.8494 bp; Sitzungseröffnung Median 0.4265 bp, p90 0.7303 bp (n=21)"
+      "note": "90. Perzentil des halben Spreads als konservativer Kostenwert; Median 0.2792 bp, p99 0.8494 bp; Sitzungseröffnung 09:30 New York (DST-korrekt) Median 0.5098 bp, p90 0.7767 bp (n=16)"
     }
   ]
 }

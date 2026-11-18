@@ -114,3 +114,75 @@ class SpreadTests(unittest.TestCase):
         self.assertEqual(result["half_spread_bps_session_open"]["n"], 1)
         self.assertIn("feed=sip", urls[0])
         self.assertIn("start=2024-03-05T14%3A30%3A00Z", urls[0])
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """PR #28 review: holdout limit, DST-aware open statistic, NaN and per-date completeness."""
+
+    def test_nan_and_infinite_costs_are_rejected(self) -> None:
+        for bad in (float("nan"), float("inf")):
+            with self.subTest(bad):
+                schedule = copy.deepcopy(load_schedule(SCHEDULE))
+                schedule["entries"][0]["value"] = bad
+                with self.assertRaises(ScheduleError):
+                    validate(schedule)
+
+    def test_gap_on_a_covered_date_is_rejected_and_visible(self) -> None:
+        from localtrader.cost_schedule import missing_components
+
+        schedule = copy.deepcopy(load_schedule(SCHEDULE))
+        self.assertEqual(missing_components(schedule, "SPY", date(2027, 1, 1)), ["regulatory_taf"])
+        schedule["coverage"]["to"] = "2027-06-01"  # vouching for 2027 although TAF ends 2026-12-31
+        with self.assertRaisesRegex(ScheduleError, "regulatory_taf missing on 2027-01-01"):
+            validate(schedule)
+
+    def test_session_open_is_classified_in_new_york_time(self) -> None:
+        moments = [
+            datetime(2024, 7, 2, 13, 30, tzinfo=UTC),  # 09:30 EDT: open
+            datetime(2024, 7, 2, 14, 30, tzinfo=UTC),  # 10:30 EDT: not open
+            datetime(2024, 1, 3, 14, 30, tzinfo=UTC),  # 09:30 EST: open
+        ]
+        quote = {"quotes": {"SPY": [{"bp": 99.99, "ap": 100.01, "bs": 1, "as": 1}]}}
+        result = measure_spreads(lambda url: (quote, {}), "SPY", moments)
+        self.assertEqual(result["half_spread_bps_session_open"]["n"], 2)
+
+    def test_cli_never_queries_the_holdout(self) -> None:
+        import argparse
+        import tempfile
+        from unittest import mock
+
+        from localtrader import cli
+
+        requested: list[str] = []
+
+        class FakeDownloader:
+            def _request_page(self, url: str) -> tuple[dict[str, Any], dict[str, str]]:
+                requested.append(url)
+                return {"quotes": {}}, {}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bars = Path(tmp) / "bars.csv"
+            rows = ["timestamp", "2025-10-31T19:45:00+00:00", "2025-11-03T14:30:00+00:00", "2025-10-31T23:59:59+00:00"]
+            bars.write_text("\n".join(rows) + "\n", encoding="utf-8")
+            config = Path(tmp) / "config.toml"
+            config.write_text(
+                (REPO / "config" / "default.toml").read_text(encoding="utf-8")
+                + '\n[holdout]\nstart = "2025-11-01T00:00:00+00:00"\n',
+                encoding="utf-8",
+            )
+
+            def args(before: str | None) -> argparse.Namespace:
+                return argparse.Namespace(
+                    config=str(config), bars=str(bars), samples=10, before=before, symbol="SPY",
+                    output=str(Path(tmp) / "out.json"), env="unused",
+                )  # fmt: skip
+
+            with mock.patch(
+                "localtrader.data_requests.AlpacaDatasetDownloader.from_env", return_value=FakeDownloader()
+            ):
+                with self.assertRaises(SystemExit):
+                    cli.run_measure_spreads(args("2025-12-01T00:00:00+00:00"))  # cannot move the limit later
+                self.assertEqual(requested, [])
+                cli.run_measure_spreads(args(None))
+        self.assertEqual(len(requested), 1)  # only 2025-10-31 19:45; the 23:59:59 window would cross the cutoff
+        self.assertIn("2025-10-31T19%3A45%3A00Z", requested[0])

@@ -1,8 +1,9 @@
 # Kostentabelle SPY/QQQ (Vorbedingung T-008)
 
 Maschinenlesbar: [`config/cost_schedule.json`](../../config/cost_schedule.json), geprüft von
-`localtrader/cost_schedule.py` (keine Überlappungen, jede Zeile mit Beleg, Pflichtkomponenten je
-Instrument). Der Digest der Datei wird bei T-008 im Freeze-Beleg gebunden. **Die Engine rechnet noch mit
+`localtrader/cost_schedule.py`: keine Überlappungen, endliche nichtnegative Werte, jede Zeile mit Beleg und
+jede Pflichtkomponente an **jedem** Tag des erklärten Geltungsbereichs (`coverage` 2016-01-01 bis
+2026-12-31); `missing_components()` zeigt Lücken für ein konkretes Datum (z. B. FINRA TAF ab 2027). Der Digest der Datei wird bei T-008 im Freeze-Beleg gebunden. **Die Engine rechnet noch mit
 den Werten aus `config/default.toml`;** die Anbindung der Tabelle gehört zu T-008/T-011.
 
 Jede Zeile ist genau einer Art zugeordnet:
@@ -19,16 +20,17 @@ Jede Zeile ist genau einer Art zugeordnet:
 | FINRA TAF 2016–2025 | Verkauf | $0.000166/Stück, max. $8.30 | Annahme / Quelle | Satz 2024/25 (frühere Jahre niedriger), FINRA-Gebührenplan |
 | FINRA TAF 2026 | Verkauf | $0.000195/Stück, max. $9.79 | Quelle | FINRA-Gebührenplan; mögliche Aussetzung Q4/2026 nicht berücksichtigt |
 | CAT-Gebühr | beide | $0.000046/Stück | Annahme | höchster bekannter Alpaca-Satz; aktuelle Sätze niedriger |
-| Halber Spread SPY | beide | 0,29 bp | Messwert | 90. Perzentil aus 400 Stichproben 2016–2025 (Median 0,18 bp; Eröffnung p90 0,50 bp) |
-| Halber Spread QQQ | beide | 0,46 bp | Messwert | 90. Perzentil aus 400 Stichproben 2016–2025 (Median 0,28 bp; Eröffnung p90 0,73 bp) |
+| Halber Spread SPY | beide | 0,29 bp | Messwert | 90. Perzentil aus 400 Stichproben 2016–2025 (Median 0,18 bp; Eröffnung 09:30 p90 0,58 bp) |
+| Halber Spread QQQ | beide | 0,46 bp | Messwert | 90. Perzentil aus 400 Stichproben 2016–2025 (Median 0,28 bp; Eröffnung 09:30 p90 0,78 bp) |
 | Slippage | beide | 1,0 bp | Annahme | keine eigenen Fill-Daten; zusätzlich zum Spread |
 | EUR/USD-Umtausch | Ein-/Auszahlung | 100 bp | Annahme | Alpaca veröffentlicht keinen festen Aufschlag (Beispiele 45–150 bp); nur bei Ein-/Auszahlung |
 
 ## Spread-Messung
 
 `python3 -m localtrader measure-spreads --symbol SPY --bars data/SPY_15m.csv` zieht mit festem Seed 400
-Bar-Eröffnungen (dort führt die Engine aus) aus dem Forschungszeitraum vor 2025-11-01 – der Holdout wird
-nie abgefragt – und nimmt je Zeitpunkt die erste gültige SIP-Quote der folgenden 2 Sekunden (gekreuzte,
+Bar-Eröffnungen (dort führt die Engine aus) aus dem Forschungszeitraum. Die Obergrenze ist fest der
+`[holdout] start`; `--before` darf sie nur vorverlegen, und das ganze Anfragefenster muss davor liegen –
+der Holdout wird nie abgefragt. Je Zeitpunkt wird je Zeitpunkt die erste gültige SIP-Quote der folgenden 2 Sekunden (gekreuzte,
 gesperrte oder leere Quotes werden übersprungen). Ergebnis je Jahr:
 
 | Jahr | SPY Median / p90 (bp, halber Spread) | QQQ Median / p90 |
@@ -41,7 +43,8 @@ gesperrte oder leere Quotes werden übersprungen). Ergebnis je Jahr:
 | 2025 | 0,09 / 0,33 | 0,19 / 0,32 |
 
 Grenzen: Quotes zeigen Spreads, keine tatsächlichen Fills; die Stichprobe je Jahr ist klein (25–51);
-Eröffnungen um 09:30 haben deutlich breitere Spreads, kommen aber nur in rund 8 % der Stichproben vor.
+Eröffnungen um 09:30 New York (sommerzeitkorrekt klassifiziert) haben deutlich breitere Spreads, kommen aber
+nur in rund 4 % der Stichproben vor (SPY 14, QQQ 16).
 
 ## Vergleich mit der bisherigen Konfiguration (Hin- und Rückweg)
 

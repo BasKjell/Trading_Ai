@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import random
 import statistics
 from collections.abc import Callable
@@ -27,8 +28,10 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 KINDS = ("source", "measurement", "assumption")
+NEW_YORK = ZoneInfo("America/New_York")
 UNITS = ("bps_of_notional", "usd_per_share", "usd_per_trade_max", "bps_half_spread", "bps_per_conversion")
 SIDES = ("buy", "sell", "both", "conversion")
 REQUIRED_COMPONENTS = ("commission", "regulatory_sec", "regulatory_taf", "regulatory_cat", "spread", "slippage")
@@ -73,8 +76,8 @@ def validate(schedule: dict[str, Any]) -> None:
         if entry.get("side") not in SIDES:
             problems.append(f"{entry_id}: unknown side {entry.get('side')!r}")
         value = entry.get("value")
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
-            problems.append(f"{entry_id}: value must be a non-negative number")
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
+            problems.append(f"{entry_id}: value must be a finite non-negative number")
         if not str(entry.get("reference") or "").strip():
             problems.append(f"{entry_id}: every entry needs a reference (URL, command or reason)")
         if entry.get("kind") == "measurement" and not isinstance(entry.get("sample"), int):
@@ -94,13 +97,42 @@ def validate(schedule: dict[str, Any]) -> None:
             if start < other_end and other_start < end:
                 problems.append(f"{entry_id} overlaps {other_id}")
         periods.setdefault(key, []).append((start, end, entry_id))
-    for instrument in schedule.get("instruments", []):
-        present = {e.get("component") for e in entries if e.get("instrument") in (instrument, "*")}
-        for component in REQUIRED_COMPONENTS:
-            if component not in present:
-                problems.append(f"{instrument}: component {component} missing")
+    coverage = schedule.get("coverage") or {}
+    try:
+        cover_from = date.fromisoformat(str(coverage["from"]))
+        cover_to = date.fromisoformat(str(coverage["to"]))
+    except (KeyError, ValueError):
+        problems.append("schedule needs coverage.from/coverage.to (dates the schedule vouches for)")
+    else:
+        # every required component must be valid on every day of the coverage, not just somewhere
+        boundaries = {cover_from}
+        for entry in entries:
+            for field_name in ("valid_from", "valid_to"):
+                try:
+                    day = date.fromisoformat(str(entry.get(field_name)))
+                except ValueError:
+                    continue
+                if cover_from <= day < cover_to:
+                    boundaries.add(day)
+        for instrument in schedule.get("instruments", []):
+            for day in sorted(boundaries):
+                for component in missing_components(schedule, instrument, day):
+                    problems.append(f"{instrument}: component {component} missing on {day}")
     if problems:
         raise ScheduleError("; ".join(problems))
+
+
+def missing_components(schedule: dict[str, Any], instrument: str, day: date) -> list[str]:
+    """Required components without a valid entry on ``day`` (a run must not use a day with gaps)."""
+    present = set()
+    for entry in schedule.get("entries", []):
+        try:
+            start, end = _period(entry)
+        except (KeyError, ValueError, ScheduleError):
+            continue
+        if entry.get("instrument") in (instrument, "*") and start <= day < end:
+            present.add(entry.get("component"))
+    return [component for component in REQUIRED_COMPONENTS if component not in present]
 
 
 def entries_for(schedule: dict[str, Any], instrument: str, day: date) -> list[dict[str, Any]]:
@@ -120,9 +152,16 @@ def digest(schedule: dict[str, Any]) -> str:
 # ------------------------------------------------------------------------------------- spread sampling
 
 
-def sample_bar_opens(bar_starts: list[datetime], count: int, before: datetime, seed: int = 20261106) -> list[datetime]:
-    """Deterministic random sample of bar opens strictly before ``before`` (holdout never sampled)."""
-    eligible = sorted(start for start in bar_starts if start < before)
+def sample_bar_opens(
+    bar_starts: list[datetime],
+    count: int,
+    before: datetime,
+    seed: int = 20261106,
+    window: timedelta = timedelta(seconds=2),
+) -> list[datetime]:
+    """Deterministic random sample of bar opens whose whole quote window ends by ``before`` (holdout never
+    queried)."""
+    eligible = sorted(start for start in bar_starts if start + window <= before)
     if count >= len(eligible):
         return eligible
     return sorted(random.Random(seed).sample(eligible, count))
@@ -164,7 +203,7 @@ def measure_spreads(
             continue
         values.append(value)
         by_year.setdefault(moment.year, []).append(value)
-        if moment.astimezone(UTC).strftime("%H:%M") in ("14:30", "13:30"):  # 09:30 New York (EST/EDT)
+        if moment.astimezone(NEW_YORK).strftime("%H:%M") == "09:30":  # session open, DST-aware
             at_open.append(value)
     return {
         "symbol": symbol,

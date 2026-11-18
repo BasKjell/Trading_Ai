@@ -133,7 +133,13 @@ def run_measure_spreads(args: argparse.Namespace) -> int:
 
     with Path(args.bars).open(newline="", encoding="utf-8") as handle:
         starts = [datetime.fromisoformat(row["timestamp"]) for row in csv.DictReader(handle)]
-    before = datetime.fromisoformat(args.before)
+    holdout = load_config(args.config).raw.get("holdout", {}).get("start")
+    if not holdout:
+        raise SystemExit("config has no [holdout] start: spreads are only measured before the holdout")
+    cutoff = datetime.fromisoformat(str(holdout))
+    before = datetime.fromisoformat(args.before) if args.before else cutoff
+    if before > cutoff:
+        raise SystemExit(f"--before {before.isoformat()} reaches into the holdout ({cutoff.isoformat()})")
     moments = sample_bar_opens(starts, args.samples, before)
     downloader = AlpacaDatasetDownloader.from_env(args.env)
     result = measure_spreads(downloader._request_page, args.symbol, moments)
@@ -380,7 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     spreads.add_argument("--symbol", required=True)
     spreads.add_argument("--bars", required=True, help="raw 15-minute CSV whose bar opens are sampled")
     spreads.add_argument("--samples", type=int, default=400)
-    spreads.add_argument("--before", default="2025-11-01T00:00:00+00:00", help="holdout start; never sampled")
+    spreads.add_argument("--before", default=None, help="optional earlier limit; never after [holdout] start")
     spreads.add_argument("--output", default=None, help="default: data/spreads_<SYMBOL>.json")
     spreads.add_argument("--env", default=".env")
     spreads.set_defaults(func=run_measure_spreads)
