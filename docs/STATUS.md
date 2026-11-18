@@ -5,3 +5,6 @@ Merge. Enthalten: localtrader-Basis, korrigierte Kosten/Risikolimits, 15-Minuten
 Intraday-Engine. Geprüfte Codebasis `1dfb421`; 105 Tests im unabhängigen lokalen Review bestanden, CI am
 Codehead grün. Kostenannahmen und kurze DAX-Historie begrenzen wirtschaftliche Aussagen. T-005, T-006 und
 T-008 weiterhin geplant; Live-Trading gesperrt.
+
+T-019: Verbindliche Betriebsregeln integriert (PR folgt). Gilt nach dessen Merge. Durchsetzung im
+Paper-/Livebetrieb teilweise geplant (siehe `docs/OPERATING_RULES.md`).
