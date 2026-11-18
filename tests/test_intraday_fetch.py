@@ -232,6 +232,26 @@ class FetchTests(unittest.TestCase):
         self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 1.0405}, {ex: 1})[0])
         self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 1.6}, {ex: 2})[0])
 
+    def test_reviewed_mismatch_is_accepted_only_for_its_exact_amounts(self) -> None:
+        from localtrader.intraday_fetch import REVIEWED_DIVIDEND_MISMATCHES, crosscheck_dividends
+
+        ex = date(2020, 11, 2)
+        reviewed = REVIEWED_DIVIDEND_MISMATCHES["TLT"]
+        official = {ex: (date(2020, 11, 6), 0.169451)}
+        accepted = crosscheck_dividends(official, {ex: 0.1604}, None, reviewed)
+        self.assertEqual(len(accepted), 1)
+        self.assertIn("(reviewed)", accepted[0])
+        self.assertNotIn(" vs derived ", accepted[0])
+        # T-021: any other derived amount, provider amount, date or symbol still aborts (fail closed)
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.15}, None, reviewed)[0])
+        changed = {ex: (date(2020, 11, 6), 0.18)}
+        self.assertIn(" vs derived ", crosscheck_dividends(changed, {ex: 0.1604}, None, reviewed)[0])
+        other = date(2020, 12, 1)
+        moved = {other: (date(2020, 12, 7), 0.169451)}
+        self.assertIn(" vs derived ", crosscheck_dividends(moved, {other: 0.1604}, None, reviewed)[0])
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.1604}, None, None)[0])
+        self.assertNotIn("SPY", REVIEWED_DIVIDEND_MISMATCHES)
+
     def test_missing_payment_dates_use_the_longest_observed_lag(self) -> None:
         from localtrader.intraday_fetch import fill_missing_pay_dates
 

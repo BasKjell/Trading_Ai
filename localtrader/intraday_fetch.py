@@ -57,6 +57,13 @@ class BarDownloader(Protocol):
 
 Dividend = tuple[date, float]  # (payment date, amount per share), keyed by ex-date
 MAX_CROSSCHECK_DEVIATION = 0.05
+# Individually reviewed disagreements between the provider amount and the amount derived from adjusted prices
+# (T-021). Accepted only for exactly this symbol, ex-date and both amounts; the provider amount is booked.
+# Anything else still aborts the download (fail closed).
+REVIEWED_DIVIDEND_MISMATCHES: dict[str, dict[date, tuple[float, float]]] = {
+    # TLT 2020-11-02: Alpaca corporate actions 0.169451, adjusted series implies 0.1604 (-5.3 %); single month
+    "TLT": {date(2020, 11, 2): (0.169451, 0.1604)},
+}
 BAR_WIDTH = timedelta(minutes=15)
 
 
@@ -199,16 +206,22 @@ def fill_missing_pay_dates(raw: dict[date, tuple[date | None, float]]) -> tuple[
 
 
 def crosscheck_dividends(
-    official: dict[date, Dividend], derived: dict[date, float], listings: dict[date, int] | None = None
+    official: dict[date, Dividend],
+    derived: dict[date, float],
+    listings: dict[date, int] | None = None,
+    reviewed: dict[date, tuple[float, float]] | None = None,
 ) -> list[str]:
     """Problems between provider amounts and amounts derived from raw/adjusted prices.
 
     ``listings`` counts how often the provider lists an ex-date. Alpaca applies a duplicated entry twice
     in its adjusted series (QQQ 2022-09-19: 2 x 0.51856); a derived amount of exactly ``count`` times the
-    official one is therefore explained and reported, not treated as a disagreement.
+    official one is therefore explained and reported, not treated as a disagreement. ``reviewed`` lists
+    individually reviewed disagreements (ex-date -> provider amount, derived amount); only an exact match of
+    both amounts is reported as reviewed instead of aborting.
     """
     problems = []
     listings = listings or {}
+    reviewed = reviewed or {}
     for ex in sorted(set(official) | set(derived)):
         if ex not in official:
             problems.append(f"{ex}: only in adjusted prices ({derived[ex]})")
@@ -216,8 +229,11 @@ def crosscheck_dividends(
             problems.append(f"{ex}: only in corporate actions ({official[ex][1]})")
         elif abs(derived[ex] / official[ex][1] - 1) > MAX_CROSSCHECK_DEVIATION:
             count = listings.get(ex, 1)
+            known = reviewed.get(ex)
             if count > 1 and abs(derived[ex] / (count * official[ex][1]) - 1) <= MAX_CROSSCHECK_DEVIATION:
                 problems.append(f"{ex}: adjusted series applies a {count}x listed dividend {count} times (explained)")
+            elif known and math.isclose(official[ex][1], known[0]) and math.isclose(derived[ex], known[1]):
+                problems.append(f"{ex}: provider amount {known[0]} booked, adjusted series {known[1]} (reviewed)")
             else:
                 problems.append(f"{ex}: {official[ex][1]} vs derived {derived[ex]}")
     return problems
@@ -359,7 +375,7 @@ def fetch_intraday_csv(
         if item.get("symbol", symbol) == symbol:
             ex = date.fromisoformat(str(item["ex_date"]))
             listings[ex] = listings.get(ex, 0) + 1
-    mismatches = crosscheck_dividends(dividends, derived, listings)
+    mismatches = crosscheck_dividends(dividends, derived, listings, REVIEWED_DIVIDEND_MISMATCHES.get(symbol))
     if any(" vs derived " in problem for problem in mismatches):
         raise CorporateActionError("dividend amounts disagree: " + "; ".join(mismatches))
     summary = {
