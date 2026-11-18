@@ -1,15 +1,20 @@
 # Status
 
-Stand: 2026-11-17. Kennzeichnung: **geplant / implementiert / getestet / integriert / blockiert**.
+Stand: 2026-11-18. Kennzeichnung: **geplant / implementiert / getestet / integriert / blockiert**.
 „Integriert" bedeutet: in `main` gemergt. Aufgaben und Zuständigkeiten: GitHub Issues (Label = Zustand).
 
 ## Integrationsstand
 
 | Branch | Inhalt | Zustand |
 |---|---|---|
-| `main` | Notebook von 2021 | integriert (Altstand) |
-| `dev/trading-system` | T-001 bis T-004 (#15) | getestet, CI grün, PR #17 offen – **wartet auf unabhängiges Review** (Risiko, Ausführung) |
-| `agent/T-009-agent-collaboration` | T-009 (#16) | getestet, PR #18 offen (basiert auf `dev/trading-system`) |
+| `main` | T-001–T-004: localtrader-Basis, korrigierte Kosten/Risikolimits, 15-Minuten-Import, kausale Intraday-Engine (geprüfte Codebasis `1dfb421`) | **integriert** (PR #17) |
+| `agent/T-009-agent-collaboration` | T-009 (#16): AGENTS.md, Spec, Register, Vorlagen | **integriert** (PR #18) |
+| `agent/T-005-order-state` | T-005 (#1): Persistenter Orderzustandsautomat und Fake-Broker-Abgleich | **integriert (PR #26)** – gilt nach dessen Merge |
+| `agent/T-018-alpaca-etf-data` | T-018 (#13): SPY/QQQ-Daten, Holdout, Dividenden | review, PR #21 |
+| `agent/T-011-fx-data` | T-011 Datenteil (#6): EZB EUR/USD, kausale Abfrage, Holdout-Schnitt | **integriert (PR #25)** – gilt nach dessen Merge; Buchhaltung in EUR offen |
+| `agent/T-007-report-view` | T-007 Report-Teil (#3): Experimentregister und Intraday-Reports im Dashboard | **integriert** (PR #24); Betriebsansicht offen (T-006) |
+| `agent/T-008-research-design` | T-008 Forschungsdesign (#4) | **integriert (PR #22)** – gilt nach dessen Merge. Forschungsdesign im Entwurf, Implementierung und Freeze ausstehend |
+| `agent/T-008-journal-registry` | T-008 Bausteine (Protokollprüfung, Journal, Registry) | review, PR #23 (Basis #22) |
 
 ## Funktionen
 
@@ -21,18 +26,19 @@ Stand: 2026-11-17. Kennzeichnung: **geplant / implementiert / getestet / integri
 | Kostenmodell (Spread, Slippage, Gebühren, Mindestgebühr, Finanzierung) | getestet | Werte sind Annahmen, keine gemessenen Kosten |
 | Risiko-Engine (0,20 %/Trade, 1 % offenes Risiko, 20 %/Instrument, DD 5/8/10 %) | getestet | ADR 0002 |
 | Intraday-Engine, Trendfolge, Mean Reversion, Benchmarks, Stressszenarien | getestet | `tests/test_intraday_engine.py`; Beispielreport `docs/reports/` |
-| Experimentregister | getestet | `tests/test_experiment_registry.py`, EXP-0001 |
+| Experimentregister | getestet | `tests/test_experiment_registry.py`, EXP-0001; IDs je Aufgabe (`EXP-T009-001`) |
 | Offline-Paper-Demo mit Neustart und Kill-Switch | implementiert | nur Demo-Ereignisse, kein 15-Minuten-Betrieb |
-| Persistenter Orderzustandsautomat, Brokerabgleich | geplant | T-005 (#1) |
+| Persistenter Orderzustandsautomat und Fake-Broker-Abgleich | getestet | T-005 (#1), PR #26; `tests/test_order_manager.py`. Periodischer Abgleich im Paper-Dienst folgt mit T-006. |
 | Paper-Betrieb 15 min, Modi backtest/paper/shadow/live | geplant | T-006 (#2) |
 | Live-Trading | **gesperrt** | kein Live-Transport im Code; `mode = "offline"` wird erzwungen |
+| Dashboard: Experimentregister und Intraday-Reports | integriert mit PR #24 | `tests/test_report_index.py` |
 | Dashboard Betriebsansicht | geplant | T-007 (#3) (Research-Dashboard vorhanden) |
 | Walk-forward + Champion-Challenger 15 min, Holdout-Kontrolle | geplant | T-008 (#4) |
 | Dezimalbuchhaltung, FX | geplant | T-011 (#6) |
-| Broker-/Datenadapter, Alpaca-Preflight | blockiert | T-012 (#7): Konflikt Instrument (DAX) vs. Broker (Alpaca, US-Märkte) – Benutzerentscheidung nötig |
+| Broker-/Datenadapter, Alpaca-Preflight | geplant | T-012 (#7): Instrumentenfrage entschieden (US-ETFs, ADR 0005 in #21); Preflight offen |
 | Live-Voraussetzungen §18.4–18.10 | geplant | T-013 (#8) bis T-016 (#11), T-019 (#14) |
 | PostgreSQL/Parquet | geplant | T-017 (#12) (Entscheidung offen, ADR 0001 zurückgestellt) |
-| Mehrjährige Intraday-Daten | blockiert | T-018 (#13): kein Datenkauf ohne Freigabe |
+| Mehrjährige Intraday-Daten | review | T-018 (#13), PR #21: SPY/QQQ 2016–2026 über Alpaca (kostenlos) |
 
 ## Ergebnisse
 
@@ -41,24 +47,14 @@ Mit den verfügbaren Daten (DAX, 165 Handelstage) wurde **keine belastbare profi
 
 ## Offene Konflikte / Benutzerentscheidungen
 
-1. **Broker vs. Instrument (T-012):** Spec §18.2 nennt Alpaca; Alpaca handelt US-Aktien/ETFs/Krypto,
-   nicht den DAX-CFD, für den die einzigen 15-Minuten-Daten vorliegen. Optionen: US-ETFs mit Alpaca-Daten,
-   oder ein anderer Broker für DAX. Nicht stillschweigend entschieden.
-2. **Datenbasis (T-018):** Für belastbare Aussagen fehlen mehrjährige Intraday-Daten.
-3. **Speicher (T-017):** PostgreSQL/Parquet laut Spec §4 vs. derzeit SQLite/CSV (ADR 0001).
+1. **Speicher (T-017):** PostgreSQL/Parquet laut Spec §4 vs. derzeit SQLite/CSV (ADR 0001).
+
+Entschieden 2026-11-17/18: Instrument frei wählbar → US-Index-ETFs mit Alpaca-Daten (T-012/T-018,
+ADR 0005); grüne CI am geprüften Head-SHA gilt als `make check`-Nachweis (AGENTS.md §0).
 
 ## Nächste Ziele (Reihenfolge)
 
-1. Unabhängiges Review (nicht durch Claude) und Integration von PR #17, danach PR #18 auf `main` umstellen.
-2. T-005 Orderzustandsautomat (kritisch, höhere Denkstufe, separates Review).
-3. T-008 Walk-forward/Champion-Challenger (parallel möglich; kritisch, separates Review).
-4. T-006 Paper-Betrieb, danach T-007 Dashboard, T-010 (#5) Abnahme.
-
-## T-008 – Forschungsdesign vorbereitet (nicht integriert)
-
-Benutzerauftrag vom 2026-11-17: Astra/high erstellt parallel zu Claudes Datenkorrekturen #21
-einen [Versuchsplan](research/EXP-T008-001.md) und ein
-[maschinenlesbares Protokoll](research/T-008-protocol.json). Stand: **geplant**, Design-Draft.
-Keine Optimierungsläufe; keine implementierte Walk-forward-/Holdout-Kontrolle.
-Freigabe des Protokolls, korrigierte Datenbasis, geprüfte Validierungsimplementierung und
-Daten-/Codebindung sind vor empirischen Läufen erforderlich. [Fortsetzung](handoffs/T-008.md).
+1. Integration von #21 und #25 nach Behebung der offenen Review-Befunde.
+2. Methodenreview von #22, danach T-008-Implementierung (High) auf den ETF-Daten.
+3. T-011 Buchhaltung in EUR (High).
+4. T-006 Paper-Betrieb, danach T-007 Betriebsansicht, T-010 (#5) Abnahme.

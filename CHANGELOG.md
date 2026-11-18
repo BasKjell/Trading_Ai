@@ -2,6 +2,116 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – T-008 Walk-forward-Forschungsdesign (PR #22)
+
+**Anlass/Ziel:** Forschungsplan und maschinenlesbares Protokoll für US-Index-ETFs, einen Vergleich mit Cash und Exposure-Benchmark sowie einen kontrollierten finalen Test.
+
+- Vier vorab definierte Varianten, drei chronologische Falten, unveränderte zentral-konfirmatorische Gates.
+- Benutzerentscheidungen aus dem Methodenreview: Shadow-Gate mit unadjustierter einseitiger 95-%-Untergrenze je Vergleich. Adjustierte Schranke als Bericht mit ausgewiesener Trennschärfe. Aktualisierte Vergleichsfamilie und Budgetabgrenzung.
+- Physische Forschungsexporte vor dem Holdout. Der Benutzer verwahrt die Freigabe und das Journal für maximal einen reservierten zentralen Abruf. Teilweise frühere Exposition dokumentiert.
+- Vollständiger Börsenkalender, Umgang mit Anbieterausnahmen, kausaler EZB-Mittelkurs mit separaten Umtauschkosten und Definition vollständiger Stundenkerzen vorgegeben.
+
+**Stand:** Design überarbeitet. Freeze, Implementierung und Auswertung ausstehend.
+
+## 2026-11-18 – T-011 (Datenteil): EUR/USD-Referenzkurse der EZB (PR #25)
+
+**Anlass/Ziel:** Voraussetzung für Ergebnisse in EUR (T-011, T-008). Nur Daten, keine Buchhaltung.
+
+**Änderungen**
+- `localtrader/fx_rates.py`: Abruf, Prüfung und Speicherung der EZB-Referenzkurse; Verfügbarkeit ab
+  16:00 Europe/Berlin; kausale Abfrage mit maximalem Kursalter (5 Tage, fail closed); Holdout-Schnitt
+  nach Verfügbarkeit; Digest der Reihe.
+- CLI `fetch-fx`; Abschnitt in `docs/DATA_FORMAT.md`.
+
+- Nach Review (`552ae42`): Holdout-Zeilen werden vor dem Parsen übersprungen (ein Defekt im Holdout
+  bricht den Forschungsimport nicht ab); leerer `OBS_STATUS` wird verworfen.
+
+**Tests:** `tests/test_fx_rates.py`: Veröffentlichungszeit (MEZ/MESZ), Verwerfungsgründe, Konflikt-
+abbruch, Sprünge/Lücken, Nutzung erst nach Veröffentlichung, Wochenende, veralteter/fehlender Kurs,
+Umrechnung, Dateirundlauf mit Manifest, Holdout-Schnitt, manipulierte Verfügbarkeit, Abruf-URL.
+
+**Nicht enthalten (T-011, High):** Decimal-Buchhaltung, Umrechnung von Fills, Bewertung, Dividenden und
+Kosten, getrennter Währungseffekt, Export.
+
+## 2026-11-18 – T-005 Persistenter Orderzustand und Fake-Broker-Abgleich (PR #26)
+
+Ein SQLite-Journal sichert Client-ID, Orderzustand, kumulierte Ausführungen und Abgleichalarme im Fake-Broker-Pfad. Offene Verkäufe reservieren Bestand. Nach einem Timeout oder einer Abweichung sperrt der Manager neue Orders. Der Wiederanlauf gleicht offene und abgeschlossene Orders, Cash und Bestände ab. Der Risikoprüfer kann den Abgleichstatus lesen. Tests umfassen doppelte und ungeordnete Meldungen, konkurrierende Aufrufer und einen echten Prozessabbruch mit simuliertem Broker.
+
+## 2026-11-18 – T-007 (Teil Reports): Experimentregister und Intraday-Reports im Dashboard (PR #24)
+
+**Anlass/Ziel:** Spec §13 / Issue #3, nur der von T-006 unabhängige Report-Teil (Denkstufe medium).
+
+**Änderungen**
+- `localtrader/report_index.py`: schreibgeschützte Übersicht über `experiments/` (alle Versuche aller
+  Agenten, Gesamtzahl der Varianten, Holdout-Nutzungen) und `reports/<lauf>/summary.json|scenarios.json`
+  (Backtests mit Kennzahlen und Buy-and-hold, Stresstests mit Kosten-, Verzögerungs-, Parameter- und
+  Phasenszenarien). Läufe mit Holdout-Nutzung werden markiert, unlesbare Dateien als Fehler gelistet.
+- Dashboard: Endpunkt `/api/reports` und zwei Tabellen (Experimentregister, Intraday-Reports).
+- Betriebsansicht (Modus, Positionen, Orders, Sperren …) bleibt offen bis T-006.
+
+- Nach Review (`83fae16`): falsch typisierte Reportdateien werden isoliert als Fehler gelistet.
+
+**Tests:** `tests/test_report_index.py`: Register-Zählung inkl. Holdout, fehlende Verzeichnisse,
+Backtest-/Stress-Einlesen inkl. NaN und kaputter Datei, HTTP-Endpunkt.
+
+## 2026-11-17 – T-009 Zusammenarbeit mehrerer Agenten (PR #18)
+
+**Anlass/Ziel:** Projekt mit Claude und Codex abwechselnd fortsetzbar machen (Spec §19, §20).
+
+**Änderungen**
+- `AGENTS.md` (einziges Regelwerk, inkl. Modellwahl/Denkstufe/Eskalation/Review), `CLAUDE.md` verweist darauf.
+- `docs/PROJECT_SPEC.md` mit den vollständigen Anforderungen inkl. §18–20; alte Codex-Spezifikation
+  nach `docs/archive/` (nicht mehr verbindlich); `docs/PLAN.md` durch `docs/STATUS.md` ersetzt;
+  `docs/ARCHITECTURE.md` mit Komponenten, Schnittstellen und Statuskennzeichnung.
+- Vorlagen: Handoff, Research, PR, Issue; `docs/agents/MODEL_EVALUATION.md`; ADR 0004.
+- Experimentregister `localtrader/experiment_registry.py`, CLI `experiments`, Eintrag EXP-0001 (18 Varianten).
+- `scripts/start_task.sh` (Branch + Worktree je Aufgabe), `scripts/check_links.py` in `make check` und CI.
+- GitHub: Zustandslabels und Issues T-005 bis T-019.
+- Benutzerentscheidung: Jede Sitzung beginnt mit dem Review fremder PRs; Merge nach `main` durch einen
+  Integrationsagenten einer anderen Agentenart nach unabhängigem Review und grüner CI erlaubt
+  (AGENTS.md §0/§2a, Spec §21). Spec-Einleitung um „gemeinsam mit anderen Entwicklern" ergänzt.
+
+- Nach Codex-Review (PR #18, `9991e9c`): Experiment-IDs aufgabenbezogen (`EXP-T009-001`), weil ein
+  globaler Zähler in getrennten Worktrees doppelte IDs vergab. AGENTS.md §0: eigene PRs auf Befunde
+  prüfen und diese vorrangig beheben; REST-Fallback ohne `gh`; Unabhängigkeit nach tatsächlicher
+  Bearbeitung; Freigabe an Head-SHA und Zielbranch gebunden; Merge mit erwartetem Head; Integrationsstand
+  (CHANGELOG/STATUS) vor der Freigabe im PR, keine Direktänderungen an `main`.
+
+- Benutzerentscheidung 2026-11-18: Grüne CI auf genau dem geprüften Head-SHA gilt als Nachweis für
+  `make check` (AGENTS.md §0, §2a); lokaler Lauf nur noch zusätzlich, da Reviewer-Umgebungen ohne
+  Netzwerk die gepinnten Werkzeuge nicht installieren können.
+
+**Tests:** `tests/test_experiment_registry.py` (Unveränderlichkeit, Zählung über Agenten, Validierung,
+umbenannte Dateien, versioniertes Register, zwei getrennte Register ohne Kollision und ohne Verlust beim Zusammenführen), `tests/test_tooling_scripts.py` (Linkprüfung, Worktree-Skript).
+
+**Ausgeführte Prüfungen:** `make check` bestanden (106 Tests + 11 Subtests, Secret-Scan, Linkprüfung).
+
+**Einschränkungen:** EXP-0001 wurde nachträglich registriert. Frühere Versuche des Tages-Research-Labs
+(lokale SQLite auf dem Mac) sind nicht im Register enthalten.
+
+## 2026-11-17 – Korrekturen nach unabhängigem Review (PR #17)
+
+**Anlass/Ziel:** Drei von Codex reproduzierte Fehler beheben (Review am Commit `1cd6e14`).
+
+**Änderungen**
+- `localtrader/intraday_engine.py`: Bars werden nach Verfügbarkeit (`received_at`) verarbeitet. Eine
+  verspätete Bar war vorher schon in früheren Entscheidungen sichtbar (Look-ahead). `earliest_execution`
+  ist jetzt bindend; Intraday-Strategien setzen ihn auf den Signalzeitpunkt (Ausführung an der nächsten
+  Eröffnung bleibt unverändert).
+- Ausstehende Einstiege werden auf der Ausführungsbar erneut geprüft: Bar nach Datenlücke, außerhalb der
+  Handelszeit oder zu altes Signal → verworfen (`entry_cancelled`). Ausstiege werden nie blockiert.
+- `localtrader/intraday_data.py`: NaN/±Inf in OHLCV werden verworfen (`non_finite_value`).
+- Beispielreport mit neuen Zahlen; auf den DAX-Daten entfallen 2 bzw. 5 Einstiege außerhalb der Handelszeit.
+- Zweites Review (Head `be6bf16`): Das vollständige Tief der laufenden Bar beeinflusste über den Stop schon
+  den Positionsstatus früherer Entscheidungen innerhalb derselben Bar. Die Engine verarbeitet jetzt jeden
+  Schritt kausal (Entscheidungen vor der Eröffnung, Eröffnung, Entscheidungen während der Bar, Stops/
+  Drawdown/Kill-Switch am Barende); Stops werden am Barende verbucht.
+
+**Tests:** Regressionstests für verspätete Bars, bindendes `earliest_execution`, ausstehenden Einstieg nach
+Datenlücke, nicht blockierten Ausstieg, veraltetes Signal über Nacht und NaN/Inf je Feld; alle schlugen
+mit dem alten Code fehl. Zusätzlich: späteres Tief verändert keine frühere Entscheidung (ein und zwei
+Instrumente inkl. Kill-Switch).
+
 ## 2026-11-17 – Intraday-Engine, Trendfolge und Mean Reversion
 
 **Anlass/Ziel:** Zwei nachvollziehbare Basisstrategien auf 15-Minuten-Daten zeitlich korrekt und
