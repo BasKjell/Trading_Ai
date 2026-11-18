@@ -125,6 +125,13 @@ def run_intraday_stress(args: argparse.Namespace) -> int:
     return 0
 
 
+def experiments(args: argparse.Namespace) -> int:
+    from .experiment_registry import summary
+
+    print(json.dumps(summary(args.directory), indent=2, ensure_ascii=False))
+    return 0
+
+
 def run_paper(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     session = PaperSession(config, args.state, args.audit)
@@ -349,6 +356,9 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--spread-multiplier", type=float, default=1.0)
             command.add_argument("--delay-bars", type=int, default=0)
         command.set_defaults(func=func)
+    register = sub.add_parser("experiments", help="show the shared experiment register and total variants tested")
+    register.add_argument("--directory", default="experiments")
+    register.set_defaults(func=experiments)
     paper = sub.add_parser("paper-demo")
     paper.add_argument("--state", default="state/paper_state.json")
     paper.add_argument("--audit", default="state/audit.jsonl")

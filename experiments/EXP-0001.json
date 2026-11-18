@@ -1,0 +1,498 @@
+{
+  "agent": "Claude Code",
+  "code_version": "1cd6e14",
+  "cost_assumptions": {
+    "currency": "EUR",
+    "fee_bps": 0.0,
+    "financing_rate_annual": 0.05,
+    "market": "index",
+    "min_fee": 0.0,
+    "qty_step": 0.1,
+    "session_end": "17:30",
+    "session_start": "09:00",
+    "session_timezone": "Europe/Berlin",
+    "slippage_bps": 0.5,
+    "spread_bps": 1.0,
+    "venue": "CFD on DAX 40 (broker-quoted)"
+  },
+  "created_at": "2026-11-17T18:44:00+00:00",
+  "data_versions": [
+    "dax3015_csv:2abcefe4e72c6ba5"
+  ],
+  "decision": "no candidate accepted",
+  "experiment_id": "EXP-0001",
+  "holdout_used": false,
+  "model": "claude-opus-5-5 (configured; serving model may differ)",
+  "rationale": "Both base strategies near zero or negative after costs; trend turns negative at 2x costs; all 90% intervals include zero; sample < 1 year, single instrument. Parameter +20% looked better but was not selected (would be in-sample selection). Plan for this experiment was documented after the runs (retroactive registration).",
+  "references": [
+    "docs/research/EXP-0001.md",
+    "docs/reports/2026-11-17_dax_baseline.md"
+  ],
+  "seeds": [
+    20261106
+  ],
+  "splits": {
+    "holdout": "none reserved yet",
+    "type": "full_sample_plus_three_chronological_phases",
+    "walk_forward": false
+  },
+  "synthetic_data": false,
+  "task_id": "T-004",
+  "uncertainty": {
+    "block_days": 5,
+    "geometric_monthly_return_90ci_block_bootstrap": {
+      "intraday_trend": [
+        -0.001269357288855355,
+        0.0018455518802809046
+      ],
+      "mean_reversion": [
+        -0.0023565325062585574,
+        0.00025784817169016705
+      ]
+    },
+    "samples": 1000
+  },
+  "variants": [
+    {
+      "name": "intraday_trend/baseline",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "baseline",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": 0.00030706011886794116,
+        "max_drawdown": 0.008226464566940872,
+        "total_costs": 40.332361670634924,
+        "total_return": 0.002415156690080078,
+        "trades": 97
+      }
+    },
+    {
+      "name": "intraday_trend/costs_2x",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "costs_2x",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17168653594607064,
+        "geometric_monthly_return": -3.959775087569728e-05,
+        "max_drawdown": 0.00874803072776531,
+        "total_costs": 67.59475806349207,
+        "total_return": -0.00031108294920545454,
+        "trades": 97
+      }
+    },
+    {
+      "name": "intraday_trend/spread_3x",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "spread_3x",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": -3.959775087569728e-05,
+        "max_drawdown": 0.00874803072776531,
+        "total_costs": 67.59475806349207,
+        "total_return": -0.00031108294920545454,
+        "trades": 97
+      }
+    },
+    {
+      "name": "intraday_trend/delay_1_bar",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "delay_1_bar",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": 0.0004405981372066492,
+        "max_drawdown": 0.007718957774628166,
+        "total_costs": 39.764948849206355,
+        "total_return": 0.0034670765436497497,
+        "trades": 95
+      }
+    },
+    {
+      "name": "intraday_trend/params_minus_20pct",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "params_minus_20pct",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": 0.0006343631005645278,
+        "max_drawdown": 0.00660498246289154,
+        "total_costs": 43.57500813636364,
+        "total_return": 0.004995135550000418,
+        "trades": 113
+      }
+    },
+    {
+      "name": "intraday_trend/params_plus_20pct",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "params_plus_20pct",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": 0.0021094892110080643,
+        "max_drawdown": 0.006961641785852901,
+        "total_costs": 36.10423813071896,
+        "total_return": 0.016694929128104663,
+        "trades": 78
+      }
+    },
+    {
+      "name": "intraday_trend/phase_1_2020-10-06_2020-12-21",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "phase_1_2020-10-06_2020-12-21",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.029767934324256284,
+        "geometric_monthly_return": -0.0011664220782023893,
+        "max_drawdown": 0.008226464566940872,
+        "total_costs": 11.056505214285716,
+        "total_return": -0.0031074362357143004,
+        "trades": 32
+      }
+    },
+    {
+      "name": "intraday_trend/phase_2_2020-12-21_2021-03-11",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "phase_2_2020-12-21_2021-03-11",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.07676212402425175,
+        "geometric_monthly_return": 0.00015446450364065,
+        "max_drawdown": 0.004181927909476468,
+        "total_costs": 12.597216408730159,
+        "total_return": 0.00039724264484131133,
+        "trades": 31
+      }
+    },
+    {
+      "name": "intraday_trend/phase_3_2021-03-11_2021-05-28",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "breakout_bars": 16,
+          "exit_bars": 8,
+          "max_hold_bars": 0,
+          "stop_atr": 2.5,
+          "trend_window_hours": 50
+        },
+        "scenario": "phase_3_2021-03-11_2021-05-28",
+        "strategy": "intraday_trend"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.05425073049975748,
+        "geometric_monthly_return": 0.001071667416906008,
+        "max_drawdown": 0.004049665970169203,
+        "total_costs": 15.262031702380952,
+        "total_return": 0.002860332544047939,
+        "trades": 33
+      }
+    },
+    {
+      "name": "mean_reversion/baseline",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "baseline",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": -0.0009830046957823857,
+        "max_drawdown": 0.012915528026952061,
+        "total_costs": 52.56484474603175,
+        "total_return": -0.007697627331747725,
+        "trades": 170
+      }
+    },
+    {
+      "name": "mean_reversion/costs_2x",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "costs_2x",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17168653594607064,
+        "geometric_monthly_return": -0.0015966344811995103,
+        "max_drawdown": 0.017021759951676207,
+        "total_costs": 100.35382560317461,
+        "total_return": -0.012476525417459361,
+        "trades": 170
+      }
+    },
+    {
+      "name": "mean_reversion/spread_3x",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "spread_3x",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": -0.0015966344811995103,
+        "max_drawdown": 0.017021759951676207,
+        "total_costs": 100.35382560317461,
+        "total_return": -0.012476525417459361,
+        "trades": 170
+      }
+    },
+    {
+      "name": "mean_reversion/delay_1_bar",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "delay_1_bar",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": -0.000990323522721659,
+        "max_drawdown": 0.011330291727451036,
+        "total_costs": 47.637444611111114,
+        "total_return": -0.007754744461110907,
+        "trades": 153
+      }
+    },
+    {
+      "name": "mean_reversion/params_minus_20pct",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "params_minus_20pct",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": -0.0007577950885150342,
+        "max_drawdown": 0.00893607093513471,
+        "total_costs": 57.6865745,
+        "total_return": -0.005938657449998885,
+        "trades": 193
+      }
+    },
+    {
+      "name": "mean_reversion/params_plus_20pct",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "params_plus_20pct",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.17192448512310987,
+        "geometric_monthly_return": -0.0019471389135741202,
+        "max_drawdown": 0.017758568017392395,
+        "total_costs": 39.64142810784314,
+        "total_return": -0.015197201634314816,
+        "trades": 125
+      }
+    },
+    {
+      "name": "mean_reversion/phase_1_2020-10-06_2020-12-21",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "phase_1_2020-10-06_2020-12-21",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.029767934324256284,
+        "geometric_monthly_return": 0.0014377944769397022,
+        "max_drawdown": 0.002410047675557081,
+        "total_costs": 12.021431746031746,
+        "total_return": 0.0038387139682536375,
+        "trades": 43
+      }
+    },
+    {
+      "name": "mean_reversion/phase_2_2020-12-21_2021-03-11",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "phase_2_2020-12-21_2021-03-11",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.07676212402425175,
+        "geometric_monthly_return": -0.003811412318244667,
+        "max_drawdown": 0.011906508743252053,
+        "total_costs": 23.77874226190476,
+        "total_return": -0.00977144565476229,
+        "trades": 73
+      }
+    },
+    {
+      "name": "mean_reversion/phase_3_2021-03-11_2021-05-28",
+      "parameters": {
+        "base_parameters": {
+          "atr_bars": 14,
+          "entry_z": 2.0,
+          "max_efficiency": 0.3,
+          "max_hold_bars": 16,
+          "reference_bars": 20,
+          "stop_atr": 2.0,
+          "trend_filter_bars": 32
+        },
+        "scenario": "phase_3_2021-03-11_2021-05-28",
+        "strategy": "mean_reversion"
+      },
+      "rejected": true,
+      "results": {
+        "buy_and_hold_total_return": 0.05425073049975748,
+        "geometric_monthly_return": -0.000662201238587401,
+        "max_drawdown": 0.004018403416813254,
+        "total_costs": 16.764670738095237,
+        "total_return": -0.001764895645238851,
+        "trades": 54
+      }
+    }
+  ]
+}

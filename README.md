@@ -1,6 +1,6 @@
 # Local Paper Trader
 
-Eine lokale, reproduzierbare Research- und Paper-Trading-Plattform gemäß [`CODEX_MASTER_PROMPT.md`](CODEX_MASTER_PROMPT.md). Der MVP enthält bewusst **keinen Live-Trading-Transport** und startet ausschließlich offline. Er ist Forschungssoftware, keine Anlageberatung und kein Renditeversprechen.
+Eine lokale, reproduzierbare Research- und Paper-Trading-Plattform gemäß [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md). Der MVP enthält bewusst **keinen Live-Trading-Transport** und startet ausschließlich offline. Er ist Forschungssoftware, keine Anlageberatung und kein Renditeversprechen.
 
 ## Schnellstart (15-Minuten-System)
 
@@ -11,7 +11,7 @@ make intraday-stress   # doppelte Kosten, 3x Spread, Verzögerung, Parameter ±2
 python3 -m localtrader intraday-backtest --synthetic-days 60   # Offline-Demo mit synthetischen Daten
 ```
 
-Startkapital 10.000 EUR (simuliert), Paper-Modus. Plan und Stand: [`docs/PLAN.md`](docs/PLAN.md),
+Startkapital 10.000 EUR (simuliert), Paper-Modus. Regeln für Agenten: [`AGENTS.md`](AGENTS.md), Anforderungen: [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md), Stand: [`docs/STATUS.md`](docs/STATUS.md),
 Änderungen: [`CHANGELOG.md`](CHANGELOG.md), Datenformat: [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md),
 Beispielreport: [`docs/reports/2026-11-17_dax_baseline.md`](docs/reports/2026-11-17_dax_baseline.md),
 Entscheidungen: [`docs/decisions/`](docs/decisions/). Lokale Zugangsdaten gehören in `.env`
