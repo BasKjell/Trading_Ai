@@ -144,6 +144,34 @@ class StateMachineTests(unittest.TestCase):
         self.advance()
         self.assertEqual(self.db.tasks()[1]["issue"], 71)
 
+    def test_opencode_keeps_working_during_cloud_cooldowns_without_merging(self):
+        self.repo.issues += [issue(71, "T-071", TAGS + ["agent:opencode"]), issue(72, "T-072")]
+        self.config["tasks"].update({"T-071": {**SCOPE, "opencode": True, "priority": 200}, "T-072": SCOPE})
+        self.repo.actions = ["quota"]
+        self.advance(3)
+        with self.db.db:
+            self.db.db.execute("INSERT INTO cooldown VALUES ('claude', ?)", (mod.time.time() + 5,))
+        self.advance(3)
+        first, local = self.db.tasks()
+        self.assertEqual(first["phase"], "develop")
+        self.assertEqual((local["author"], local["reviewer"], local["phase"]), ("opencode", "claude", "review"))
+        self.assertFalse(mod.cycle(self.repo, self.db, self.config))
+        self.repo.actions = ["approve"]
+        with patch.object(mod.time, "time", return_value=local["created"] + 6):
+            self.advance()
+        self.assertEqual(self.db.tasks()[1]["phase"], "manual")
+        self.assertNotIn("merge", [call[0] for call in self.repo.calls])
+
+    def test_opencode_requires_issue_label_and_local_scope(self):
+        self.config["tasks"]["T-070"] = {**SCOPE, "opencode": True}
+        self.assertIsNone(mod.choose(self.repo, self.config, []))
+        self.repo.issues = [issue(tags=TAGS + ["agent:opencode", "agent:codex"])]
+        self.assertIsNone(mod.choose(self.repo, self.config, []))
+        self.repo.issues = [issue(tags=TAGS + ["agent:opencode"])]
+        self.assertEqual(mod.choose(self.repo, self.config, [])[2], "opencode")
+        self.config["tasks"]["T-070"] = SCOPE
+        self.assertIsNone(mod.choose(self.repo, self.config, []))
+
     def test_no_fourth_correction(self):
         self.repo.actions = [f"Unterschiedlicher Befund {i}" for i in range(4)]
         self.advance(10)
@@ -361,6 +389,80 @@ class ControllerBoundaryTests(unittest.TestCase):
                     else:
                         container.agent("codex", root, "test", False, paths)
                         self.assertEqual((root / paths[0]).read_text(), "generated")
+
+    def test_opencode_role_configuration_and_no_project_plugins(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(worker.os.environ, {"OLLAMA_HOST": "http://ollama:11434", "OPENAI_API_KEY": "test-placeholder"}),
+        ):
+            root = Path(directory)
+            workspace = root / "work"
+            workspace.mkdir()
+            for role, paths in (("author", ["docs/REPORTS.md"]), ("review", None)):
+                env = worker.opencode_environment(root / role, workspace, paths)
+                config = json.loads((Path(env["XDG_CONFIG_HOME"]) / "opencode/opencode.json").read_text())
+                self.assertEqual(config["providers"]["ollama"]["settings"]["baseURL"], "http://ollama:11434/v1")
+                self.assertNotIn("OPENAI_API_KEY", env)
+                self.assertEqual(config["permissions"][0]["effect"], "deny")
+                self.assertEqual(
+                    [rule["resource"] for rule in config["permissions"] if rule["action"] == "edit"], paths or []
+                )
+            (workspace / ".opencode").mkdir()
+            with self.assertRaisesRegex(ValueError, "project configuration"):
+                worker.opencode_environment(root / "unsafe", workspace, None)
+
+    def test_opencode_stream_filters_tool_text_and_rejects_error(self):
+        text = 'RUNNER_RESULT {"status":"done"}'
+        event = json.dumps({"type": "text", "part": {"text": text}})
+        tool = json.dumps({"type": "tool_use", "part": {"text": "tool output"}})
+        self.assertEqual(backend.opencode_text(tool + "\n" + event, 0), text)
+        with self.assertRaises(backend.RunnerError):
+            backend.opencode_text(event + '\n{"type":"error"}', 0)
+        with self.assertRaises(backend.RunnerError):
+            backend.opencode_text(event, 1)
+
+    def test_local_programmer_and_reviewer_have_one_correction_round(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, tree = root / "source", root / "tree"
+            for path in (source, tree):
+                (path / "docs").mkdir(parents=True)
+                (path / "docs/REPORTS.md").write_text("original")
+            settings = {"file_bytes": 2000, "diff_bytes": 2000}
+            roles = []
+            reports = iter(["Testbeispiel fehlt", ""])
+
+            def agent(provider, snapshot, prompt, review, paths=None):
+                roles.append((provider, review))
+                if review:
+                    self.assertIsNone(paths)
+                    self.assertIn("> original", prompt)
+                    return "LOCAL_REVIEW " + json.dumps({"findings": next(reports)})
+                self.assertEqual(paths, SCOPE["paths"])
+                if len(roles) == 3:
+                    self.assertIn("Testbeispiel fehlt", prompt)
+                (snapshot / paths[0]).write_text(f"draft {len(roles)}")
+                return ""
+
+            repo = backend.Repository(
+                root, root, REPO, SimpleNamespace(settings=settings, agent=agent, check=lambda _source: None)
+            )
+            progress = []
+            repo.progress = lambda issue, phase: progress.append((issue, phase))
+            repo.local_develop({"issue": 70}, tree, source, SCOPE["paths"], "Auftrag")
+            self.assertEqual(roles, [("opencode", False), ("opencode", True)] * 2)
+            self.assertEqual(
+                [phase for _, phase in progress],
+                [
+                    "opencode:programmer",
+                    "opencode:check",
+                    "opencode:local-review",
+                    "opencode:correction",
+                    "opencode:check",
+                    "opencode:local-review",
+                ],
+            )
+            self.assertEqual((tree / "docs/REPORTS.md").read_text(), "original")
 
     def test_local_draft_only_applies_authorized_complete_text(self):
         with tempfile.TemporaryDirectory() as temp:

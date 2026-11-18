@@ -140,3 +140,39 @@ CLI- und API-Referenzen: [Codex](https://developers.openai.com/codex/noninteract
 [Docker](https://docs.docker.com/reference/cli/docker/container/run),
 [GitHub-Branch-Schutz](https://docs.github.com/en/rest/branches/branch-protection),
 [GitHub-Issue-Abhängigkeiten](https://docs.github.com/en/rest/issues/issue-dependencies).
+
+## OpenCode mit lokalem Ollama
+
+OpenCode kann ausdrücklich freigegebene Klasse-U-Aufgaben lokal bearbeiten. Der Controller startet
+nacheinander einen Programmierer und einen Reviewer mit frischem Kontext. Der Programmierer
+bearbeitet die freigegebenen Pfade. Der Reviewer liest den Auftrag, die Originaldateien und den
+geänderten Snapshot nach bestandenem `make check`. Bei konkreten Befunden erhält der Programmierer
+eine Korrekturrunde. Nach einem weiteren Vorab-Review mit offenen Befunden pausiert die Aufgabe.
+
+Nach der lokalen Prüfung führt der Controller `make check` am exakten Commit-Kandidaten aus und
+öffnet den PR. Claude oder Codex führt anschließend das unabhängige Review am PR-Head durch.
+Bei einer Kontingentpause kann der Controller weitere explizit freigegebene OpenCode-Aufgaben
+bearbeiten. Pro Orchestrator arbeitet weiterhin nur ein Worker gleichzeitig. OpenCode-PRs gelangen
+nach der unabhängigen Prüfung zur manuellen Integration. Das gilt auch mit dem Label `auto-merge`.
+
+### Einrichtung
+
+1. Beim Image-Build `OPENCODE_VERSION` auf eine geprüfte exakte Version der OpenCode-V2-CLI
+   `@opencode/cli` setzen und das Image per Digest referenzieren.
+2. In der YAML-Datei `opencode` mit dem exakten Tag aus `ollama list`, einem eigenen internen
+   Docker-Netz und der dort erreichbaren HTTP-Adresse des lokalen Ollama-Diensts konfigurieren.
+   Das Netz darf nur den vorgesehenen Ollama-Endpunkt erreichen. Auf dem Mac ist `localhost`
+   im Container der Container selbst. Für den GPU-beschleunigten Host-Dienst braucht es daher
+   einen separat eingerichteten, auf Ollama begrenzten Weg aus diesem internen Netz zum Mac.
+3. Einen bereits freigegebenen Pilot-Task mit `opencode: true` in der Task-Konfiguration und
+   `agent:opencode` am Issue kennzeichnen. Die übrigen Freigabelabels und die Pilot-Pfadliste
+   gelten weiter. `plan` zeigt die Auswahl. Den ersten Lauf mit dem echten Modell beaufsichtigen.
+
+`status` zeigt je Issue den Programmierer, Testlauf, lokalen Review und gegebenenfalls die
+Korrekturrunde in `recent_events`. Die OpenCode-Sitzungen laufen mit eigenem temporären Home
+und einem privaten Server pro Container. Die Chatprotokolle enden mit dem Container. Laufende
+Schritte und PR-Status sind über den Orchestrator und GitHub sichtbar.
+
+Referenzen: [OpenCode CLI](https://opencode.ai/docs/cli/commands),
+[OpenCode-Berechtigungen](https://opencode.ai/docs/permissions),
+[Ollama-Modellkonfiguration](https://opencode.ai/docs/models/#ollama).
