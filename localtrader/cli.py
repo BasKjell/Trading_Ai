@@ -166,6 +166,31 @@ def run_intraday_stress(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_measure_spreads(args: argparse.Namespace) -> int:
+    import csv
+
+    from .cost_schedule import measure_spreads, sample_bar_opens
+    from .data_requests import AlpacaDatasetDownloader
+
+    with Path(args.bars).open(newline="", encoding="utf-8") as handle:
+        starts = [datetime.fromisoformat(row["timestamp"]) for row in csv.DictReader(handle)]
+
+    load_config(args.config)  # rejects a configuration that tries to move the holdout boundary
+    try:
+        before = research_limit(datetime.fromisoformat(args.before) if args.before else None)
+    except HoldoutError as error:
+        raise SystemExit(f"--before not allowed: {error}") from None
+    moments = sample_bar_opens(starts, args.samples, before)
+    downloader = AlpacaDatasetDownloader.from_env(args.env)
+    result = measure_spreads(downloader._request_page, args.symbol, moments)
+    result.update({"bars_file": args.bars, "sampled_before": before.isoformat(), "seed": 20261106})
+    output = Path(args.output or f"data/spreads_{args.symbol}.json")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def run_fetch_intraday(args: argparse.Namespace) -> int:
     from .data_requests import AlpacaDatasetDownloader
     from .intraday_fetch import default_end, fetch_intraday_csv
@@ -449,6 +474,14 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--spread-multiplier", type=float, default=1.0)
             command.add_argument("--delay-bars", type=int, default=0)
         command.set_defaults(func=func)
+    spreads = sub.add_parser("measure-spreads", help="sample quoted SIP spreads at bar opens (research period only)")
+    spreads.add_argument("--symbol", required=True)
+    spreads.add_argument("--bars", required=True, help="raw 15-minute CSV whose bar opens are sampled")
+    spreads.add_argument("--samples", type=int, default=400)
+    spreads.add_argument("--before", default=None, help="optional earlier limit; never after [holdout] start")
+    spreads.add_argument("--output", default=None, help="default: data/spreads_<SYMBOL>.json")
+    spreads.add_argument("--env", default=".env")
+    spreads.set_defaults(func=run_measure_spreads)
     fetch = sub.add_parser("fetch-intraday", help="download 15-minute ETF bars from Alpaca into data/")
     fetch.add_argument("--symbol", required=True)
     fetch.add_argument("--start", default="2016-01-01T00:00:00+00:00")
