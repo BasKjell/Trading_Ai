@@ -78,7 +78,11 @@ def parse_ecb_csv(text: str) -> tuple[list[FxRate], dict[str, Any]]:
         except (KeyError, ValueError):
             reject("unparseable")
             continue
-        if row.get("OBS_STATUS") not in (None, "", "A"):
+        status = (row.get("OBS_STATUS") or "").strip()
+        if not status:
+            reject("status_missing")  # only explicitly final values (A) are used
+            continue
+        if status != "A":
             reject("not_final")
             continue
         if not math.isfinite(value) or not PLAUSIBLE_RANGE[0] <= value <= PLAUSIBLE_RANGE[1]:
@@ -139,13 +143,21 @@ def read_fx_file(path: str | Path, available_until: datetime | None = None) -> F
     rates: list[FxRate] = []
     with Path(path).open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
-            rate = FxRate(
-                date.fromisoformat(row["date"]), float(row["usd_per_eur"]), datetime.fromisoformat(row["available_at"])
-            )
-            if rate.available_at != available_at(rate.day):
-                raise FxDataError(f"{rate.day}: availability differs from the publication rule")
-            if available_until is None or rate.available_at <= available_until:
-                rates.append(rate)
+            # the window is decided from the date alone, before any value is parsed, so a defect in a
+            # withheld (holdout) row can neither abort nor influence the research import
+            try:
+                day = date.fromisoformat(row["date"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise FxDataError(f"unreadable date in {row}") from error
+            if available_until is not None and available_at(day) > available_until:
+                continue
+            try:
+                rate = FxRate(day, float(row["usd_per_eur"]), datetime.fromisoformat(row["available_at"]))
+            except (KeyError, TypeError, ValueError) as error:
+                raise FxDataError(f"{day}: unreadable rate") from error
+            if rate.available_at != available_at(day):
+                raise FxDataError(f"{day}: availability differs from the publication rule")
+            rates.append(rate)
     return FxSeries(rates)
 
 

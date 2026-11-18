@@ -54,6 +54,7 @@ class ParseTests(unittest.TestCase):
             + row("2025-10-28", "nan")
             + row("2025-10-29", "9.0")
             + row("2025-10-30", "1.15", status="P")
+            + row("2025-10-29", "1.15", status="")
             + row("2025-10-31", "1.15", key="EXR.D.GBP.EUR.SP00.A")
             + row("2025-10-27", "1.164")
             + row("x", "1.1")
@@ -62,7 +63,14 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([r.day for r in series], [date(2025, 10, 27)])
         self.assertEqual(
             report["rejected"],
-            {"implausible_value": 2, "not_final": 1, "other_series": 1, "duplicate": 1, "unparseable": 1},
+            {
+                "implausible_value": 2,
+                "not_final": 1,
+                "status_missing": 1,  # Regression (PR #25 review): empty status was accepted
+                "other_series": 1,
+                "duplicate": 1,
+                "unparseable": 1,
+            },
         )
         with self.assertRaises(FxDataError):
             parse_ecb_csv(HEADER + row("2025-10-27", "1.164") + row("2025-10-27", "1.2"))
@@ -117,6 +125,13 @@ class FileTests(unittest.TestCase):
             self.assertEqual(len(full.rates), 6)
             self.assertEqual(cut.rates[-1].day, date(2025, 10, 31))
             self.assertNotEqual(full.digest(), cut.digest())
+            # Regression (PR #25 review): a defect only in a withheld row must not abort the research import
+            lines = path.read_text(encoding="utf-8").splitlines()
+            path.write_text("\n".join([*lines[:-1], "2025-11-03,not-a-number,x"]) + "\n", encoding="utf-8")
+            self.assertEqual(read_fx_file(path, datetime(2025, 11, 1, tzinfo=UTC)).digest(), cut.digest())
+            with self.assertRaises(FxDataError):
+                read_fx_file(path)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
             text = path.read_text(encoding="utf-8").replace("2025-10-31T15:00:00+00:00", "2025-10-31T09:00:00+00:00")
             path.write_text(text, encoding="utf-8")
             with self.assertRaises(FxDataError):  # earlier availability than published: look-ahead
