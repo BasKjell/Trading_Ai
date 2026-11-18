@@ -263,8 +263,8 @@ class RuntimeTests(unittest.TestCase):
         original = runtime_module.check_feed
         holdout = [(datetime(2026, 10, 30, 19, 45, tzinfo=UTC), 1.0, 1.0, 1.0, 1.0, 1.0), *self.rows]
 
-        def swap_source_after_check(path: Path, label: str | None = None) -> None:
-            original(path, label)
+        def swap_source_after_check(content: bytes, name: str) -> None:
+            original(content, name)
             write_feed(self.feed, holdout)  # atomic replacement of the operator's feed file
 
         runtime = self.runtime()
@@ -281,22 +281,41 @@ class RuntimeTests(unittest.TestCase):
         first = runtime.db.execute("SELECT min(start) FROM bars").fetchone()[0]
         self.assertGreaterEqual(datetime.fromisoformat(first), PAPER_DATA_START)
 
-    def test_snapshot_changed_after_check_halts_without_storing(self) -> None:
+    def test_imported_content_must_equal_the_checked_content(self) -> None:
         import localtrader.runtime as runtime_module
 
-        original = runtime_module.check_feed
+        original = runtime_module.import_csv
         holdout = [(datetime(2026, 10, 30, 19, 45, tzinfo=UTC), 1.0, 1.0, 1.0, 1.0, 1.0), *self.rows]
 
-        def tamper_snapshot_after_check(path: Path, label: str | None = None) -> None:
-            original(path, label)
-            write_feed(path, holdout)
+        def tamper_before_import(spec: object, session: object = None) -> object:
+            write_feed(Path(spec.path), holdout)  # type: ignore[attr-defined]
+            return original(spec, session)  # type: ignore[arg-type]
 
         runtime = self.runtime()
         self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
-        with unittest.mock.patch.object(runtime_module, "check_feed", tamper_snapshot_after_check):
+        with unittest.mock.patch.object(runtime_module, "import_csv", tamper_before_import):
             status = runtime.tick()
         self.assertEqual(status["status"], "halted")
         self.assertIsNone(runtime.db.execute("SELECT min(start) FROM bars").fetchone()[0])
+
+    def test_halt_on_holdout_rows_leaves_no_holdout_values_on_disk(self) -> None:
+        """Review #39 round 2, P1: rejected rows must not reach any file of the runtime state."""
+        marker = (123.4567, 123.8901, 122.2345, 123.6789, 98765.0)
+        holdout = [(datetime(2026, 10, 30, 19, 45, tzinfo=UTC), *marker), *self.rows]
+        write_feed(self.feed, holdout)
+        runtime = self.runtime()
+        self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+        status = runtime.tick()
+        self.assertEqual(status["status"], "halted")
+        runtime.close()
+        state = self.dir / "state"
+        files = [p for p in state.rglob("*") if p.is_file()]
+        self.assertTrue(files)
+        for path in files:
+            content = path.read_bytes()
+            for value in ("123.4567", "123.8901", "122.2345", "123.6789", "98765", "2026-10-30"):
+                self.assertNotIn(value.encode(), content, f"{path.name} contains {value}")
+        self.assertEqual([p.name for p in files if p.suffix == ".csv"], [])
 
     def test_holdout_bar_in_stored_state_halts_replay(self) -> None:
         runtime = self.runtime()
@@ -354,6 +373,48 @@ class RuntimeTests(unittest.TestCase):
         self.clock.now = datetime(2026, 11, 3, 21, 36, tzinfo=UTC)
         complete.ingest(self.clock.now)
         self.assertEqual(complete.stale_symbols(self.clock.now), [])
+
+    def test_missing_friday_close_stays_open_until_delivered_or_resolved(self) -> None:
+        """Review #39 round 2, P2: fresh bars of a later session must not clear an open slot."""
+        friday_close = datetime(2026, 11, 6, 20, 45, tzinfo=UTC)
+        rows = [r for r in bar_rows(6) if r[0] != friday_close]  # Mon Nov 2 .. Mon Nov 9
+        write_feed(self.feed, rows)
+        runtime = self.runtime()
+        for moment in (
+            datetime(2026, 11, 6, 21, 30, tzinfo=UTC),  # Friday after the close
+            datetime(2026, 11, 7, 15, 0, tzinfo=UTC),  # Saturday
+            datetime(2026, 11, 9, 16, 1, tzinfo=UTC),  # Monday with fresh bars
+            datetime(2026, 11, 9, 21, 40, tzinfo=UTC),  # Monday after the close
+        ):
+            self.clock.now = moment
+            status = runtime.tick()
+            self.assertEqual(status["status"], "stale", moment)
+            self.assertEqual(status["missing"], {"SPY": [friday_close.isoformat()]})
+            self.assertEqual(status["new_orders"], 0)
+        self.assertGreater(runtime.db.execute("SELECT count(*) FROM bars WHERE start >= '2026-11-09'").fetchone()[0], 0)
+
+        delivered = self.runtime(state="delivered")
+        write_feed(self.feed, bar_rows(6))  # the late closing bar arrives
+        self.assertEqual(delivered.tick()["status"], "ok")
+
+        write_feed(self.feed, rows)
+        resolved = self.runtime(state="resolved")
+        self.assertEqual(resolved.tick()["status"], "stale")
+        with self.assertRaises(ValueError):
+            resolved.resolve_gap("SPY", friday_close, "", "provider gap")  # needs an operator
+        with self.assertRaises(ValueError):
+            resolved.resolve_gap("SPY", friday_close - BAR, "operator", "not missing")
+        resolved.resolve_gap("SPY", friday_close, "operator", "provider confirmed the bar does not exist")
+        self.assertEqual(resolved.tick()["status"], "ok")
+        audit = [json.loads(d) for k, d in resolved.db.execute("SELECT kind, detail FROM audit") if k == "gap_resolved"]
+        self.assertEqual(audit[0]["operator"], "operator")
+
+    def test_gap_inside_a_session_stays_open_after_later_bars_arrive(self) -> None:
+        hole = datetime(2026, 11, 3, 16, 0, tzinfo=UTC)
+        write_feed(self.feed, [r for r in self.rows if r[0] != hole])
+        runtime = self.runtime()
+        self.clock.now = datetime(2026, 11, 3, 19, 1, tzinfo=UTC)
+        self.assertEqual(runtime.tick()["missing"], {"SPY": [hole.isoformat()]})
 
     def test_saturday_with_missing_friday_is_stale(self) -> None:
         runtime = self.runtime()  # the feed covers Monday..Thursday only
@@ -494,3 +555,15 @@ class CliTests(unittest.TestCase):
             status = json.loads(out.getvalue().splitlines()[-1])
             self.assertEqual(status["status"], "halted")
             self.assertIn("'iex'", status["reason"])
+
+    def test_run_resolve_gap_needs_operator_and_reason(self) -> None:
+        from localtrader.cli import build_parser
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = Path(tmp) / "SPY.csv"
+            write_feed(feed, bar_rows(1))
+            base = ["run", "--mode", "paper", "--feed", f"SPY={feed}", "--trade-from", TRADE_FROM.isoformat()]
+            base += ["--state-dir", str(Path(tmp) / "s"), "--resolve-gap", "SPY=2026-11-02T15:00:00+00:00"]
+            args = build_parser().parse_args(base)
+            with self.assertRaises(SystemExit):
+                args.func(args)

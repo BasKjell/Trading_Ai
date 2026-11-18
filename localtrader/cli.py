@@ -340,6 +340,16 @@ def run_runtime(args: argparse.Namespace) -> int:
             runtime.resume(args.resume)
             print(json.dumps({"resumed_by": args.resume}))
             return 0
+        if args.resolve_gap:
+            symbol, _, start = args.resolve_gap.partition("=")
+            try:
+                runtime.resolve_gap(
+                    symbol.strip(), datetime.fromisoformat(start.strip()), args.operator or "", args.reason or ""
+                )
+            except ValueError as error:
+                raise SystemExit(f"--resolve-gap: {error}") from error
+            print(json.dumps({"gap_resolved": args.resolve_gap, "operator": args.operator}))
+            return 0
         while True:
             print(json.dumps(runtime.tick(), default=str), flush=True)
             if args.once:
@@ -625,6 +635,11 @@ def build_parser() -> argparse.ArgumentParser:
     runtime.add_argument("--interval-seconds", type=float, default=60.0)
     runtime.add_argument("--halt", default=None, help="latch a halt with this reason")
     runtime.add_argument("--resume", default=None, help="operator name; clears a halt")
+    runtime.add_argument(
+        "--resolve-gap", default=None, help="SYMBOL=START: declare a missing slot as never delivered (audited)"
+    )
+    runtime.add_argument("--operator", default=None, help="operator name for --resolve-gap")
+    runtime.add_argument("--reason", default=None, help="reason for --resolve-gap")
     runtime.add_argument("--release", default=None, help="live release file (live stays locked in this build)")
     runtime.add_argument("--env-file", default=".env")
     runtime.set_defaults(func=run_runtime)

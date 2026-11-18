@@ -18,15 +18,18 @@ identical to a backtest over the same bars with the same arrival times (no secon
 received before ``trade_from`` are warm-up history only. Every tick also checks that everything booked
 earlier is still reproduced unchanged; a divergence (changed config, code or data) halts the runtime.
 
-Data rules: each tick reads a feed file exactly once into a private snapshot; the holdout, source and
-duplicate checks and the import all use that snapshot, so a file replaced between check and import cannot
-slip unchecked rows in. Every row must name ``feed=sip`` (ADR 0006: only delayed SIP drives signals). A bar
+Data rules: each tick reads a feed file exactly once into memory and checks that content (holdout, source,
+duplicates) before anything of it is written; only checked content is imported (via a temporary file
+removed right after, hash-verified), so a file replaced between check and import cannot slip unchecked
+rows in, and rejected rows never reach the state directory. Every row must name ``feed=sip`` (ADR 0006: only delayed SIP drives signals). A bar
 is stored once per (symbol, start); a re-delivered identical bar is ignored, a changed one halts the
 runtime. Bars ending less than ``feed_delay`` (at least 15 minutes, ADR 0006) ago are not read. Bars before
 the end of the central holdout window are refused before any price is parsed, again before they are
 persisted and again when stored bars are loaded. A session bar is overdue once ``max_bar_age - 15 min``
-have passed since its end (exchange calendar with holidays and early closes, closing bar included); while
-any overdue bar is missing, the tick books nothing (stale data -> no new orders). The engine itself later
+have passed since its end (exchange calendar with holidays and early closes, closing bar included). Every
+overdue slot since the first stored bar must be present; a missing one stays open until it is delivered or
+an operator resolves it explicitly (``resolve_gap``, audited). While a slot is open, the tick books nothing
+(stale data -> no new orders). The engine itself later
 refuses entries that follow a gap or whose signal has become too old.
 """
 
@@ -34,9 +37,11 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 import sqlite3
 import subprocess
+import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -173,6 +178,9 @@ CREATE TABLE IF NOT EXISTS signals(id TEXT PRIMARY KEY, time TEXT NOT NULL, deta
 CREATE TABLE IF NOT EXISTS fills(
     seq INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT UNIQUE NOT NULL, mode TEXT NOT NULL,
     detail TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS gap_resolutions(
+    symbol TEXT NOT NULL, start TEXT NOT NULL, operator TEXT NOT NULL, reason TEXT NOT NULL, time TEXT NOT NULL,
+    PRIMARY KEY(symbol, start));
 CREATE TABLE IF NOT EXISTS audit(
     seq INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL);
 """
@@ -199,35 +207,37 @@ def _bar_payload(bar: Bar) -> str:
     return json.dumps([bar.end.isoformat(), bar.open, bar.high, bar.low, bar.close, bar.volume], separators=(",", ":"))
 
 
-def check_feed(path: Path, label: str | None = None) -> None:
-    """First pass over the timestamp and feed columns only: any bar before ``PAPER_DATA_START`` or any row not
-    marked as SIP stops the feed before a price is parsed. Second pass: a re-delivered row must be identical;
-    conflicting duplicates stop the feed. ``path`` must be the snapshot that is imported afterwards."""
-    name = label or path.name
-    with path.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        if "feed" not in [(field or "").strip().lower() for field in reader.fieldnames or []]:
-            raise RuntimeHalted(f"{name}: feed file has no 'feed' column (ADR 0006 requires SIP provenance)")
-        for row in reader:
-            raw = (row.get("timestamp") or "").strip()
-            try:
-                start = datetime.fromisoformat(raw)
-            except ValueError:
-                start = None  # rejected later by the regular import checks
-            if start is not None and (start.tzinfo is None or start < PAPER_DATA_START):
-                raise RuntimeHalted(f"{name}: feed contains bars before {PAPER_DATA_START.isoformat()}")
-            source = next(((v or "").strip().lower() for k, v in row.items() if (k or "").strip().lower() == "feed"))
-            if source != REQUIRED_FEED:
-                raise RuntimeHalted(
-                    f"{name}: row {raw!r} comes from feed {source!r}; only {REQUIRED_FEED!r} may drive signals"
-                )
+def check_feed(content: bytes, name: str) -> None:
+    """Checks the feed content held in memory, before anything of it is written anywhere. First pass over the
+    timestamp and feed columns only: any bar before ``PAPER_DATA_START`` or any row not marked as SIP stops
+    the feed before a price is parsed. Second pass: a re-delivered row must be identical; conflicting
+    duplicates stop the feed. Only content that passed is later handed to the import."""
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeHalted(f"{name}: feed is not valid UTF-8") from error
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    if "feed" not in [(field or "").strip().lower() for field in reader.fieldnames or []]:
+        raise RuntimeHalted(f"{name}: feed file has no 'feed' column (ADR 0006 requires SIP provenance)")
+    for row in reader:
+        raw = (row.get("timestamp") or "").strip()
+        try:
+            start = datetime.fromisoformat(raw)
+        except ValueError:
+            start = None  # rejected later by the regular import checks
+        if start is not None and (start.tzinfo is None or start < PAPER_DATA_START):
+            raise RuntimeHalted(f"{name}: feed contains bars before {PAPER_DATA_START.isoformat()}")
+        source = next(((v or "").strip().lower() for k, v in row.items() if (k or "").strip().lower() == "feed"))
+        if source != REQUIRED_FEED:
+            raise RuntimeHalted(
+                f"{name}: row {raw!r} comes from feed {source!r}; only {REQUIRED_FEED!r} may drive signals"
+            )
     seen: dict[str, dict[str, str]] = {}
-    with path.open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            key = (row.get("timestamp") or "").strip()
-            if key in seen and seen[key] != row:
-                raise RuntimeHalted(f"{path.name}: conflicting rows for {key}")
-            seen[key] = row
+    for row in csv.DictReader(io.StringIO(text, newline="")):
+        key = (row.get("timestamp") or "").strip()
+        if key in seen and seen[key] != row:
+            raise RuntimeHalted(f"{name}: conflicting rows for {key}")
+        seen[key] = row
 
 
 def _is_session_day(session: SessionSpec, day: date) -> bool:
@@ -255,6 +265,23 @@ def last_session_bar_end(session: SessionSpec, moment: datetime, lookback_days: 
                 return end if end - BAR >= PAPER_DATA_START else None
         day -= timedelta(days=1)
     return None
+
+
+def session_bar_starts(session: SessionSpec, first: datetime, last_end: datetime) -> list[datetime]:
+    """UTC starts of all regular-session 15-minute bars with ``start >= first`` and ``end <= last_end``."""
+    zone = ZoneInfo(session.timezone)
+    output = []
+    day = first.astimezone(zone).date()
+    while day <= last_end.astimezone(zone).date():
+        if _is_session_day(session, day):
+            moment = datetime.combine(day, session.start, zone)
+            closes = datetime.combine(day, session.close_on(day), zone)
+            while moment + BAR <= closes:
+                if moment >= first and moment + BAR <= last_end:
+                    output.append(moment.astimezone(UTC))
+                moment += BAR
+        day += timedelta(days=1)
+    return output
 
 
 class PaperRuntime:
@@ -400,33 +427,34 @@ class PaperRuntime:
             )
         return output
 
-    def _snapshot(self, symbol: str, path: Path) -> tuple[Path, str] | None:
-        """Read the feed once into a private copy; every later check and the import use only this copy."""
+    def _import_checked(self, symbol: str, content: bytes) -> ImportedDataset:
+        """Import exactly the bytes ``check_feed`` passed. The regular importer needs a file, so the checked
+        content goes to a private temporary file that is removed right after the import."""
+        spec = self.instruments[symbol]
+        descriptor, name = tempfile.mkstemp(dir=self.state_dir, prefix=".feed-", suffix=".csv")
+        temporary = Path(name)
         try:
-            content = path.read_bytes()
-        except FileNotFoundError:
-            return None
-        snapshots = self.state_dir / "feed-snapshots"
-        snapshots.mkdir(exist_ok=True)
-        snapshot = snapshots / f"{symbol}.csv"
-        snapshot.write_bytes(content)
-        return snapshot, hashlib.sha256(content).hexdigest()
+            with open(descriptor, "wb") as handle:
+                handle.write(content)
+            data = import_csv(
+                CsvImportSpec(str(temporary), symbol, spec.market, spec.venue, "paper-feed", "UTC", 15), spec.session
+            )
+        finally:
+            temporary.unlink(missing_ok=True)
+        if data.manifest.file_sha256 != hashlib.sha256(content).hexdigest():
+            raise RuntimeHalted(f"{symbol}: imported feed differs from the checked content")
+        return data
 
     def ingest(self, now: datetime) -> dict[str, int]:
         """Store newly completed bars once, stamped with the time they were first seen."""
         counts = {"new": 0, "duplicate": 0, "incomplete": 0}
         for symbol, path in self.feeds.items():
-            taken = self._snapshot(symbol, path)
-            if taken is None:
+            try:
+                content = path.read_bytes()  # read once; nothing of it is written before it passed the checks
+            except FileNotFoundError:
                 continue
-            snapshot, digest = taken
-            check_feed(snapshot, path.name)
-            spec = self.instruments[symbol]
-            data = import_csv(
-                CsvImportSpec(str(snapshot), symbol, spec.market, spec.venue, "paper-feed", "UTC", 15), spec.session
-            )
-            if data.manifest.file_sha256 != digest:
-                raise RuntimeHalted(f"{symbol}: feed snapshot changed between check and import")
+            check_feed(content, path.name)
+            data = self._import_checked(symbol, content)
             # identical re-delivered rows were verified by check_feed; the import keeps the first copy
             reported = data.manifest.quality.get("rejected")
             rejected = {k: v for k, v in (reported if isinstance(reported, dict) else {}).items() if k != "duplicate"}
@@ -462,17 +490,52 @@ class PaperRuntime:
         ``max_bar_age`` old). The closing bar stays due after the close, over nights, weekends and holidays."""
         return last_session_bar_end(self.instruments[symbol].session, now - (self.max_bar_age - BAR))
 
+    def missing_slots(self, symbol: str, now: datetime) -> list[datetime] | None:
+        """Overdue session slots without a stored bar, from the symbol's first stored bar on. A missing slot
+        stays open until the bar arrives or an operator resolves it explicitly (``resolve_gap``); it never
+        expires with time or because later sessions deliver fresh bars. ``None``: nothing stored although a
+        bar is overdue."""
+        due = self.overdue_bar_end(symbol, now)
+        if due is None:
+            return []  # no session bar of the paper period is due yet
+        stored = {
+            datetime.fromisoformat(row[0])
+            for row in self.db.execute("SELECT start FROM bars WHERE symbol=?", (symbol,))
+        }
+        if not stored:
+            return None
+        resolved = {
+            datetime.fromisoformat(row[0])
+            for row in self.db.execute("SELECT start FROM gap_resolutions WHERE symbol=?", (symbol,))
+        }
+        session = self.instruments[symbol].session
+        return [t for t in session_bar_starts(session, min(stored), due) if t not in stored and t not in resolved]
+
     def stale_symbols(self, now: datetime) -> list[str]:
-        stale = []
-        for symbol in self.feeds:
-            due = self.overdue_bar_end(symbol, now)
-            if due is None:
-                continue  # no session bar of the paper period is due yet
-            row = self.db.execute("SELECT max(start) FROM bars WHERE symbol=?", (symbol,)).fetchone()
-            newest_end = datetime.fromisoformat(row[0]) + BAR if row and row[0] else None
-            if newest_end is None or newest_end < due:
-                stale.append(symbol)
-        return stale
+        return [symbol for symbol in self.feeds if self.missing_slots(symbol, now) != []]
+
+    def resolve_gap(self, symbol: str, start: datetime, operator: str, reason: str) -> None:
+        """Explicit, audited operator decision that a slot will never be delivered (e.g. a provider gap). The
+        engine still treats the following bar as after a gap and refuses entries on it."""
+        if symbol not in self.feeds:
+            raise ValueError(f"unknown symbol {symbol}")
+        if not operator.strip() or not reason.strip():
+            raise ValueError("resolving a gap needs the operator's name and a reason")
+        if start.tzinfo is None:
+            raise ValueError("start must be timezone-aware")
+        start = start.astimezone(UTC)
+        if start not in session_bar_starts(self.instruments[symbol].session, start, start + BAR):
+            raise ValueError(f"{start.isoformat()} is not a regular-session slot of {symbol}")
+        if self.db.execute("SELECT 1 FROM bars WHERE symbol=? AND start=?", (symbol, start.isoformat())).fetchone():
+            raise ValueError(f"{symbol} {start.isoformat()} is not missing")
+        with self._tx():
+            self.db.execute(
+                "INSERT INTO gap_resolutions(symbol, start, operator, reason, time) VALUES(?, ?, ?, ?, ?)",
+                (symbol, start.isoformat(), operator, reason, self.clock().isoformat()),
+            )
+            self._audit(
+                "gap_resolved", {"symbol": symbol, "start": start.isoformat(), "operator": operator, "reason": reason}
+            )
 
     def _datasets(self) -> dict[str, ImportedDataset]:
         datasets = {}
@@ -510,11 +573,13 @@ class PaperRuntime:
         except RuntimeHalted as error:
             self.halt(str(error))
             return {"status": "halted", "reason": str(error)}
-        stale = self.stale_symbols(now)
+        missing = {symbol: self.missing_slots(symbol, now) for symbol in self.feeds}
+        stale = [symbol for symbol, slots in missing.items() if slots != []]
         if stale:
+            open_slots = {s: [t.isoformat() for t in (missing[s] or [])][:20] for s in stale}
             with self._tx():
-                self._audit("stale_data", {"symbols": stale})
-            return {"status": "stale", "symbols": stale, "bars": counts, "new_orders": 0}
+                self._audit("stale_data", {"symbols": stale, "missing": open_slots})
+            return {"status": "stale", "symbols": stale, "missing": open_slots, "bars": counts, "new_orders": 0}
         if not self.db.execute("SELECT 1 FROM bars LIMIT 1").fetchone():
             return {"status": "waiting", "bars": counts, "new_orders": 0}
         try:
