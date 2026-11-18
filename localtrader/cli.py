@@ -5,7 +5,7 @@ import hashlib
 import json
 import sys
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .alpaca_check import AlpacaCheckError, checker_from_env
@@ -219,11 +219,22 @@ def run_fetch_intraday(args: argparse.Namespace) -> int:
 def run_fetch_fx(args: argparse.Namespace) -> int:
     from datetime import date
 
-    from .fx_rates import ECB_URL, fetch_ecb_csv, parse_ecb_csv, write_fx_file
+    from .fx_rates import ECB_URL, fetch_ecb_csv, parse_ecb_csv, research_series, write_fx_file
 
+    load_config(args.config)  # rejects a configuration that tries to move the holdout boundary
+    try:  # fixed boundary from localtrader/holdout.py; --available-until may only be earlier
+        cutoff = research_limit(datetime.fromisoformat(args.available_until) if args.available_until else None)
+    except (HoldoutError, ValueError) as error:
+        raise SystemExit(f"--available-until not allowed: {error}") from None
     start = date.fromisoformat(args.start)
-    end = date.fromisoformat(args.end) if args.end else datetime.now(UTC).date()
-    series, report = parse_ecb_csv(fetch_ecb_csv(start, end))
+    last_allowed = cutoff.date() - timedelta(days=1)
+    end = date.fromisoformat(args.end) if args.end else last_allowed
+    if end > last_allowed:
+        raise SystemExit(f"--end {end} reaches into the holdout ({cutoff.isoformat()}); not allowed")
+    # rows published at/after the cutoff are dropped before validation, so the manifest's quality report
+    # cannot describe the holdout either; research_series is a second, independent guard
+    series, report = parse_ecb_csv(fetch_ecb_csv(start, end), available_before=cutoff)
+    series = research_series(series, cutoff)
     if not series:
         raise SystemExit("ECB returned no usable rates")
     manifest = write_fx_file(series, args.output, report, ECB_URL)
@@ -485,6 +496,9 @@ def build_parser() -> argparse.ArgumentParser:
     fx.add_argument("--start", default="2015-12-01")
     fx.add_argument("--end", default=None, help="default: today")
     fx.add_argument("--output", default="data/EURUSD_ecb.csv")
+    fx.add_argument(
+        "--available-until", default=None, help="optional earlier limit; never after the fixed holdout start"
+    )
     fx.set_defaults(func=run_fetch_fx)
     register = sub.add_parser("experiments", help="show the shared experiment register and total variants tested")
     register.add_argument("--directory", default="experiments")

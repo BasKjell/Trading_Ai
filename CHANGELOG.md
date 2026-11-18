@@ -165,6 +165,12 @@ Holdout-Abgleich; Belege; Journal-Lebenszyklus, Budget, Eindeutigkeit, Manipulat
   nach Verfügbarkeit; Digest der Reihe.
 - CLI `fetch-fx`; Abschnitt in `docs/DATA_FORMAT.md`.
 
+- Holdout-Grenze fest im Code (`localtrader/holdout.py`); `--available-until` und Konfiguration können sie
+  nicht nach hinten verschieben (Review zu #29).
+- Benutzerentscheidung 2026-11-18: `fetch-fx` lädt nur bis vor den Holdout-Start; die Forschungsdatei
+  enthält physisch keine Holdout-Kurse. Fehlermeldungen nennen nur Zeilennummern.
+- Forschungszeitraum endet strikt vor der Grenze; Zeilen ab dem Cutoff werden vor Validierung und
+  Qualitätsbericht verworfen, das Manifest beschreibt nur zulässige Kurse (Review 3 zu #29).
 - Nach Review (`552ae42`): Holdout-Zeilen werden vor dem Parsen übersprungen (ein Defekt im Holdout
   bricht den Forschungsimport nicht ab); leerer `OBS_STATUS` wird verworfen.
 
