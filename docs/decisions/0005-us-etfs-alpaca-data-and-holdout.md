@@ -43,9 +43,9 @@ sind, und es sollen mehr Daten ergänzt werden.
   `config/default.toml`), festgelegt und committet, bevor irgendein Ergebnis auf diesen Daten berechnet
   wurde. Beim Import werden alle Zeilen, die nicht vollständig vor dieser Grenze verfügbar sind
   (`received_at`), vor jeder Qualitätsprüfung verworfen; im Manifest steht nur ihre Anzahl, nie ein Preis.
-  Dividenden ab dem Holdout-Tag werden ebenfalls nicht geladen. `--use-holdout` ist derzeit eine im
-  Report protokollierte **Konvention, keine technische Zugriffskontrolle**; eine zentrale Kontrolle mit
-  Nutzungszähler ist für T-008 geplant.
+  Dividenden ab dem Holdout-Tag werden ebenfalls nicht geladen. Die Grenze ist **im Code fest** (`localtrader/holdout.py`); eine abweichende Konfiguration wird beim
+  Start abgelehnt, Kommandozeilen-Grenzen dürfen nur früher liegen, und der Forschungspfad hat keinen
+  Zugang zum Holdout (kein `--use-holdout`). Der zentrale Zugriff mit Journalreservierung gehört zu T-008.
 - **Verwahrung (Benutzerentscheidung 2026-11-18, Methodenreview zu #22):** Forschungsdateien enthalten
   physisch keine Holdout-Daten. `fetch-intraday` lädt Kurse, bereinigte Kurse und Corporate Actions
   höchstens bis vor den `[holdout] start` und lehnt ein späteres Ende ab; die früheren Vollkopien wurden

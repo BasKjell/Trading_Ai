@@ -25,6 +25,8 @@ verfügbaren Daten wählen und mehr Daten ergänzen (ADR 0005).
   `Portfolio.receive_income()`; Dividendenlücken im Manifest. Ergebnisse als EXP-T018-002 neu
   berechnet (EXP-T018-001 beruhte auf bereinigten Kursen und enthielt Halbtags-Nachbörse).
 
+- Nach Review 4: Holdout-Grenze fest im Code (`localtrader/holdout.py`), Konfiguration muss übereinstimmen,
+  Grenzen nur früher; `--use-holdout` entfernt (kein Forschungspfad zum Holdout).
 - Nach Review 3 (`e41c8f7`): Zahltag-Schätzung nur aus Forschungsaktionen, Dividendenzeilen vor dem Parsen
   nach Ex-Datum gefiltert (Grenze konsistent zur Session), Fehlermeldungen ohne Zeileninhalt;
   Neuregistrierung EXP-T018-004 (bitgenau gleich EXP-T018-003).

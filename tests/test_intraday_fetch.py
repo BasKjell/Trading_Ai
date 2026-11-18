@@ -12,6 +12,7 @@ from localtrader.cli import _load_intraday
 from localtrader.config import load_config
 from localtrader.domain import Bar, Market
 from localtrader.execution import CostProfile
+from localtrader.holdout import HoldoutError
 from localtrader.intraday_data import CsvImportSpec, DatasetManifest, ImportedDataset, SessionSpec, import_csv
 from localtrader.intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics
 from localtrader.intraday_fetch import (
@@ -411,9 +412,19 @@ class HoldoutTests(unittest.TestCase):
             with self.assertRaises(SystemExit):  # missing corporate actions: fail closed
                 _load_intraday(config, path, None, "SPY")
             dividends.write_text(rows, encoding="utf-8")
-            _, _, datasets, holdout = _load_intraday(config, path, None, "SPY", use_holdout=True)
-            self.assertEqual(len(datasets["SPY"].bars), 2)
-            self.assertTrue(holdout["used"])
+            # Regression (PR #21 review 4): no research path to the holdout, no configuration that moves it
+            moved = Path(tmp) / "moved.toml"
+            moved.write_text(
+                Path(config)
+                .read_text(encoding="utf-8")
+                .replace('start = "2025-11-01T00:00:00+00:00"', 'start = "2026-06-01T00:00:00+00:00"'),
+                encoding="utf-8",
+            )
+            with self.assertRaises(HoldoutError):
+                _load_intraday(str(moved), path, None, "SPY")
+            import inspect
+
+            self.assertNotIn("use_holdout", inspect.signature(_load_intraday).parameters)
 
 
 SESSION = SessionSpec("UTC", time(0, 0), time(23, 59))

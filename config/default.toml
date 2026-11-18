@@ -150,9 +150,8 @@ dividend_withholding = 0.15     # US withholding with W-8BEN treaty rate (assump
 session_calendar = "nyse"       # early closes; days after the covered range are not traded
 
 # Final independent test period, fixed before the first evaluation of the ETF data (T-018, ADR 0005).
-# Rows not completely available before `start` are withheld at import (only their count is reported).
-# `--use-holdout` is a convention logged in the report, not yet an access control (planned: T-008).
-# Do not move this date after looking at results.
+# The boundary is fixed in localtrader/holdout.py; this entry documents it and must be identical (checked
+# at start). Research commands cannot reach data at or after it; central access belongs to T-008.
 [holdout]
 start = "2025-11-01T00:00:00+00:00"
 

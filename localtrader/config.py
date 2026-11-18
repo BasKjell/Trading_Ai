@@ -122,4 +122,7 @@ def load_config(path: str | Path = "config/default.toml") -> AppConfig:
         raise ValueError("min_positive_fold_ratio must be in [0.5, 1.0]")
     if research.min_median_trades < 2:
         raise ValueError("min_median_trades must be at least 2")
+    from .holdout import check_config
+
+    check_config(raw)  # the holdout boundary is fixed in code; a configuration cannot move it
     return AppConfig(raw=raw, risk=risk, costs=costs, research=research)
