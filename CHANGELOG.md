@@ -2,6 +2,23 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – Kostentabelle SPY/QQQ mit gemessenen Spreads (Vorbedingung T-008)
+
+**Änderungen**
+- `config/cost_schedule.json` und `localtrader/cost_schedule.py`: Kosten je Instrument, Währung, Seite und
+  Zeitraum, getrennt nach Quelle/Messwert/Annahme, mit Validierung und Digest.
+- CLI `measure-spreads`: Stichprobe der SIP-Quotes an Bar-Eröffnungen, nur Forschungszeitraum.
+- Nach Review 3: Pflichtdeckung je Komponente und Handelsseite (`both` deckt Kauf und Verkauf; SEC/TAF
+  nur Verkauf). Die versionierte Tabelle ist vollständig; Werte unverändert.
+- Nach Review 2: Holdout-Grenze fest im Code (`localtrader/holdout.py`, Konfiguration muss übereinstimmen),
+  Anfragefenster endet strikt vor der Grenze. Messwerte unverändert (kein Stichprobenzeitpunkt betroffen).
+- Nach Review (`1404b5e`): Obergrenze fest `[holdout] start` (inkl. ganzem Anfragefenster), Eröffnungsstatistik
+  in New-York-Zeit, NaN/Inf abgelehnt, Vollständigkeit je Datum im erklärten Geltungsbereich; Neumessung.
+- `docs/costs/COST_SCHEDULE.md`: Belege, Messergebnisse, Vergleich mit der Konfiguration (unterschätzt
+  um ca. 6 % / 19 %). Engine unverändert.
+
+**Tests:** `tests/test_cost_schedule.py`.
+
 ## 2026-11-18 – Review nach Risikoklasse, Sammel-PR für den Integrationsstand (T-009, PR #32)
 
 **Anlass/Ziel:** Benutzerentscheidung 2026-11-18: Reviews dort behalten, wo Fehler unumkehrbar sind, und
