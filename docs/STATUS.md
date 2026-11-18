@@ -15,6 +15,7 @@ Stand: 2026-11-18. Kennzeichnung: **geplant / implementiert / getestet / integri
 | `agent/T-007-report-view` | T-007 Report-Teil (#3): Experimentregister und Intraday-Reports im Dashboard | **integriert** (PR #24); Betriebsansicht offen (T-006) |
 | `agent/T-008-research-design` | T-008 Forschungsdesign (#4) | **integriert (PR #22)** – gilt nach dessen Merge. Forschungsdesign im Entwurf, Implementierung und Freeze ausstehend |
 | `agent/T-008-journal-registry` | T-008 Bausteine (Protokollprüfung, Journal, Registry) | review, PR #23 (Basis #22) |
+| `agent/T-008-folds` | T-008 Falten, Purge/Embargo, Warm-up (#4) | implementiert und synthetisch getestet, unabhängige Codeprüfung ausstehend |
 
 ## Funktionen
 
