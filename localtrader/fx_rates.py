@@ -147,13 +147,13 @@ def read_fx_file(path: str | Path, available_until: datetime | None = None) -> F
             # withheld (holdout) row can neither abort nor influence the research import
             try:
                 day = date.fromisoformat(row["date"])
-            except (KeyError, TypeError, ValueError) as error:
+            except (KeyError, TypeError, ValueError):
                 raise FxDataError(f"unreadable date in line {line}") from None  # never echo row values
             if available_until is not None and available_at(day) > available_until:
                 continue
             try:
                 rate = FxRate(day, float(row["usd_per_eur"]), datetime.fromisoformat(row["available_at"]))
-            except (KeyError, TypeError, ValueError) as error:
+            except (KeyError, TypeError, ValueError):
                 raise FxDataError(f"{day}: unreadable rate (line {line})") from None
             if rate.available_at != available_at(day):
                 raise FxDataError(f"{day}: availability differs from the publication rule")
