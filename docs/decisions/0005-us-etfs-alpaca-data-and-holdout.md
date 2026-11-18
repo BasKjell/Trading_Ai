@@ -46,6 +46,11 @@ sind, und es sollen mehr Daten ergänzt werden.
   Dividenden ab dem Holdout-Tag werden ebenfalls nicht geladen. `--use-holdout` ist derzeit eine im
   Report protokollierte **Konvention, keine technische Zugriffskontrolle**; eine zentrale Kontrolle mit
   Nutzungszähler ist für T-008 geplant.
+- **Verwahrung (Benutzerentscheidung 2026-11-18, Methodenreview zu #22):** Forschungsdateien enthalten
+  physisch keine Holdout-Daten. `fetch-intraday` lädt Kurse, bereinigte Kurse und Corporate Actions
+  höchstens bis vor den `[holdout] start` und lehnt ein späteres Ende ab; die früheren Vollkopien wurden
+  gelöscht. Der Holdout wird erst im zentralen T-008-Lauf frisch geladen, nachdem der eine Versuch im
+  Versuchsjournal reserviert ist; der Benutzer gibt diesen Lauf als Verwahrer frei.
 - Der DAX bleibt als zweiter, kleiner Datensatz erhalten.
 
 ## Alternativen

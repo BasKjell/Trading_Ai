@@ -25,6 +25,11 @@ verfügbaren Daten wählen und mehr Daten ergänzen (ADR 0005).
   `Portfolio.receive_income()`; Dividendenlücken im Manifest. Ergebnisse als EXP-T018-002 neu
   berechnet (EXP-T018-001 beruhte auf bereinigten Kursen und enthielt Halbtags-Nachbörse).
 
+- Nach Review 3 (`e41c8f7`): Zahltag-Schätzung nur aus Forschungsaktionen, Dividendenzeilen vor dem Parsen
+  nach Ex-Datum gefiltert (Grenze konsistent zur Session), Fehlermeldungen ohne Zeileninhalt;
+  Neuregistrierung EXP-T018-004 (bitgenau gleich EXP-T018-003).
+- Benutzerentscheidung 2026-11-18: `fetch-intraday` lädt Kurse und Corporate Actions nur bis vor den
+  Holdout-Start; Forschungsdateien enthalten physisch keine Holdout-Daten.
 - Nach Review 2 (`535493e`): Dividenden aus dem Corporate-Actions-Endpunkt mit Zahltag, Gegenprobe
   gegen die abgeleiteten Beträge; Forderung am Ex-Tag, Cash am Zahltag (`Portfolio.accrue_income`,
   `settle_income`), offene Forderungen am Ende ausgewiesen; Dividenden validiert und an die Datenversion

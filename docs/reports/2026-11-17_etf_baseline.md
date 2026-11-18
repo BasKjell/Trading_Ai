@@ -2,13 +2,13 @@
 
 Erzeugt mit `intraday-backtest` und `intraday-stress` (`--symbol SPY|QQQ`) auf dem Stand nach dem
 Codex-Review zu PR #21. Rohdateien liegen lokal unter `reports/` und werden nicht versioniert.
-Experiment: **EXP-T018-003** (ersetzt EXP-T018-001/-002; -001 nutzte bereinigte Kurse zur Ausführung und
+Experiment: **EXP-T018-004** (bitgenau gleich EXP-T018-003, auf reinen Forschungsdateien; ersetzt EXP-T018-001/-002/-003; -001 nutzte bereinigte Kurse zur Ausführung und
 enthielt Nachbörsen-Bars an Halbtagen, -002 buchte Dividenden am Ex-Tag als Cash).
 
 **Daten:** Alpaca SIP, **handelbare Rohkurse** für Signale, Ausführung, Stops und Bewertung; Dividenden
 aus Alpaca-Corporate-Actions als Forderung am Ex-Tag und Cash am Zahltag, abzüglich 15 % Quellensteuer; reguläre Handelszeit je Tag inkl. NYSE-Halbtagen
 (ADR 0005). Forschungszeitraum 2016-01-04 bis 2025-10-31 (2.473 Handelstage). **Holdout ab 2025-11-01
-beim Import verworfen** (6.788 Zeilen je Symbol, nur Anzahl gemeldet). SPY fehlen bei Alpaca zwei
+nicht in den Forschungsdateien enthalten** (Benutzerentscheidung 2026-11-18). SPY fehlen bei Alpaca zwei
 Dividenden (März 2016, Juni 2018); Trend- und Buy-and-hold-Ergebnisse von SPY sind dadurch minimal zu niedrig.
 **Kosten (Annahme):** keine Kommission, 0,1 bp Gebühren, 0,5 bp Spread, 1,0 bp Slippage, keine Finanzierung.
 **Kapital/Risiko:** 10.000 (USD 1:1 als Kontowährung, T-011 offen), 0,20 % Risiko je Trade, max. 20 % je Instrument.

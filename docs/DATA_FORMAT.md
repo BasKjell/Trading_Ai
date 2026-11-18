@@ -59,7 +59,7 @@ Das reicht für technische Prüfungen, aber **nicht** für belastbare Aussagen z
 
 | Feld | Wert |
 |---|---|
-| Abruf | `python3 -m localtrader fetch-intraday --symbol SPY --env <pfad/zur/.env>` (ebenso QQQ) |
+| Abruf | `python3 -m localtrader fetch-intraday --symbol SPY --env <pfad/zur/.env>` (ebenso QQQ); lädt höchstens bis vor den Holdout-Start, ein späteres `--end` wird abgelehnt |
 | Quelle | Alpaca Market Data v2, Feed SIP, Paper-Key aus `.env` (kostenlos, Basic-Plan) |
 | Handelbare Preise | `data/<SYMBOL>_15m.csv`, `adjustment=raw`: Signale, Ausführung, Stops, Bewertung |
 | Analysepreise | `data/<SYMBOL>_15m_adjusted.csv`, `adjustment=all`: nur Analyse, nie Ausführung |
@@ -69,12 +69,13 @@ Das reicht für technische Prüfungen, aber **nicht** für belastbare Aussagen z
 | Handelszeit | 09:30–16:00 New York, an NYSE-Halbtagen bis 13:00 (`localtrader/calendars.py`); nach 2026-12-31 kein Handel |
 | Holdout | Zeilen, die nicht vollständig vor 2025-11-01 verfügbar sind, werden beim Import vor jeder Prüfung verworfen; nur die Anzahl wird gemeldet. Der Herkunftshash umfasst dann nur die Forschungszeilen (`research-rows:<sha256>`), Dividenden ab dem Holdout-Tag werden nicht geladen; eine Änderung nur im Holdout-Teil lässt alle Forschungsausgaben unverändert |
 
-Stand des Abrufs vom 2026-11-18 (alle Dateien nicht versioniert):
+Stand des Abrufs vom 2026-11-18, **nur Forschungszeitraum** (Benutzerentscheidung: keine Holdout-Daten in
+Forschungsdateien; alle Dateien nicht versioniert):
 
 | Symbol | Bars Handelszeit | Zeitraum | Dividenden | Dividendenlücken (Alpaca) |
 |---|---|---|---|---|
-| SPY | 70.857 | 2016-01-04 bis 2026-11-18 | 41 (14 Zahltage angenommen) | 2016-01..2016-06 (Ex-Tag März 2016), 2018-03..2018-09 (Juni 2018) |
-| QQQ | 70.856 | 2016-01-04 bis 2026-11-18 | 44 (16 Zahltage angenommen) | keine; 2022-09-19 doppelt gelistet (späterer Zahltag verwendet, in Alpacas bereinigter Serie doppelt eingerechnet) |
+| SPY | 64.069 | 2016-01-04 bis 2025-10-31 | 37 (14 Zahltage angenommen) | 2016-01..2016-06 (Ex-Tag März 2016), 2018-03..2018-09 (Juni 2018) |
+| QQQ | 64.068 | 2016-01-04 bis 2025-10-31 | 40 (16 Zahltage angenommen) | keine; 2022-09-19 doppelt gelistet (späterer Zahltag verwendet, in Alpacas bereinigter Serie doppelt eingerechnet) |
 
 Die Halbtage 2016–2025 im Kalender stimmen genau mit den Tagen überein, an denen das Volumen nach
 13:00 New York auf nachbörsliches Niveau fällt; kein weiterer Tag zeigt dieses Muster.
