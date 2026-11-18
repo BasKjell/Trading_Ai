@@ -17,7 +17,7 @@ Exits and protective stops are never blocked by this gate.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 
 from .config import RiskConfig
@@ -34,7 +34,13 @@ def _reached(value: float, threshold: float) -> bool:
 
 
 class RiskEngine:
-    def __init__(self, config: RiskConfig, groups: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        config: RiskConfig,
+        groups: Mapping[str, str] | None = None,
+        *,
+        reconciliation_ok: Callable[[], bool] | None = None,
+    ) -> None:
         self.config = config
         self.groups = dict(groups or {})
         self.kill_switch = False
@@ -42,6 +48,7 @@ class RiskEngine:
         self.paused = False
         self.data_healthy = True
         self.positions_reconciled = True
+        self._reconciliation_ok = reconciliation_ok
 
     def per_trade_risk_fraction(self, drawdown: float = 0.0) -> float:
         fraction = min(self.config.risk_per_trade, self.config.max_risk_per_trade)
@@ -94,7 +101,7 @@ class RiskEngine:
             violations.append("paused")
         if not self.data_healthy:
             violations.append("data_quality")
-        if not self.positions_reconciled:
+        if not self.positions_reconciled or (self._reconciliation_ok is not None and not self._reconciliation_ok()):
             violations.append("position_mismatch")
         if now > intent.valid_until or price <= 0:
             violations.append("invalid_or_expired_price")
