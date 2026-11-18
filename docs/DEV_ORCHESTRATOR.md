@@ -1,0 +1,129 @@
+# Entwicklungsorchestrator für Trading_Ai
+
+**Status: MVP implementiert und offline getestet.** Der bestehende T-020-Runner behält seine technische
+Sperre. Dieser separate Einstiegspunkt ist standardmäßig deaktiviert. Die Benutzeranforderung vom
+18.11.2026 sieht automatisches Mergen für unkritische Änderungen vor. In diesem MVP braucht es dafür
+eine separate Aktivierung im Controller und die Issue-Freigabe `auto-merge`. Die Betriebsfreigabe nach
+AGENTS.md §7, ein unabhängiges Review der Isolation und ein beaufsichtigter erster Lauf stehen aus.
+Änderungen am Orchestrator selbst sind Klasse K.
+
+## Ablauf
+
+Der Controller wählt ein unbeanspruchtes Issue mit `backlog`, `auto-ready`, `effort:medium` und
+`work:coding`. Die Aufgabennummer braucht einen Klasse-U-Eintrag in der lokalen YAML-Datei mit genauen
+Dateipfaden und Abhängigkeiten. Priorität ergibt sich aus `priority`, der Reihenfolge unter
+„Nächste Ziele“ in STATUS.md und der Issue-Nummer. Der Controller zieht GitHub-Abhängigkeiten,
+`depends_on` in YAML und Issue-Zeilen wie `Abhängigkeiten: #12, #17` heran. Abhängigkeiten im Projekt
+müssen geschlossen und als `done` markiert sein. Offene PRs derselben Task-ID und bestehende Claims
+schließen eine Übernahme aus.
+
+```mermaid
+flowchart TD
+    C["Issue beanspruchen"] --> D["Claude Code oder Codex entwickelt"]
+    D --> T["Isoliertes make check und PR"]
+    T --> R["Anderer Anbieter reviewt den Head"]
+    R -->|P1 oder P2| F["Befund an ursprünglichen Autor"]
+    F --> D
+    R -->|Freigabe| Q["Head, CI und Branch-Schutz prüfen"]
+    Q -->|Automerge freigegeben| M["Merge-Commit und Issue auf done"]
+    Q -->|Manueller Merge| H["PR zur Integration offen lassen"]
+```
+
+Der Steuerprozess veröffentlicht Commit, PR und Kommentar-Review. Jeder Review-Head wird davor erneut
+mit `make check` geprüft. Korrekturen gehen mit den Befunden an denselben Autor. Drei Korrekturen sind
+das absolute Maximum. Ein identisch gemeldeter blockierender Befund stoppt früher. Ein positives
+Review gilt für genau den gespeicherten Head-SHA und `main`. Der nächste aktive Task startet nach dem
+Abschluss der automatischen Schritte. Bereits existierende fremde PRs bleiben im normalen
+manuellen Projekt-Review-Prozess.
+
+Nur der Controller kann mergen. Er prüft Klasse-U-Scope, die aktuellen Freigaben, den enthaltenen
+Stand von `main`, das unabhängige Review, Kommentar-/Review-Blockaden, WIP-Commits und den grünen
+Pflichtcheck vom auf GitHub hinterlegten App-Absender für genau diesen Head. GitHub muss
+Pull-Request-Schutz, strikte aktuelle Basis, gebundene Pflichtchecks, Gesprächsauflösung und
+Adminsperre erzwingen. GitHubs zusätzliche Pflicht-Approvals bleiben wirksam. Merges erfolgen mit
+Merge-Commit und erwartetem Head. Klasse K, kritische Pfade, veränderte Freigaben und unklarer Scope
+bleiben außerhalb der automatischen Integration. Klasse U ist vorab vom Benutzer zu klassifizieren.
+Eine Dateiliste allein kann kritische Semantik nicht erkennen.
+
+## Ausführungsgrenzen
+
+- Der Controller läuft als eigener Nicht-root-Benutzer in einem dedizierten sauberen Clone ohne
+  `.env`, Broker-Zustände oder lokale Modellregistry. Nur dieser Prozess hält GitHub-Schreibrechte.
+  Ein GitHub-Token mit administrativen Schreibrechten ist nicht für den Betrieb vorgesehen. Das
+  Lesen der Branch-Protection-Konfiguration kann eigene GitHub-Leseberechtigungen erfordern.
+- Agenten und Prüfschritte erhalten Git-Snapshots ohne `.git` als schreibgeschützten Mount.
+  Entwicklung und Tests schreiben ausschließlich in begrenzte Container-Arbeitsverzeichnisse.
+  Der Controller übernimmt nur ausdrücklich erlaubte Textdateien und prüft die exakte
+  Commit-Kandidatenversion erneut in einem frischen Offline-Container. Dateiverknüpfungen werden
+  abgelehnt. Agenten erhalten weder Host-Home noch Docker-Socket, GitHub- oder Broker-Anmeldedaten.
+- Codex und Claude Code verwenden getrennte Subscription-Logins in separaten Docker-Volumes.
+  Diese Volumes enthalten ausschließlich die jeweilige Anmeldung und als vertrauenswürdig
+  geprüfte CLI-Einstellungen. Jedes Agentennetz ist eine interne Docker-Bridge mit einem separat
+  bereitgestellten, auf den jeweiligen Anbieter beschränkten Forward-Proxy. Den Proxy, Docker-Daemon
+  und das unveränderlich per Digest referenzierte Image vor der Freigabe unabhängig prüfen. GitHub,
+  Broker, andere Konten und Hostdienste dürfen über den Agentenproxy nicht erreichbar sein.
+- CPU, RAM, PID-Zahl, temporärer Speicher, einzelne Dateigrößen, Agentenausgaben, Prozesslaufzeit,
+  Aufgabenzahl und maximale Aufgabendauer sind begrenzt. Docker-Ausgabelogs sind abgeschaltet.
+  SQLite enthält nur Statusereignisse, Claims, Cooldowns und konkrete Review-Befunde für Korrekturen.
+  `status` zeigt Ereignisse mit Zeitstempeln und unterdrückt die Befundtexte.
+- Ein bekanntes Nutzungslimit setzt den Anbieter und die betroffene Aufgabe bis zum konfigurierten
+  Wiederanlaufzeitpunkt zurück. Danach wird derselbe Schritt mit demselben Modell erneut versucht.
+  Zusätzliche Konto-Usage/Credits müssen im Anbieter-Konto deaktiviert sein. Es gibt weder
+  Abrechnungs-Fallback noch automatischen Modellwechsel. Unklare Fehler blockieren mit erhaltenem
+  Claim. Ein unterbrochener Schreibschritt wird nach Neustart blockiert, weil auf GitHub bereits
+  Änderungen angekommen sein könnten. Saubere Checkpoints laufen weiter.
+- Optional erhält ein bestehendes Ollama-Modell in einem separaten internen Netz Aufträge für eine
+  Erstfassung von Code, Doku oder Tests sowie Vorab-Reviews. Der Cloud-Autor prüft und überarbeitet
+  die Erstfassung vor dem Commit. Der andere Cloud-Agent reviewt weiterhin den PR. Ollama erhält keine Agenten- oder GitHub-Anmeldung und kein Freigabe- oder
+  Merge-Recht. Der lokale Dienst braucht bereits das in YAML angegebene Modell. Seine
+  Ressourcenlimits sind auf dem Ollama-Server einzustellen.
+
+## Einrichtung und Betrieb
+
+1. Python 3.12+, Git, GitHub CLI und einen dedizierten Docker-Daemon bereitstellen. Im Controller-
+   Python-Environment PyYAML aus `requirements-dev.txt` installieren und den GitHub-Konto-Zugriff
+   ausschließlich dort einrichten. Den Controller mit einem sauberen Clone starten.
+2. Architektur und Netz-/Rechte-Trennung unabhängig prüfen. Das Worker-Image aus
+   [dev-orchestrator.Dockerfile](../config/dev-orchestrator.Dockerfile) mit geprüften CLI-Versionen
+   bauen, in eine freigegebene Registry veröffentlichen und lokal laden. Beide CLIs in ihren
+   jeweiligen Volumes mit der späteren Container-UID interaktiv anmelden. CLI-Versionen, das
+   Gruppenverhalten der Git-Sandbox und die Testimage-Abhängigkeiten im beaufsichtigten Lauf prüfen.
+3. [YAML-Beispiel](../config/dev-orchestrator.yaml) außerhalb des Clones kopieren, private
+   Zustandsablage, Image-Digest, Modelle, Netze und mindestens einen freigegebenen Scope setzen.
+   `TRADING_DEV_STATE` und `TRADING_DEV_IMAGE` überschreiben die jeweiligen YAML-Werte.
+4. `plan` prüft die Auswahl lesend. Nach Freigabe zunächst lediglich `execution_enabled: true`
+   setzen, einen harmlosen Pilot-Task markieren und den Dienst mit `start --execute` beaufsichtigen.
+   Nach erfolgreichem Pilot kann `merge_enabled` für explizit markierte Issues aktiviert werden.
+
+```bash
+python3.12 scripts/dev_orchestrator.py plan --config /absolute/pilot.yaml
+python3.12 scripts/dev_orchestrator.py status --config /absolute/pilot.yaml
+python3.12 scripts/dev_orchestrator.py start --config /absolute/pilot.yaml --execute
+```
+
+Unter macOS führt ein LaunchAgent den Vordergrundbefehl als `ProgramArguments` aus. Setze
+`WorkingDirectory` auf den Clone und `KeepAlive.SuccessfulExit` auf `false`. Unter Linux verwende
+denselben Befehl als `ExecStart` eines systemd-User-Diensts mit `WorkingDirectory`,
+`Restart=on-failure` und `RestartSec=30`. Benutze absolute Pfade zum Python und zur YAML-Datei.
+Der Prozess startet genau einen Worker. Für Pause, Fortsetzen, Stop und Status verwende dieselbe
+Konfiguration mit `pause`, `resume`, `stop` oder `status` statt `start`.
+
+Pause und Stop greifen an der nächsten sicheren Grenze. Ein per `stop` beendeter Dienst wird erst
+nach `resume` und einem erneuten Dienststart aktiv. Bei `blocked` den GitHub-Claim, den Branch,
+offene PRs und gegebenenfalls erhaltene Docker-Container abgleichen. Nachdem der Vorgang manuell
+abgeschlossen oder verworfen, das Issue geschlossen und der zugehörige PR geschlossen ist, kann
+`resolve ISSUE_NUMMER` den lokalen Eintrag abschließen und weitere Aufgaben wieder freigeben.
+Bei gesetzter Cluster-/Parallelregel darf es nur einen Dienst für einen Zustandsordner geben.
+Automatische Merges lösen keinen Trading- oder Livebetrieb aus.
+
+## Nachweise
+
+Mock-Integration und echte lokale Git-Worktrees prüfen Auswahl, Abhängigkeiten, Korrekturzyklen,
+persistente Anbieterpausen, Neustart, CI-Wartezustand, Scope und Freigabe für den aktuellen SHA.
+Der echte Docker-/GitHub-/Abo-End-to-End-Lauf ist an die Betriebsvoraussetzungen oben gebunden.
+
+CLI- und API-Referenzen: [Codex](https://developers.openai.com/codex/noninteractive/),
+[Claude Code](https://code.claude.com/docs/en/cli-reference),
+[Docker](https://docs.docker.com/reference/cli/docker/container/run),
+[GitHub-Branch-Schutz](https://docs.github.com/en/rest/branches/branch-protection),
+[GitHub-Issue-Abhängigkeiten](https://docs.github.com/en/rest/issues/issue-dependencies).
