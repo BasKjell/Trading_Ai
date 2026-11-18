@@ -59,17 +59,17 @@ Das reicht für technische Prüfungen, aber **nicht** für belastbare Aussagen z
 
 | Feld | Wert |
 |---|---|
-| Abruf | `python3 -m localtrader fetch-fx` (Standard ab 2015-12-01 bis heute) |
+| Abruf | `python3 -m localtrader fetch-fx` (ab 2015-12-01 bis **vor** den Holdout-Start aus `[holdout]` oder `--available-until`; ein späteres Ende wird abgelehnt) |
 | Quelle | EZB Data Portal, Serie `EXR.D.USD.EUR.SP00.A` (USD je EUR, tägliche Referenzkurse), frei zugänglich, ohne Schlüssel |
 | Datei | `data/EURUSD_ecb.csv` (`date,usd_per_eur,available_at`) + `.manifest.json` (Quelle, Hash, Qualitätsbericht), nicht versioniert |
 | Verfügbarkeit | ab 16:00 Europe/Berlin am Kurstag (EZB legt die Kurse gegen 14:10 fest und veröffentlicht sie gegen 16:00); frühere Nutzung wäre Look-ahead |
 | Abfrage | `FxSeries.rate_at(t)`: letzter bis `t` veröffentlichter Kurs; älter als 5 Tage → Fehler (fail closed) |
-| Holdout | `read_fx_file(..., available_until=…)` lädt nur bis zur Grenze veröffentlichte Kurse |
+| Holdout | Die Forschungsdatei enthält physisch keine Kurse ab dem Holdout-Start (Benutzerentscheidung 2026-11-18); `read_fx_file(..., available_until=…)` schneidet zusätzlich beim Laden |
 | Prüfungen | nur finale Werte (`OBS_STATUS=A`), plausibel 0,5–2,5, keine widersprüchlichen Duplikate; Sprünge > 4 % und Lücken > 5 Tage werden gemeldet |
 
-Stand 2026-11-18: 2.807 Kurse vom 2015-12-01 bis 2026-11-17, nichts verworfen, keine Sprünge > 4 %,
-keine Lücke > 5 Tage. Für alle 70.853 SPY-Bars der Handelszeit liegt ein veröffentlichter Kurs vor;
-das größte Kursalter beträgt 4 Tage 23 Stunden 45 Minuten (Ostern).
+Stand 2026-11-18: 2.541 Kurse vom 2015-12-01 bis 2025-10-31 (Forschungszeitraum), nichts verworfen,
+keine Sprünge > 4 %, keine Lücke > 5 Tage. Für alle SPY-Bars der Handelszeit im Forschungszeitraum liegt
+ein veröffentlichter Kurs vor; das größte Kursalter beträgt 4 Tage 23 Stunden 45 Minuten (Ostern).
 
 Der Referenzkurs ist ein indikativer Mittelkurs, kein handelbarer Kurs: Umtauschkosten des Brokers
 (Spread, Gebühr) müssen getrennt modelliert werden (Kostentabelle).
