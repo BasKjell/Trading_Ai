@@ -5,7 +5,8 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from localtrader.feed_compare import compare, compare_files, summary
+from localtrader.feed_compare import compare, compare_files, read_bars, summary
+from localtrader.holdout import HOLDOUT_START, HoldoutError
 
 
 def feed(n: int, shift: float = 0.0, volume: float = 1000.0, skip: frozenset[int] = frozenset()):
@@ -53,3 +54,72 @@ class FeedCompareTests(unittest.TestCase):
         self.assertIn("| SPY |", summary([("SPY", result)]))
         with self.assertRaises(ValueError):
             compare(feed(10), {})
+
+
+def write_rows(path: Path, rows: list[tuple[datetime, str, str, str, str, str]]) -> None:
+    lines = ["timestamp,open,high,low,close,volume"] + [",".join([t.isoformat(), *v]) for t, *v in rows]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+class HoldoutBoundaryTests(unittest.TestCase):
+    """Review #40 P1: no metric, span or row of the holdout may leave the comparison."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        step = timedelta(minutes=15)
+        self.before = [HOLDOUT_START - step * (40 - i) for i in range(40)]  # last one ends exactly at the start
+        self.after = [HOLDOUT_START + step * i for i in range(20)]  # starts at or after the holdout start
+        for name, after_price in (("sip", "100"), ("iex", "120")):  # 2,000 bp apart inside the holdout only
+            folder = self.dir / name
+            folder.mkdir()
+            rows = [(t, "100", "100.5", "99.5", "100", "1000") for t in self.before]
+            rows += [(t, after_price, after_price, after_price, after_price, "1000") for t in self.after]
+            write_rows(folder / "SPY_15m.csv", rows)
+
+    def test_reader_keeps_rows_up_to_the_boundary_and_drops_the_holdout_before_parsing(self) -> None:
+        path = self.dir / "mixed.csv"
+        write_rows(
+            path,
+            [
+                (self.before[-1], "1", "1", "1", "1", "1"),  # ends exactly at the holdout start: kept
+                (HOLDOUT_START, "not-a-price", "x", "x", "x", "x"),  # would raise if it were parsed
+                (HOLDOUT_START + timedelta(days=200), "x", "x", "x", "x", "x"),
+            ],
+        )
+        self.assertEqual(list(read_bars(path)), [self.before[-1]])
+        with self.assertRaises(HoldoutError):
+            read_bars(path, HOLDOUT_START + timedelta(minutes=15))
+
+    def test_both_cli_output_forms_contain_no_holdout_information(self) -> None:
+        import contextlib
+        import io
+        import json
+
+        from localtrader.cli import build_parser
+
+        for extra in ([], ["--json"]):
+            with self.subTest(extra=extra):
+                out = io.StringIO()
+                args = build_parser().parse_args(
+                    ["compare-feeds", "--reference-dir", str(self.dir / "sip"), "--candidate-dir"]
+                    + [str(self.dir / "iex"), "--symbols", "SPY", *extra]
+                )
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(args.func(args), 0)
+                text = out.getvalue()
+                self.assertIn("| SPY | 100.00% | 0.00 / 0.00 / 0.00 |", text)
+                for moment in self.after:
+                    self.assertNotIn(moment.isoformat(), text)
+                if extra:
+                    result = json.loads(text[text.index("{") :])["SPY"]
+                    self.assertEqual(result["span"], [self.before[0].isoformat(), self.before[-1].isoformat()])
+                    self.assertEqual(result["candidate_bars"], len(self.before))
+                    self.assertEqual(result["abs_diff_bps"]["close"]["max"], 0.0)
+
+    def test_files_entirely_inside_the_holdout_yield_no_metrics(self) -> None:
+        only = self.dir / "only.csv"
+        write_rows(only, [(t, "1", "1", "1", "1", "1") for t in self.after])
+        with self.assertRaises(ValueError):
+            compare_files(only, only)

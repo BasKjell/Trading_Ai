@@ -2,8 +2,10 @@
 
 Only data properties are measured: coverage, price and volume differences, agreement of bar directions and
 of a generic breakout flag. No strategy is run and no return of any strategy is computed, so the measurement
-adds no attempt to the T-008 experiment inventory. Research files end before the holdout; the comparison
-never reads anything else.
+adds no attempt to the T-008 experiment inventory. The reader enforces the fixed research boundary itself
+(``holdout.research_limit``): a row whose bar ends after the holdout start is dropped from the timestamp
+alone, before any price or volume is parsed, so no holdout row reaches a metric, a span or the output,
+whatever files are passed.
 """
 
 from __future__ import annotations
@@ -11,21 +13,28 @@ from __future__ import annotations
 import csv
 import math
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from statistics import median
 from typing import Any
 
+from .holdout import research_limit
+
+BAR = timedelta(minutes=15)
 Row = tuple[float, float, float, float, float]  # open, high, low, close, volume
 
 
-def read_bars(path: str | Path) -> dict[datetime, Row]:
+def read_bars(path: str | Path, available_until: datetime | None = None) -> dict[datetime, Row]:
+    """Bars that end at or before ``available_until`` (default and maximum: the holdout start)."""
+    cutoff = research_limit(available_until)
     bars: dict[datetime, Row] = {}
     with Path(path).open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
             start = datetime.fromisoformat(row["timestamp"])
             if start.tzinfo is None:
                 raise ValueError(f"{path}: timestamps must be timezone-aware")
+            if start + BAR > cutoff:
+                continue  # holdout: dropped before any price or volume is parsed
             values = tuple(float(row[k]) for k in ("open", "high", "low", "close", "volume"))
             bars[start] = values  # type: ignore[assignment]
     return bars
@@ -105,6 +114,10 @@ def compare_files(reference: str | Path, candidate: str | Path, window: int = 16
     return compare(read_bars(reference), read_bars(candidate), window)
 
 
+def _fmt(value: float | None, spec: str) -> str:
+    return "–" if value is None else format(value, spec)
+
+
 def summary(results: Iterable[tuple[str, dict[str, Any]]]) -> str:
     lines = [
         "| Symbol | Abdeckung | Close-Abw. Median / p95 / p99 (bp) | High / Low p95 (bp) | IEX-Volumenanteil (Median) | gleiche Richtung | Ausbruch-Jaccard |",
@@ -116,6 +129,7 @@ def summary(results: Iterable[tuple[str, dict[str, Any]]]) -> str:
         lines.append(
             f"| {symbol} | {r['coverage']:.2%} | {close['median']:.2f} / {close['p95']:.2f} / {close['p99']:.2f} | "
             f"{r['abs_diff_bps']['high']['p95']:.2f} / {r['abs_diff_bps']['low']['p95']:.2f} | "
-            f"{r['volume_share']['median']:.2%} | {r['same_direction_share']:.1%} | {jaccard:.2f} |"
+            f"{_fmt(r['volume_share']['median'], '.2%')} | {_fmt(r['same_direction_share'], '.1%')} | "
+            f"{_fmt(jaccard, '.2f')} |"
         )
     return "\n".join(lines)

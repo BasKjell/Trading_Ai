@@ -6,7 +6,8 @@
 - **Ergebnis:**
   - IEX deckt 99,86 % der SIP-Bars ab. Schlusskurse weichen im Median um weniger als 1 bp ab.
   - IEX zeigt nur 1 bis 2 % des SIP-Volumens. Rund 10 % der Ausbruchs-Bars sind auf IEX anders.
-  - SIP ist im aktuellen Plan genau 15 Minuten verzögert. Das entspricht dem T-008-Szenario `delay1`.
+  - SIP ist im aktuellen Plan genau 15 Minuten verzögert. Eine Entsprechung zum T-008-Szenario `delay1` ist nicht belegt (Review #40).
   - Der Benutzer hat Option C (SIP verzögert) entschieden, festgehalten in ADR 0006.
-- **Tests:** `tests/test_feed_compare.py` mit synthetischen Feeds. `make check` siehe PR.
+- **Holdout:** `compare-feeds` liest nur Bars, die bis zum Holdout-Beginn enden. Spätere Zeilen werden allein anhand des Zeitstempels verworfen, bevor Preise gelesen werden (Review #40).
+- **Tests:** `tests/test_feed_compare.py` mit synthetischen Feeds, darunter Zeilen vor, an und nach der Grenze über beide CLI-Ausgabeformen. `make check` siehe PR.
 - **Einschränkungen:** IEX-Historie gibt es erst ab 2020-07. Die Daten (IEX und SIP) liegen lokal und gitignoriert unter `data/` und `data/iex/`.

@@ -28,17 +28,17 @@ Der Befehl misst nur Dateneigenschaften und rechnet keine Strategie und keine Re
 - Eine Anfrage mit Ende vor weniger als 15 Minuten scheitert mit `HTTP 403`.
 - Ab 15 Minuten Abstand liefert die API SIP-Bars. Achtung: Die zuletzt gelieferte Bar kann dann noch laufen.
 - Eine SIP-Bar, die um T endet, ist also vollständig ab T + 15 min verfügbar. Ein Feed darf nur Bars mit `Ende ≤ jetzt − 15 min` übernehmen.
-- Eine Entscheidung auf dieser Bar fällt eine Bar später als in der Forschung. Die Ausführung erfolgt ein zulässiges Open später. Das entspricht genau dem T-008-Stressszenario `delay1` („ein weiteres zulässiges Open“).
+- Entscheidungen fallen dadurch später als in der Forschung. Ob der Paper-Betrieb damit einem T-008-Szenario entspricht, ist **nicht belegt**. `delay1` verschiebt die Ausführung um genau ein zulässiges Open. Der Paper-Dienst arbeitet dagegen mit dem tatsächlichen Tick-Zeitpunkt: Eine Bar, die um T endet, ist frühestens um T + 15 min lesbar, und dann liegt das Open um T + 15 min schon in der Vergangenheit. Innerhalb der Sitzung kommt daher eher das Open um T + 30 min infrage, am Sitzungswechsel dagegen dasselbe Open wie im Basisszenario. Eine Gleichsetzung braucht einen Vergleich der tatsächlichen Ankunfts- und Ausführungszeitpunkte, einschließlich Sitzungswechsel (offen).
 
 ## Bewertung der Optionen
 
 | Option | Datenbasis wie Forschung | Zeitpunkt | Kosten | Bewertung |
 |---|---|---|---|---|
 | **A: IEX in Echtzeit** | nein (rund 10 % abweichende Ausbruchs-Bars, Volumen nicht vergleichbar) | wie Forschung | kostenlos | gut für Betriebstests. Die Signale sind nicht 1:1 mit der Forschung vergleichbar |
-| **B: SIP in Echtzeit** | ja | wie Forschung | Abo, nur mit Freigabe | nur nötig, wenn die Strategie zwar im Basis-, nicht aber im `delay1`-Szenario besteht |
-| **C: SIP verzögert** | ja | eine Bar später (= `delay1`) | kostenlos | **empfohlen**: gleiche Daten wie die Forschung, und die Verzögerung ist bereits ein Pflicht-Gate von T-008 |
+| **B: SIP in Echtzeit** | ja | wie Forschung | Abo, nur mit Freigabe | nur nötig, wenn die Verzögerung von C die Strategie nachweislich beeinträchtigt |
+| **C: SIP verzögert** | ja | später als die Forschung (Ausmaß siehe oben, Entsprechung zu `delay1` nicht belegt) | kostenlos | **empfohlen**: gleiche Daten wie die Forschung |
 
 **Empfehlung:**
-- **C** für Shadow und Paper. Ein T-008-Kandidat muss `delay1` ohnehin bestehen. Damit prüft der Paper-Betrieb genau die bereits validierte Annahme, ohne Kosten und ohne Feed-Bruch.
+- **C** für Shadow und Paper: gleiche Datenquelle wie die Forschung, ohne Kosten und ohne Feed-Bruch. Die zeitliche Verschiebung gegenüber der Forschung ist zu belegen, bevor Paper-Ergebnisse mit einem Forschungsszenario verglichen werden.
 - **A** nur ergänzend zur Überwachung der Datenfrische oder für reine Betriebstests.
-- **B** erst nach einem bestandenen Forschungsurteil, wenn `delay1` knapp ist. Die Entscheidung liegt beim Benutzer (Datenkauf nur nach Freigabe).
+- **B** erst nach einem bestandenen Forschungsurteil, wenn die Verzögerung von C nachweislich schadet. Die Entscheidung liegt beim Benutzer (Datenkauf nur nach Freigabe).
