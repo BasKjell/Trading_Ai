@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
@@ -131,6 +132,10 @@ def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> Impor
                 volume = float(row.get("volume") or 0.0)
             except (KeyError, ValueError):
                 report.reject("unparseable")
+                continue
+            # NaN/inf pass every comparison below unnoticed, so reject them explicitly first.
+            if not all(math.isfinite(value) for value in (o, h, low, c, volume)):
+                report.reject("non_finite_value")
                 continue
             if (start.timestamp() % step.total_seconds()) != 0:
                 report.reject("misaligned_timestamp")
