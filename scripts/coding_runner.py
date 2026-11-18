@@ -239,37 +239,12 @@ def clean_environment() -> dict[str, str]:
     return env
 
 
+WORKER_EXECUTION_BLOCKED = "worker execution disabled: no isolated backend without host credentials is available"
+
+
 def worker_command(provider: str, settings: dict[str, Any]) -> list[str]:
-    binary, model = settings["binary"], settings["model"]
-    if provider == "codex":
-        return [
-            binary,
-            "--ask-for-approval",
-            "never",
-            "exec",
-            "--sandbox",
-            "workspace-write",
-            "--model",
-            model,
-            "-c",
-            'model_reasoning_effort="medium"',
-            "--json",
-            "-",
-        ]
-    return [
-        binary,
-        "-p",
-        "--model",
-        model,
-        "--effort",
-        "medium",
-        "--output-format",
-        "json",
-        "--permission-mode",
-        "acceptEdits",
-        "--allowedTools",
-        "Read,Edit,Write,Glob,Grep,Bash(git *),Bash(gh *),Bash(make *),Bash(python3 *)",
-    ]
+    """A provider binary on the host is never a supported worker backend."""
+    raise RunnerError(WORKER_EXECUTION_BLOCKED)
 
 
 def subscription_login(provider: str, settings: dict[str, Any], cwd: Path) -> None:
@@ -481,6 +456,7 @@ def cycle(config: dict[str, Any], root: Path, state: State, gh: GitHub, *, dry_r
     for job in jobs:
         if not state.ready(job, time.time()):
             continue
+        args = worker_command(job.provider, config[job.provider])
         try:
             subscription_login(job.provider, config[job.provider], root)
         except (RunnerError, ValueError, subprocess.TimeoutExpired):
@@ -504,7 +480,7 @@ def cycle(config: dict[str, Any], root: Path, state: State, gh: GitHub, *, dry_r
             row.update(status="running", worktree=str(worktree), started_at=time.time())
             state.save()
             result = run_worker(
-                worker_command(job.provider, config[job.provider]),
+                args,
                 worktree,
                 prompt_for(job),
                 int(config["runner"]["timeout_seconds"]),
@@ -531,6 +507,9 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=Path("config/coding-runner.toml"))
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.action in {"once", "watch"} and not args.dry_run:
+        print(f"runner stopped: {WORKER_EXECUTION_BLOCKED}", file=sys.stderr)
+        return 1
     os.umask(0o077)
     root = args.repo_root.resolve()
     config_path = args.config if args.config.is_absolute() else root / args.config
@@ -558,11 +537,8 @@ def main() -> int:
             gh = GitHub(root, config["runner"]["repository"])
             command(["gh", "auth", "status"], root)
             if args.action == "doctor":
-                for provider in FAMILIES:
-                    if config[provider].get("enabled", True):
-                        subscription_login(provider, config[provider], root)
                 command(["make", "check"], root, timeout=1800)
-                print("doctor: CLI subscription logins, clean origin checkout and make check OK")
+                print("doctor: clean origin checkout, GitHub login and make check OK; planning only")
                 return 0
             while True:
                 if (directory / "STOP").exists() and not args.dry_run:

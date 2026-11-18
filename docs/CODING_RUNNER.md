@@ -1,12 +1,12 @@
 # Lokaler Coding-Runner
 
-Status: implementiert und offline getestet (T-020), noch nicht integriert. Kein echter Codex-/Claude-
-Arbeitslauf wurde in der Entwicklungsumgebung ausgeführt: beide CLIs fehlen dort. PR #17/#18 müssen
-vor der Aktivierung integriert sein; der Runner startet auf einem sauberen Checkout mit Projektdokumenten.
+Status: **Planung und Offline-Tests** (T-020, Draft). Die Ausführung von Codex- oder Claude-Workern
+ist technisch gesperrt. Aufrufe von `once` und `watch` ohne `--dry-run` brechen vor Login, Claims,
+Worktree-Erstellung und Worker-Start ab. GitHub-Labels und Konfiguration ändern diese Sperre nicht.
 
 ## Zweck und Freigabe
 
-Ein Python-Skript fragt GitHub ab und startet nacheinander eine Codex- oder Claude-Code-Sitzung.
+Ein Python-Skript fragt GitHub ab und zeigt geeignete Jobs an. Die geplante Ausführung sieht höchstens eine Sitzung vor.
 Ein lokales LLM, kostenpflichtige API-Schlüssel und ein externer Scheduler sind nicht erforderlich.
 Es gibt höchstens einen Worker pro Runner; der nächste geeignete Anbieter kann eine andere Aufgabe
 übernehmen, während ein Anbieter pausiert. Laufende Arbeit wechselt nicht automatisch den Anbieter.
@@ -39,38 +39,25 @@ Head → freie Coding-Issues. Unklare Agentenherkunft, mehrere Task-IDs, Drafts 
 
 ## Einrichtung auf dem Mac
 
-1. Python ≥3.12, Git, GitHub CLI, Codex CLI und Claude Code installieren und interaktiv anmelden.
-   Codex muss die Anmeldung über ChatGPT bestätigen; Claude muss eine Subscription-Anmeldung melden.
-   API-Key-Logins werden vom Runner abgelehnt. GitHub-Login benötigt Repo-/PR-Schreibrechte.
-2. Einen separaten sauberen Clone für den Runner verwenden. Keine manuelle Agentensitzung in seinen
-   Worktrees starten. Nur **einen** Runner-Zustand je Repository betreiben; nicht pro Anbieter duplizieren.
-3. Abhängigkeiten mit `python3.12 -m pip install -r requirements-dev.txt` einrichten und `make check`
-   ausführen. Auch Worker benötigen diese Werkzeuge über PATH bzw. dieselbe aktive virtuelle Umgebung.
-4. `config/coding-runner.toml` prüfen: Binärpfade, explizite Modell-IDs, Laufzeit (30 min), Pollintervall
-   (5 min), Limitpause (5 h). Modell-IDs werden nicht automatisch auf teurere Modelle umgestellt.
-5. Falls benötigt die genannten Labels in GitHub anlegen (einmalig, z. B. `gh label create auto-ready
-   --repo BasKjell/Trading_Ai --color 0E8A16`). Erst danach einzelne geeignete Ziele markieren.
-
-Im Repository-Verzeichnis:
+1. Python ≥3.12, Git und GitHub CLI installieren. Die Planung benötigt einen GitHub-Lesezugang.
+2. Einen sauberen separaten Clone ohne `.env`, Broker-Zustände oder Zugangsdaten verwenden.
+3. Gepinnte Abhängigkeiten installieren und `make check` ausführen. `doctor` prüft die Planungsvoraussetzungen.
 
 ```bash
 python3.12 scripts/coding_runner.py doctor
 python3.12 scripts/coding_runner.py once --dry-run
-python3.12 scripts/coding_runner.py once
-python3.12 scripts/coding_runner.py watch
+python3.12 scripts/coding_runner.py status
 ```
 
-`doctor` prüft passenden origin, sauberen Kontroll-Checkout, Dokumente, GitHub-Anmeldung,
-Subscription-Anmeldungen und `make check`. Fehlende/unbekannte CLI-Flags oder fehlende Netzwerkrechte
-werden beim Arbeitsstart zu einer Blockade; niemals mit `--yolo` oder abgeschalteten Berechtigungen
-beheben. Codex braucht im lokal eingerichteten Sandbox-Profil die für GitHub nötigen Netzwerkrechte.
-Claude bekommt Dateibearbeitung und die dokumentierten Git-/gh-/make-/python3-Befehle freigegeben;
-weitere Werkzeuge müssen bei Bedarf bewusst konfiguriert werden. Ein CLI-Versionswechsel erfordert
-einen erneuten Doctor und beaufsichtigten ersten Lauf.
+## Voraussetzungen für eine spätere Ausführung
 
-`watch` läuft im Vordergrund. Der Mac muss eingeschaltet und wach sein. Es wurde kein Hintergrunddienst
-installiert und kein Agent gestartet. Für den Anfang im Terminal beobachten; einen launchd-Dienst erst
-nach einem erfolgreichen beaufsichtigten Lauf einrichten.
+Ein getrennter Ausführungsbereich muss beliebigen Worker-Code von Benutzerverzeichnis, Host-Dateien,
+Git-/GitHub-Identität und Brokergeheimnissen isolieren. Der vertrauenswürdige Steuerprozess muss
+veröffentlichbare Änderungen und GitHub-Mutationen separat kontrollieren. Worker erhalten keine
+GitHub-Schreibidentität und keine Merge-, Force-Push- oder Löschbefugnis. Die künftige GitHub-Identität
+des Steuerprozesses und der Branch-Schutz müssen diese Trennung ergänzen. Ein separater Clone und
+Provider-Toolfilter allein bieten diese Isolation nicht. Der erste echte Test erfordert eine geprüfte
+Implementierung und ausdrückliche Freigabe. Aktuell fehlt dieser Ausführungsbereich.
 
 ## Usage und Kosten
 
@@ -87,7 +74,7 @@ werden. Subscription-Login allein beweist keine kostenlose weitere Nutzung.
 
 ## Zustand, Sicherheit und Fortsetzung
 
-`.coding-runner/` ist lokal und ignoriert: atomar geschriebener Zustand, Prozesssperre und ein eigener
+`.coding-runner/` ist lokal und ignoriert. Für die geplante Ausführung gibt es atomar geschriebenen Zustand, Prozesssperre und einen eigenen
 Git-Worktree je Arbeitslauf. Keine Broker-Zustände werden gemeinsam genutzt; kein .env wird kopiert.
 Bekannte Broker-/API-Key-Umgebungsvariablen werden entfernt. Der Runner ist kein vollständiger
 Secret-Sandbox: Coding-Werkzeuge können Code ausführen. Daher keine Live-Secrets, produktiven
@@ -125,7 +112,7 @@ aus und prüft das tatsächliche PR-/Review-Artefakt. Implementierungen müssen 
 erfolgreich sein; ausstehende CI wird als Blockade dokumentiert und kann später explizit erneut geprüft
 werden. Ein Review mit „Änderungen nötig“ ist ein erledigter Reviewauftrag, keine Merge-Freigabe.
 
-Sanfter Stopp vor dem nächsten Start: `touch .coding-runner/STOP`. Entfernen gibt spätere Starts frei.
+Eine mögliche spätere Ausführung kann zwischen Jobs über `.coding-runner/STOP` pausieren. Die Datei hebt die aktuelle Ausführungssperre nicht auf.
 `Ctrl+C` beendet auch den aktiven Worker; Arbeit danach prüfen. Nach einem harten Stopp darf der
 Benutzer erst nach Prüfung der Prozesse `resume-provider` ausführen.
 
@@ -133,8 +120,7 @@ Benutzer erst nach Prüfung der Prozesse `resume-provider` ausführen.
 
 Offline-Tests verwenden Fake-GitHub und lokale Fake-Worker: Aufgabenfilter, Agentenunabhängigkeit,
 Claim-Rennen, persistente Limitpausen, Quarantäne nach Absturz, parallele Prozesssperren, reine
-Vorschau, strukturierte Fehler und Prozess-/Ausgabegrenzen. Ein echter Abo-Worker-End-to-End-Test
-und die Anmeldung auf dem Benutzer-Mac bleiben erforderlich. Die vorhandenen Tests und CI bleiben
+Vorschau, strukturierte Fehler und Prozess-/Ausgabegrenzen. Ein Test für echte Worker folgt frühestens nach Implementierung und Prüfung der Rechteisolation. Die vorhandenen Tests und CI bleiben
 unverändert verpflichtend; fehlende Werkzeuge werden nicht durch Erfolgsmeldungen ersetzt.
 
 CLI-Referenzen (geprüft 2026-11-17): [Codex non-interactive](https://developers.openai.com/codex/noninteractive),

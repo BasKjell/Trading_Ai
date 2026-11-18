@@ -182,6 +182,38 @@ class PersistenceTests(unittest.TestCase):
                 work.assert_not_called()
                 self.assertEqual(gh.comments, [])
 
+    def test_non_dry_cli_stops_before_local_or_remote_side_effects(self):
+        for action in ("once", "watch"):
+            with (
+                self.subTest(action=action),
+                patch("sys.argv", ["coding_runner.py", action]),
+                patch("sys.stderr", new_callable=io.StringIO) as errors,
+                patch.object(runner, "lock") as acquire,
+                patch.object(runner, "command") as command,
+                patch.object(runner, "cycle") as cycle,
+            ):
+                self.assertEqual(runner.main(), 1)
+                self.assertIn("no isolated backend", errors.getvalue())
+                acquire.assert_not_called()
+                command.assert_not_called()
+                cycle.assert_not_called()
+
+    def test_direct_execution_stops_before_login_claim_or_worktree(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state, gh = runner.State(Path(temp)), FakeGitHub(issues=[issue()])
+            with (
+                patch.object(runner, "subscription_login") as login,
+                patch.object(runner, "prepare") as prepare,
+                patch.object(runner, "run_worker") as worker,
+                self.assertRaisesRegex(runner.RunnerError, "no isolated backend"),
+            ):
+                runner.cycle({"codex": {}, "claude": {}}, Path(temp), state, gh, dry_run=False)
+            login.assert_not_called()
+            prepare.assert_not_called()
+            worker.assert_not_called()
+            self.assertEqual(gh.comments, [])
+            self.assertEqual(state.data["jobs"], {})
+
     def test_unavailable_provider_does_not_reserve_new_task(self):
         with tempfile.TemporaryDirectory() as temp:
             state, gh = runner.State(Path(temp)), FakeGitHub(issues=[issue()])
@@ -307,13 +339,12 @@ class WorkerTests(unittest.TestCase):
         event = {"type": "result", "result": 'RUNNER_RESULT {"status":"done"}'}
         self.assertEqual(runner.outcome(json.dumps(event, indent=2), 0), "verify")
 
-    def test_medium_flags_no_permission_bypass_and_no_api_keys(self):
+    def test_host_worker_command_is_unavailable_for_both_providers(self):
         for provider in runner.FAMILIES:
-            cmd = runner.worker_command(provider, {"binary": provider, "model": "fixed-model"})
-            self.assertIn("fixed-model", cmd)
-            self.assertIn("medium", " ".join(cmd))
-            self.assertNotIn("--dangerously-skip-permissions", cmd)
-            self.assertNotIn("--yolo", cmd)
+            with self.subTest(provider=provider), self.assertRaisesRegex(runner.RunnerError, "no isolated backend"):
+                runner.worker_command(provider, {"binary": provider, "model": "fixed-model"})
+
+    def test_worker_environment_removes_broker_and_provider_api_keys(self):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sensitive", "PAPER_BROKER_API_KEY": "sensitive"}):
             env = runner.clean_environment()
             self.assertNotIn("OPENAI_API_KEY", env)
