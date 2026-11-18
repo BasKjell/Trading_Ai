@@ -72,19 +72,44 @@ def _load_intraday(
     synthetic_days: int | None,
     symbol: str | None = None,
 ) -> tuple[AppConfig, dict[str, InstrumentSpec], dict[str, ImportedDataset], dict[str, object]]:
+    """Load one or more instruments (``symbol`` may be ``"SPY,EFA,TLT"``) for one shared portfolio run."""
     config = load_config(config_path)
     instruments = instruments_from_config(config)
     settings = config.raw["intraday"]
-    symbol = symbol or str(settings["data_symbol"])
-    if symbol not in instruments:
-        raise SystemExit(f"no [instruments.{symbol}] in the config")
-    spec = instruments[symbol]
-    raw = config.raw["instruments"][symbol]
+    symbols = [item.strip() for item in (symbol or str(settings["data_symbol"])).split(",") if item.strip()]
+    if not symbols:
+        raise SystemExit("at least one symbol is required")
+    if len(set(symbols)) != len(symbols):
+        raise SystemExit("each symbol may appear only once")
+    unknown = [s for s in symbols if s not in instruments]
+    if unknown:
+        raise SystemExit(f"no [instruments.{unknown[0]}] in the config")
+    if data_file and len(symbols) > 1:
+        raise SystemExit("--data needs exactly one symbol; multiple symbols use their configured data_file")
     # The research path never reads the holdout; the boundary is fixed in code (localtrader/holdout.py).
     holdout: dict[str, object] = {"start": HOLDOUT_START.isoformat(), "excluded_bars": 0, "used": False}
+    datasets: dict[str, ImportedDataset] = {}
+    withheld = 0
+    for name in symbols:
+        data = _load_symbol(config, instruments[name], name, data_file, synthetic_days)
+        count = data.manifest.quality.get("holdout_rows_withheld", 0)
+        withheld += count if isinstance(count, int) else 0
+        datasets[name] = data
+    holdout["excluded_bars"] = withheld
+    return config, instruments, datasets, holdout
+
+
+def _load_symbol(
+    config: AppConfig,
+    spec: InstrumentSpec,
+    symbol: str,
+    data_file: str | None,
+    synthetic_days: int | None,
+) -> ImportedDataset:
+    settings = config.raw["intraday"]
+    raw = config.raw["instruments"][symbol]
     if synthetic_days:
-        data = synthetic_intraday(symbol, synthetic_days, config.seed, 15000.0, spec.session)
-        return config, instruments, {symbol: data}, holdout
+        return synthetic_intraday(symbol, synthetic_days, config.seed, 15000.0, spec.session)
     cutoff = research_limit()
     data = import_csv(
         CsvImportSpec(
@@ -99,7 +124,6 @@ def _load_intraday(
         ),
         spec.session,
     )
-    holdout["excluded_bars"] = data.manifest.quality.get("holdout_rows_withheld", 0)
     if raw.get("corporate_actions") == "dividends_file":
         # written by fetch-intraday next to the raw price file; missing file = fail closed
         dividends_path = output_paths(data_file or str(raw["data_file"]))["dividends"]
@@ -119,8 +143,8 @@ def _load_intraday(
         )
         data = replace(data, dividends=dividends, manifest=manifest)
     if not data.bars:
-        raise SystemExit("no bars left for the research period")
-    return config, instruments, {symbol: data}, holdout
+        raise SystemExit(f"no bars left for the research period ({symbol})")
+    return data
 
 
 def _strategy_names(value: str) -> list[str]:
@@ -468,7 +492,11 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--data", default=None, help="CSV file; default from [intraday] in the config")
         command.add_argument("--synthetic-days", type=int, default=None, help="use labelled synthetic data")
         command.add_argument("--output", default=default_out)
-        command.add_argument("--symbol", default=None, help="instrument from [instruments.*]; default [intraday]")
+        command.add_argument(
+            "--symbol",
+            default=None,
+            help="instrument(s) from [instruments.*], comma-separated for one shared portfolio; default [intraday]",
+        )
         if name == "intraday-backtest":
             command.add_argument("--cost-multiplier", type=float, default=1.0)
             command.add_argument("--spread-multiplier", type=float, default=1.0)
