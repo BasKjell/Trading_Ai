@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from dataclasses import replace
@@ -21,7 +22,7 @@ from .data_requests import (
 from .domain import Market
 from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, synthetic_intraday
 from .intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics, instruments_from_config
-from .intraday_fetch import output_paths, read_dividends
+from .intraday_fetch import dividends_digest, output_paths, read_dividends
 from .intraday_report import run_scenarios, strategies_from_config, write_intraday_report
 from .ollama_lab import OllamaClient, OllamaStrategySearch
 from .paper import PaperSession
@@ -111,7 +112,17 @@ def _load_intraday(
         if cutoff is not None:
             # an ex-date is known from its morning on; only dates before the holdout day are kept
             dividends = {day: v for day, v in dividends.items() if day < spec.session.local_date(cutoff)}
-        data = replace(data, dividends=dividends)
+        # bind the corporate actions actually used into the dataset version (changes are visible)
+        digest = dividends_digest(dividends)
+        manifest = replace(
+            data.manifest,
+            data_version=hashlib.sha256(f"{data.manifest.data_version}|{digest}".encode()).hexdigest()[:16],
+            quality={
+                **data.manifest.quality,
+                "corporate_actions": {"source": "dividends file", "dividends": len(dividends), "digest": digest},
+            },
+        )
+        data = replace(data, dividends=dividends, manifest=manifest)
     if not data.bars:
         raise SystemExit("no bars left for the research period")
     return config, instruments, {symbol: data}, holdout

@@ -97,3 +97,36 @@ class DataRequestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DroppedConnectionTests(unittest.TestCase):
+    def test_remote_disconnect_is_retried(self):
+        # Regression: a full 10-year download aborted on http.client.RemoteDisconnected after 270 pages.
+        import http.client
+        import io
+        from unittest import mock
+
+        from localtrader.data_requests import AlpacaDatasetDownloader
+
+        class Response(io.BytesIO):
+            headers: dict = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+        calls = {"n": 0}
+
+        def fake_urlopen(request, timeout=60):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise http.client.RemoteDisconnected("Remote end closed connection without response")
+            return Response(b'{"bars": {}}')
+
+        downloader = AlpacaDatasetDownloader("k", "s", sleeper=lambda seconds: None)
+        with mock.patch("localtrader.data_requests.urlopen", fake_urlopen):
+            payload, _ = downloader._request_page("https://data.alpaca.markets/v2/stocks/bars")
+        self.assertEqual(payload, {"bars": {}})
+        self.assertEqual(calls["n"], 2)

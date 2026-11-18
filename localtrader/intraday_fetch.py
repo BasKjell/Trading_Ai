@@ -6,10 +6,12 @@ feed ``sip`` (consolidated tape, all US venues). Two series are fetched and kept
 * ``<SYMBOL>_15m.csv`` – ``adjustment=raw``: prices as actually traded. The engine uses only these for
   signals, fills, stops and valuation.
 * ``<SYMBOL>_15m_adjusted.csv`` – ``adjustment=all``: split/dividend adjusted, for analysis only.
-* ``<SYMBOL>_dividends.csv`` – cash dividend per share by ex-date, derived from the two series
-  (see :func:`derive_dividends`). The engine books them on held positions.
+* ``<SYMBOL>_dividends.csv`` – cash dividends from Alpaca's corporate-actions endpoint: ex-date, payment
+  date and amount per share. The engine records an entitlement at the ex-date and pays cash on the payment
+  date. As an independent cross-check the amounts are also derived from the raw and adjusted series
+  (:func:`derive_dividends`); a deviation above 5 % aborts the download.
 
-Splits are not supported yet: a split in the window aborts the download (fail closed).
+Splits are not supported yet: a split in the window (either source) aborts the download (fail closed).
 Only bars inside the regular NYSE session of that day are written (early closes from
 :mod:`localtrader.calendars`); extended hours have thin volume and Alpaca accepts only limit orders there.
 Raw API pages and a manifest stay under ``data/raw/alpaca/<request_id>/`` (not versioned).
@@ -20,6 +22,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -47,6 +50,12 @@ class BarDownloader(Protocol):
     def download(
         self, request: Any, progress: Callable[[str], None] | None = None
     ) -> tuple[list[Bar], dict[str, Any], Path]: ...
+
+    def corporate_actions(self, symbol: str, start: date, end: date) -> dict[str, list[dict[str, Any]]]: ...
+
+
+Dividend = tuple[date, float]  # (payment date, amount per share), keyed by ex-date
+MAX_CROSSCHECK_DEVIATION = 0.05
 
 
 def regular_session_bars(bars: list[Bar], session: SessionSpec = US_REGULAR_SESSION) -> list[Bar]:
@@ -121,19 +130,129 @@ def dividend_gaps(dividends: dict[date, float], first: date, last: date, max_day
     ]
 
 
-def write_dividends(dividends: dict[date, float], path: str | Path) -> str:
+def dividends_from_actions(
+    actions: dict[str, list[dict[str, Any]]], symbol: str, first: date, last: date
+) -> dict[date, Dividend]:
+    """Cash dividends with ex-date in [first, last]; any split in that window aborts."""
+    for kind, items in actions.items():
+        if "split" in kind:
+            for item in items:
+                ex = date.fromisoformat(str(item.get("ex_date")))
+                if item.get("symbol", symbol) == symbol and first <= ex <= last:
+                    raise CorporateActionError(f"{kind} on {ex} is not supported")
+    raw: dict[date, tuple[date | None, float]] = {}
+    for item in actions.get("cash_dividends", []):
+        if item.get("symbol", symbol) != symbol:
+            continue
+        ex = date.fromisoformat(str(item["ex_date"]))
+        if not first <= ex <= last:
+            continue
+        pay = date.fromisoformat(str(item["payable_date"])) if item.get("payable_date") else None
+        amount = float(item["rate"])
+        if ex in raw and raw[ex] != (pay, amount):
+            previous_pay, previous_amount = raw[ex]
+            if previous_amount != amount:
+                raise CorporateActionError(f"conflicting dividend amounts for ex-date {ex}")
+            # same amount, different payment dates (seen at Alpaca for QQQ 2022-09-19): keep the later
+            # date, i.e. cash arrives later (conservative); reported via duplicate_pay_dates()
+            known = [d for d in (previous_pay, pay) if d is not None]
+            pay = max(known) if known else None
+        raw[ex] = (pay, amount)
+    dividends, _ = fill_missing_pay_dates(raw)
+    validate_dividends(dividends)
+    return dividends
+
+
+def duplicate_pay_dates(actions: dict[str, list[dict[str, Any]]], symbol: str) -> list[str]:
+    """Ex-dates listed more than once with different payment dates (for the manifest)."""
+    by_ex: dict[str, set[str]] = {}
+    for item in actions.get("cash_dividends", []):
+        if item.get("symbol", symbol) == symbol:
+            by_ex.setdefault(str(item["ex_date"]), set()).add(str(item.get("payable_date")))
+    return [f"{ex}: {sorted(pays)}" for ex, pays in sorted(by_ex.items()) if len(pays) > 1]
+
+
+def fill_missing_pay_dates(raw: dict[date, tuple[date | None, float]]) -> tuple[dict[date, Dividend], list[date]]:
+    """Alpaca has no payment dates before 2020. Model assumption, stated explicitly: payment on
+    ex-date + the **longest** observed ex-to-payment lag of the same symbol (cash later = conservative).
+    Without any observed lag the payment date cannot be modelled and the download aborts."""
+    lags = [(pay - ex).days for ex, (pay, _) in raw.items() if pay is not None]
+    missing = sorted(ex for ex, (pay, _) in raw.items() if pay is None)
+    if missing and not lags:
+        raise CorporateActionError("no payment dates at all: cannot model dividend cash timing")
+    lag = timedelta(days=max(lags)) if lags else timedelta(0)
+    filled = {ex: (pay if pay is not None else ex + lag, amount) for ex, (pay, amount) in raw.items()}
+    return filled, missing
+
+
+def crosscheck_dividends(
+    official: dict[date, Dividend], derived: dict[date, float], listings: dict[date, int] | None = None
+) -> list[str]:
+    """Problems between provider amounts and amounts derived from raw/adjusted prices.
+
+    ``listings`` counts how often the provider lists an ex-date. Alpaca applies a duplicated entry twice
+    in its adjusted series (QQQ 2022-09-19: 2 x 0.51856); a derived amount of exactly ``count`` times the
+    official one is therefore explained and reported, not treated as a disagreement.
+    """
+    problems = []
+    listings = listings or {}
+    for ex in sorted(set(official) | set(derived)):
+        if ex not in official:
+            problems.append(f"{ex}: only in adjusted prices ({derived[ex]})")
+        elif ex not in derived:
+            problems.append(f"{ex}: only in corporate actions ({official[ex][1]})")
+        elif abs(derived[ex] / official[ex][1] - 1) > MAX_CROSSCHECK_DEVIATION:
+            count = listings.get(ex, 1)
+            if count > 1 and abs(derived[ex] / (count * official[ex][1]) - 1) <= MAX_CROSSCHECK_DEVIATION:
+                problems.append(f"{ex}: adjusted series applies a {count}x listed dividend {count} times (explained)")
+            else:
+                problems.append(f"{ex}: {official[ex][1]} vs derived {derived[ex]}")
+    return problems
+
+
+def validate_dividends(dividends: dict[date, Dividend]) -> None:
+    for ex, (pay, amount) in dividends.items():
+        if not math.isfinite(amount) or amount <= 0:
+            raise CorporateActionError(f"dividend on {ex} must be a positive finite amount")
+        if pay < ex:
+            raise CorporateActionError(f"dividend on {ex} is paid before its ex-date")
+
+
+def write_dividends(
+    dividends: dict[date, Dividend], path: str | Path, source: str, assumed_pay: set[date] | None = None
+) -> str:
     target = Path(path)
     with target.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(("ex_date", "amount"))
-        for day in sorted(dividends):
-            writer.writerow((day.isoformat(), repr(dividends[day])))
+        writer.writerow(("ex_date", "pay_date", "amount", "source"))
+        for ex in sorted(dividends):
+            pay, amount = dividends[ex]
+            label = source + ("; pay_date assumed (max observed lag)" if ex in (assumed_pay or set()) else "")
+            writer.writerow((ex.isoformat(), pay.isoformat(), repr(amount), label))
     return hashlib.sha256(target.read_bytes()).hexdigest()
 
 
-def read_dividends(path: str | Path) -> dict[date, float]:
+def read_dividends(path: str | Path) -> dict[date, Dividend]:
+    """Read and validate; duplicate ex-dates, non-positive or non-finite amounts abort."""
+    dividends: dict[date, Dividend] = {}
     with Path(path).open(newline="", encoding="utf-8") as handle:
-        return {date.fromisoformat(row["ex_date"]): float(row["amount"]) for row in csv.DictReader(handle)}
+        for row in csv.DictReader(handle):
+            try:
+                ex = date.fromisoformat(row["ex_date"])
+                pay = date.fromisoformat(row["pay_date"])
+                amount = float(row["amount"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise CorporateActionError(f"invalid dividend row {row}") from error
+            if ex in dividends:
+                raise CorporateActionError(f"duplicate ex-date {ex}")
+            dividends[ex] = (pay, amount)
+    validate_dividends(dividends)
+    return dividends
+
+
+def dividends_digest(dividends: dict[date, Dividend]) -> str:
+    payload = json.dumps([[ex.isoformat(), p.isoformat(), a] for ex, (p, a) in sorted(dividends.items())])
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def output_paths(output: str | Path) -> dict[str, Path]:
@@ -182,8 +301,25 @@ def fetch_intraday_csv(
             "downloaded_at": manifest.get("downloaded_at"),
             "bars_downloaded": len(bars),
         }
-    dividends = derive_dividends(series["raw"], series["all"])  # raises before any file is written
     raw_bars = series["raw"]
+    first_day = US_REGULAR_SESSION.local_date(raw_bars[0].start) if raw_bars else start.date()
+    last_day = US_REGULAR_SESSION.local_date(raw_bars[-1].start) if raw_bars else end.date()
+    derived = derive_dividends(series["raw"], series["all"])  # raises before any file is written
+    actions = downloader.corporate_actions(symbol, first_day - timedelta(days=120), last_day + timedelta(days=120))
+    dividends = dividends_from_actions(actions, symbol, first_day, last_day)
+    assumed = sorted(
+        date.fromisoformat(str(i["ex_date"]))
+        for i in actions.get("cash_dividends", [])
+        if not i.get("payable_date") and first_day <= date.fromisoformat(str(i["ex_date"])) <= last_day
+    )
+    listings: dict[date, int] = {}
+    for item in actions.get("cash_dividends", []):
+        if item.get("symbol", symbol) == symbol:
+            ex = date.fromisoformat(str(item["ex_date"]))
+            listings[ex] = listings.get(ex, 0) + 1
+    mismatches = crosscheck_dividends(dividends, derived, listings)
+    if any(" vs derived " in problem for problem in mismatches):
+        raise CorporateActionError("dividend amounts disagree: " + "; ".join(mismatches))
     summary = {
         "symbol": symbol,
         "provider": "alpaca",
@@ -195,11 +331,17 @@ def fetch_intraday_csv(
         "files": {
             "raw": {"path": str(paths["raw"]), "sha256": write_csv(raw_bars, paths["raw"])},
             "adjusted": {"path": str(paths["adjusted"]), "sha256": write_csv(series["all"], paths["adjusted"])},
-            "dividends": {"path": str(paths["dividends"]), "sha256": write_dividends(dividends, paths["dividends"])},
+            "dividends": {
+                "path": str(paths["dividends"]),
+                "sha256": write_dividends(dividends, paths["dividends"], "alpaca_corporate_actions", set(assumed)),
+            },
         },
         "dividends": len(dividends),
+        "dividend_crosscheck": mismatches,
+        "pay_dates_assumed": [ex.isoformat() for ex in assumed],
+        "duplicate_pay_dates_later_used": duplicate_pay_dates(actions, symbol),
         "dividend_gaps": dividend_gaps(
-            dividends,
+            {ex: amount for ex, (_, amount) in dividends.items()},
             US_REGULAR_SESSION.local_date(raw_bars[0].start),
             US_REGULAR_SESSION.local_date(raw_bars[-1].start),
         )

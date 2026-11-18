@@ -114,8 +114,8 @@ class ImportedDataset:
     manifest: DatasetManifest
     # Start times (UTC) of bars that directly follow an unexpected gap inside a session.
     after_gap: frozenset[datetime]
-    # Cash dividend per share by ex-date (exchange-local date), booked on held positions.
-    dividends: dict[date, float] = field(default_factory=dict)
+    # Cash dividends by ex-date (exchange-local): (payment date, amount per share).
+    dividends: dict[date, tuple[date, float]] = field(default_factory=dict)
 
 
 def _parse_timestamp(row: dict[str, str], zone: ZoneInfo) -> datetime:
@@ -141,8 +141,12 @@ def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> Impor
     report = QualityReport()
     seen: set[datetime] = set()
     candidates: list[Bar] = []
+    # With a holdout cut, the provenance hash covers only the research rows, so a change confined to the
+    # withheld suffix leaves every research output bit-identical.
+    research_rows = hashlib.sha256()
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
+        research_rows.update(json.dumps(reader.fieldnames).encode())
         for raw in reader:
             report.rows_read += 1
             row = {key.strip().lower(): (value or "").strip() for key, value in raw.items() if key}
@@ -156,6 +160,7 @@ def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> Impor
             ):
                 report.holdout_rows_withheld += 1
                 continue
+            research_rows.update(json.dumps(raw, sort_keys=True).encode())
             try:
                 o, h, low, c = (float(row[k]) for k in ("open", "high", "low", "close"))
                 volume = float(row.get("volume") or 0.0)
@@ -234,7 +239,9 @@ def import_csv(spec: CsvImportSpec, session: SessionSpec | None = None) -> Impor
         source_timezone=spec.source_timezone,
         timeframe_minutes=spec.timeframe_minutes,
         data_version=hashlib.sha256(payload.encode()).hexdigest()[:16],
-        file_sha256=_file_sha256(path),
+        file_sha256=_file_sha256(path)
+        if spec.available_until is None
+        else "research-rows:" + research_rows.hexdigest(),
         synthetic=False,
         quality=asdict(report),
     )

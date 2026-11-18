@@ -50,10 +50,14 @@ def bar(symbol: str, start: datetime, close: float = 100.5, delay: timedelta = t
 class FakeDownloader:
     """Returns raw bars for adjustment=raw and the same bars scaled by ``factor(day)`` for adjustment=all."""
 
-    def __init__(self, raw: list[Bar], factor: Any = lambda day: 1.0) -> None:
+    def __init__(self, raw: list[Bar], factor: Any = lambda day: 1.0, actions: dict[str, Any] | None = None) -> None:
         self.raw = raw
         self.factor = factor
+        self.actions = actions or {}
         self.requests: list[Any] = []
+
+    def corporate_actions(self, symbol: str, start: date, end: date) -> dict[str, Any]:
+        return self.actions
 
     def download(self, request: Any, progress: Any = None) -> tuple[list[Bar], dict[str, Any], Path]:
         self.requests.append(request)
@@ -158,10 +162,15 @@ class FetchTests(unittest.TestCase):
         raw.insert(0, bar("SPY", starts[0] - timedelta(hours=1)))  # pre-market, dropped
         raw.append(bar("QQQ", starts[0]))  # other symbol, ignored
         ex_day = US_REGULAR_SESSION.local_date(starts[2])
-        downloader = FakeDownloader(raw, lambda day: 0.99 if day < ex_day else 1.0)
+        pay_day = ex_day + timedelta(days=40)
+        official = {
+            "cash_dividends": [{"symbol": "SPY", "ex_date": str(ex_day), "payable_date": str(pay_day), "rate": 1.01}]
+        }
+        downloader = FakeDownloader(raw, lambda day: 0.99 if day < ex_day else 1.0, official)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "SPY_15m.csv"
             summary = fetch_intraday_csv(downloader, "SPY", starts[0], starts[-1] + timedelta(days=1), path)
+            self.assertEqual(summary["dividend_crosscheck"], [])
             paths = output_paths(path)
             self.assertEqual([r.adjustment for r in downloader.requests], ["raw", "all"])
             self.assertEqual(summary["bars_regular_session"], 3)
@@ -177,8 +186,81 @@ class FetchTests(unittest.TestCase):
             dividends = read_dividends(paths["dividends"])
         self.assertEqual([b.close for b in data.bars], [100.0, 101.0, 102.0])  # as traded
         self.assertAlmostEqual(adjusted.bars[0].close, 99.0)
-        self.assertEqual(dividends, {ex_day: 1.01})
+        self.assertEqual(dividends, {ex_day: (pay_day, 1.01)})
         self.assertEqual(data.bars[0].received_at, data.bars[0].end)
+
+    def test_disagreeing_or_split_corporate_actions_abort(self) -> None:
+        starts = _days(3)
+        raw = [bar("SPY", s, 100.0) for s in starts]
+        ex_day = US_REGULAR_SESSION.local_date(starts[2])
+        factor = lambda day: 0.99 if day < ex_day else 1.0  # noqa: E731
+        cases = {
+            "amount": {"cash_dividends": [{"ex_date": str(ex_day), "payable_date": str(ex_day), "rate": 2.0}]},
+            "split": {"forward_splits": [{"ex_date": str(ex_day), "new_rate": 2, "old_rate": 1}]},
+        }
+        for name, actions in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "SPY_15m.csv"
+                with self.assertRaises(CorporateActionError):
+                    fetch_intraday_csv(FakeDownloader(raw, factor, actions), "SPY", starts[0], starts[-1], path)
+                self.assertFalse(path.exists())  # nothing written before the check
+
+    def test_duplicate_entry_with_other_pay_date_keeps_the_later_one(self) -> None:
+        from localtrader.intraday_fetch import dividends_from_actions, duplicate_pay_dates
+
+        ex = date(2022, 9, 19)
+        entries = [
+            {"ex_date": "2022-09-19", "payable_date": "2022-09-23", "rate": 0.51856},
+            {"ex_date": "2022-09-19", "payable_date": "2022-10-31", "rate": 0.51856},
+        ]
+        actions = {"cash_dividends": entries}
+        self.assertEqual(dividends_from_actions(actions, "QQQ", ex, ex), {ex: (date(2022, 10, 31), 0.51856)})
+        self.assertEqual(len(duplicate_pay_dates(actions, "QQQ")), 1)
+        entries[1]["rate"] = 0.6
+        with self.assertRaises(CorporateActionError):
+            dividends_from_actions(actions, "QQQ", ex, ex)
+
+    def test_duplicate_listing_explains_a_doubled_derived_amount_only(self) -> None:
+        from localtrader.intraday_fetch import crosscheck_dividends
+
+        ex = date(2022, 9, 19)
+        official = {ex: (date(2022, 10, 31), 0.51856)}
+        explained = crosscheck_dividends(official, {ex: 1.0405}, {ex: 2})
+        self.assertEqual(len(explained), 1)
+        self.assertIn("explained", explained[0])
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 1.0405}, {ex: 1})[0])
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 1.6}, {ex: 2})[0])
+
+    def test_missing_payment_dates_use_the_longest_observed_lag(self) -> None:
+        from localtrader.intraday_fetch import fill_missing_pay_dates
+
+        raw = {
+            date(2019, 3, 15): (None, 1.2),
+            date(2024, 3, 15): (date(2024, 4, 30), 1.6),
+            date(2024, 6, 21): (date(2024, 7, 31), 1.7),
+        }
+        filled, missing = fill_missing_pay_dates(raw)
+        self.assertEqual(missing, [date(2019, 3, 15)])
+        self.assertEqual(filled[date(2019, 3, 15)], (date(2019, 3, 15) + timedelta(days=46), 1.2))
+        with self.assertRaises(CorporateActionError):
+            fill_missing_pay_dates({date(2019, 3, 15): (None, 1.2)})
+
+    def test_invalid_dividend_files_are_rejected(self) -> None:
+        cases = {
+            "negative": "2024-03-05,2024-04-30,-1.0",
+            "nan": "2024-03-05,2024-04-30,nan",
+            "paid before ex": "2024-03-05,2024-03-01,1.0",
+            "duplicate": "2024-03-05,2024-04-30,1.0\n2024-03-05,2024-04-30,1.1",
+            "unparseable": "2024-03-05,,1.0",
+        }
+        for name, rows in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "d.csv"
+                path.write_text(
+                    "ex_date,pay_date,amount,source\n" + "\n".join(r + ",x" for r in rows.split("\n")), encoding="utf-8"
+                )
+                with self.assertRaises(CorporateActionError):
+                    read_dividends(path)
 
     def test_default_end_is_old_enough_and_aligned(self) -> None:
         now = datetime(2026, 11, 17, 19, 52, 13, tzinfo=UTC)
@@ -218,6 +300,7 @@ class HoldoutTests(unittest.TestCase):
         self.assertEqual(jump.manifest.quality["last_bar"], before.isoformat())
         self.assertEqual(jump.manifest.data_version, calm.manifest.data_version)
         self.assertEqual(jump.manifest.quality, calm.manifest.quality)
+        self.assertEqual(jump.manifest, calm.manifest)  # incl. the provenance hash of the research rows
 
     def test_bar_straddling_the_cutoff_is_withheld(self) -> None:
         # Regression (PR #21 review): a 14:30-14:45 bar stayed in research with cutoff 14:37.
@@ -240,17 +323,27 @@ class HoldoutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(_csv(tmp, [(before, 100.0), (inside, 100.0)]))
             dividends = Path(tmp) / "SPY_dividends.csv"
-            dividends.write_text("ex_date,amount\n2025-09-22,1.5\n2025-12-22,1.6\n", encoding="utf-8")
+            rows = "ex_date,pay_date,amount,source\n2025-09-22,2025-10-31,1.5,t\n2025-12-22,2026-01-30,1.6,t\n"
+            dividends.write_text(rows, encoding="utf-8")
             config = str(REPO / "config" / "default.toml")
             _, _, datasets, holdout = _load_intraday(config, path, None, "SPY")
             self.assertEqual([b.start for b in datasets["SPY"].bars], [before])
             self.assertEqual(holdout["excluded_bars"], 1)
             self.assertFalse(holdout["used"])
-            self.assertEqual(datasets["SPY"].dividends, {date(2025, 9, 22): 1.5})  # holdout dividend withheld
+            self.assertEqual(datasets["SPY"].dividends, {date(2025, 9, 22): (date(2025, 10, 31), 1.5)})
+            version = datasets["SPY"].manifest.data_version
+            # Regression (PR #21 review 2): a changed dividend must change the dataset version
+            dividends.write_text(rows.replace(",1.5,", ",50.0,"), encoding="utf-8")
+            _, _, changed, _ = _load_intraday(config, path, None, "SPY")
+            self.assertNotEqual(changed["SPY"].manifest.data_version, version)
+            # ... but a change only in the withheld holdout part must not
+            dividends.write_text(rows.replace(",1.6,", ",60.0,"), encoding="utf-8")
+            _, _, holdout_only, _ = _load_intraday(config, path, None, "SPY")
+            self.assertEqual(holdout_only["SPY"].manifest, datasets["SPY"].manifest)
             dividends.unlink()
             with self.assertRaises(SystemExit):  # missing corporate actions: fail closed
                 _load_intraday(config, path, None, "SPY")
-            dividends.write_text("ex_date,amount\n2025-09-22,1.5\n2025-12-22,1.6\n", encoding="utf-8")
+            dividends.write_text(rows, encoding="utf-8")
             _, _, datasets, holdout = _load_intraday(config, path, None, "SPY", use_holdout=True)
             self.assertEqual(len(datasets["SPY"].bars), 2)
             self.assertTrue(holdout["used"])
@@ -273,23 +366,73 @@ class HoldThrough:
         return None
 
 
+class SellOnDay:
+    """Enters on the first bar, exits once the given number of bars has been seen."""
+
+    name = "hold"
+
+    def __init__(self, exit_after: int | None = None) -> None:
+        self.exit_after = exit_after
+
+    def parameters(self) -> dict[str, float]:
+        return {}
+
+    def evaluate(self, ctx: StrategyContext) -> Any:
+        from localtrader.domain import Direction, Signal
+
+        if not ctx.in_position and len(ctx.bars) == 1:
+            return Signal("hold", "X", Market.ETF, ctx.now, ctx.now, Direction.LONG, 1.0, "in", stop_price=95.0)
+        if ctx.in_position and self.exit_after is not None and len(ctx.bars) == self.exit_after:
+            return Signal("hold", "X", Market.ETF, ctx.now, ctx.now, Direction.FLAT, 1.0, "out", stop_price=None)
+        return None
+
+
 class DividendBookingTests(unittest.TestCase):
-    def test_dividend_is_credited_net_of_withholding_and_in_the_benchmark(self) -> None:
-        config = load_config()
-        spec = InstrumentSpec("X", Market.ETF, "t", "USD", SESSION, CostProfile(0, 0, 0, 0), 0.001, 0.0, 0.15)
-        starts = [datetime(2024, 3, 4, 10, tzinfo=UTC) + timedelta(minutes=15 * i) for i in range(3)]
-        starts += [datetime(2024, 3, 5, 10, tzinfo=UTC) + timedelta(minutes=15 * i) for i in range(3)]
-        bars_ = [replace(bar("X", s, 100.0), market=Market.ETF) for s in starts]
-        manifest = DatasetManifest("X", "etf", "t", "unit", "UTC", 15, "v", "v", False, {})
-        ex_day = date(2024, 3, 5)
-        with_div = ImportedDataset(bars_, manifest, frozenset(), {ex_day: 2.0})
-        without = ImportedDataset(bars_, manifest, frozenset())
-        a = IntradayEngine(config, {"X": spec}, [HoldThrough()]).run({"X": with_div})
-        b = IntradayEngine(config, {"X": spec}, [HoldThrough()]).run({"X": without})
-        quantity = a.fills[0].quantity
-        self.assertAlmostEqual(a.dividend_income, quantity * 2.0 * 0.85)
-        self.assertAlmostEqual(a.equity[-1].equity - b.equity[-1].equity, quantity * 2.0 * 0.85)
-        self.assertAlmostEqual(compute_metrics(a)["dividends_received"], a.dividend_income)
-        bh_with = buy_and_hold({"X": with_div}, {"X": spec}, config)["buy_and_hold_total_return"]
-        bh_without = buy_and_hold({"X": without}, {"X": spec}, config)["buy_and_hold_total_return"]
+    def setUp(self) -> None:
+        self.config = load_config()
+        self.spec = InstrumentSpec("X", Market.ETF, "t", "USD", SESSION, CostProfile(0, 0, 0, 0), 0.001, 0.0, 0.15)
+        days = [datetime(2024, 3, d, 10, tzinfo=UTC) for d in (4, 5, 6, 7)]
+        starts = [d + timedelta(minutes=15 * i) for d in days for i in range(3)]
+        self.bars = [replace(bar("X", s, 100.0), market=Market.ETF) for s in starts]
+        self.manifest = DatasetManifest("X", "etf", "t", "unit", "UTC", 15, "v", "v", False, {})
+        self.ex, self.pay = date(2024, 3, 5), date(2024, 3, 7)
+
+    def run_engine(self, strategy: Any, dividends: dict[date, Any]) -> Any:
+        data = ImportedDataset(self.bars, self.manifest, frozenset(), dividends)
+        return IntradayEngine(self.config, {"X": self.spec}, [strategy]).run({"X": data})
+
+    def test_entitlement_at_ex_date_cash_only_at_payment(self) -> None:
+        # Regression (PR #21 review 2): the dividend was spendable cash from the ex-date on.
+        result = self.run_engine(SellOnDay(), {self.ex: (self.pay, 2.0)})
+        quantity = result.fills[0].quantity
+        net = quantity * 2.0 * 0.85
+        events = [d for d in result.decisions if str(d["event"]).startswith("dividend")]
+        self.assertEqual([e["event"] for e in events], ["dividend_entitlement", "dividend_paid"])
+        self.assertTrue(str(events[0]["time"]).startswith("2024-03-05"))
+        self.assertTrue(str(events[1]["time"]).startswith("2024-03-07"))
+        on_ex = [p for p in result.equity if p.timestamp.date() == self.ex][-1]
+        before = [p for p in result.equity if p.timestamp.date() == date(2024, 3, 4)][-1]
+        self.assertAlmostEqual(on_ex.cash, before.cash)  # not yet paid
+        self.assertAlmostEqual(on_ex.equity - before.equity, net)  # but part of equity
+        self.assertAlmostEqual(result.dividend_income, net)
+        self.assertAlmostEqual(result.dividend_receivable_end, 0.0)
+
+    def test_sold_between_ex_and_payment_is_still_paid(self) -> None:
+        result = self.run_engine(SellOnDay(exit_after=5), {self.ex: (self.pay, 2.0)})
+        exit_fill = [f for f in result.fills if f.quantity < 0][0]
+        self.assertEqual(exit_fill.timestamp.date(), self.ex)
+        paid = [d for d in result.decisions if d["event"] == "dividend_paid"]
+        self.assertEqual(len(paid), 1)
+        self.assertAlmostEqual(result.equity[-1].cash, result.equity[-1].equity)
+
+    def test_unpaid_entitlement_at_end_is_reported(self) -> None:
+        result = self.run_engine(SellOnDay(), {self.ex: (date(2024, 4, 30), 2.0)})
+        self.assertGreater(result.dividend_receivable_end, 0)
+        self.assertAlmostEqual(compute_metrics(result)["dividends_unpaid_at_end"], result.dividend_receivable_end)
+
+    def test_benchmark_includes_dividends(self) -> None:
+        with_div = ImportedDataset(self.bars, self.manifest, frozenset(), {self.ex: (self.pay, 2.0)})
+        without = ImportedDataset(self.bars, self.manifest, frozenset())
+        bh_with = buy_and_hold({"X": with_div}, {"X": self.spec}, self.config)["buy_and_hold_total_return"]
+        bh_without = buy_and_hold({"X": without}, {"X": self.spec}, self.config)["buy_and_hold_total_return"]
         self.assertGreater(bh_with, bh_without)

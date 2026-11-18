@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import http.client
 import json
 import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -215,10 +216,36 @@ class AlpacaDatasetDownloader:
                     self._cooldown(headers, attempt)
                     continue
                 raise DataRequestError(f"Alpaca rejected data request ({error.code}): {last_error[:300]}") from error
-            except (URLError, TimeoutError) as error:
+            # dropped connections (e.g. RemoteDisconnected) are transient like timeouts: retry with backoff
+            except (URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
                 last_error = str(error)
                 self._sleep_chunked(min(300.0, 2.0**attempt))
         raise RetryExhausted(f"Alpaca request failed after {self.max_attempts} attempts: {last_error[:300]}")
+
+    def corporate_actions(self, symbol: str, start: date, end: date) -> dict[str, list[dict[str, Any]]]:
+        """Cash dividends and splits from Alpaca's corporate-actions endpoint (all pages).
+
+        The endpoint filters by processing date, so the caller filters by ex-date afterwards.
+        """
+        result: dict[str, list[dict[str, Any]]] = {}
+        page_token: str | None = None
+        for _ in range(1000):
+            params = {
+                "symbols": symbol,
+                "types": "cash_dividend,forward_split,reverse_split,unit_split",
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "limit": 1000,
+            }
+            if page_token:
+                params["page_token"] = page_token
+            payload, _ = self._request_page(f"https://data.alpaca.markets/v1/corporate-actions?{urlencode(params)}")
+            for kind, items in (payload.get("corporate_actions") or {}).items():
+                result.setdefault(kind, []).extend(items)
+            page_token = payload.get("next_page_token")
+            if not page_token:
+                return result
+        raise DataRequestError("excessive corporate-actions pagination")
 
     def _cooldown(self, headers: dict[str, str], attempt: int) -> None:
         delay = min(300.0, 2.0**attempt)
