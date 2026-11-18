@@ -19,15 +19,38 @@ Vor jeder neuen Aufgabe:
    Branch mit Regressionstests beheben, im PR auf jeden Befund antworten (behoben in `<SHA>` / begründet
    abgelehnt) und erneutes Review anfordern. Das ist Fehlerbehebung, kein Selbstreview. Erst wenn eigene
    PRs keine offenen Befunde haben, gilt §0 für sie als erledigt.
-3. Fremde PRs reviewen: Code und Tests lesen, `make check` nachweisen (siehe „Nachweis von `make check`"),
-   Look-ahead,
-   Kosten, Risikogrenzen, Orderlogik und Validierung gezielt prüfen. Ergebnis als PR-Review mit klarer
-   Empfehlung (freigeben / Änderungen nötig) und gefundenen Fehlern; Fehler in
-   `docs/agents/MODEL_EVALUATION.md` beim verursachenden Eintrag nachtragen.
+3. Fremde PRs je nach **Risikoklasse** (unten) behandeln. Klasse K: vollständiges Review vor dem Merge –
+   Code und Tests lesen, `make check` nachweisen (siehe „Nachweis von `make check`"), Look-ahead, Holdout,
+   Kosten, Risikogrenzen, Orderlogik und Validierung gezielt prüfen. Klasse U: Klassenprüfung vor dem
+   Merge, inhaltliches Review danach (gesammelt). Ergebnis als PR-Review mit klarer Empfehlung
+   (freigeben / Änderungen nötig) und gefundenen Fehlern; Fehler in `docs/agents/MODEL_EVALUATION.md`
+   beim verursachenden Eintrag nachtragen.
 4. Bei Freigabe als Integrationsagent mergen (Abschnitt 2a). Sonst Label `review` belassen und Befunde
    im PR dokumentieren.
 5. Dem Benutzer am Sitzungsende melden, welche PRs reviewt, gemergt, zurückgewiesen oder (eigene)
    nach Befunden korrigiert wurden.
+
+**Review nach Risikoklasse** (Benutzerentscheidung 2026-11-18)
+
+Jeder PR nennt seine Klasse (PR-Vorlage); der Integrationsagent prüft die Einstufung. Im Zweifel und bei
+gemischten PRs gilt **K**. Ziel: Schutz dort, wo Fehler unumkehrbar sind (gesehene Ergebnisse,
+verbrauchter Holdout, echte Orders), und weniger Runden für alles andere.
+
+| Klasse | Umfang | Vorgehen |
+|---|---|---|
+| **K – kritisch** | Holdout und Datenverfügbarkeit, Kausalität/Engine, Orderausführung und Broker, Risikoregeln, Buchhaltung, Kosten- und Dividendenbuchung, statistische Validierung und Auswahl, Live-Sperren und Sicherheitsregeln (§5), Rechte automatischer Agenten. **Außerdem:** mögliche Offenlegung von Zugangsdaten, geschützten Daten oder Ergebnissen (Zugriffskontrollen, Artefakt- und Reportveröffentlichung, auch lesende Dashboards mit Holdout- oder Kontodaten); dauerhafter Zustand (Migration, Restore, Retention oder Löschung von Order-, Audit-, Versuchs- und Holdoutjournalen sowie der Modellregistry); Kontrollmechanismen (CI-Pflichtprüfungen, Branch-Schutz, Deployment- und Mergebefugnisse, normative Projektregeln wie AGENTS.md und Spec) | unabhängiges Review **vor** dem Merge, Label `needs-independent-review` (wie bisher) |
+| **U – unkritisch** | Dokumentation ohne normative Regeln, Anzeige ohne Zugriff auf geschützte Daten, Werkzeuge ohne Daten-, Order- oder Holdoutzugriff, reine Testergänzungen und Sammel-PRs, die weder Schutzwirkung noch normative Regeln ändern, Konfiguration außerhalb von Risiko/Kosten/Holdout | Merge durch einen Integrationsagenten einer anderen Agentenart nach **Klassenprüfung** (Einstufung stimmt, CI grün am Head, keine Konflikte); inhaltliches Review danach, gesammelt; Befunde als Folge-Issues |
+
+- **Nur P1/P2 blockieren einen Merge.** P3-Befunde werden als Issue mit Label `follow-up` erfasst und im
+  Review verlinkt; sie lösen keine weitere Review-Runde aus.
+- **Gleicher Befund nach zwei Runden nicht geschlossen:** Benutzer informieren; ggf. stärkeres Modell (§3).
+- **Übergang:** Diese Regeln gelten ab dem Merge-Commit des PRs, der sie einführt (#32), für alle PRs,
+  die danach geöffnet oder neu freigegeben werden. #32 selbst wird nach der vorher geltenden Regel
+  integriert (unabhängiges Review vor dem Merge, Integrationsstand im PR). Die beim Erstellen dieser Regel
+  offenen PRs #20, #21, #28, #29 und #31 sind Klasse K; ihre offenen Befunde, Abhängigkeiten sowie Head- und
+  Zielbindung bleiben bestehen, und sie dürfen ihre vorhandenen `CHANGELOG.md`-/`docs/STATUS.md`-Einträge
+  behalten. Die fachliche Freigabe von #31 gilt nur gegen den Branch von #21; nach dem Umstellen auf
+  `main` braucht #31 eine neue zielgebundene Freigabe am neuen Head und grüne CI.
 
 **Unabhängigkeit und Form des Reviews**
 - Herkunft und Unabhängigkeit richten sich nach der dokumentierten tatsächlichen Bearbeitung (Feld
@@ -43,8 +66,15 @@ Vor jeder neuen Aufgabe:
   `COMMENT`-Review abgegeben, das beginnt mit `<Agent>: unabhängiges Review`, den geprüften
   **Head-SHA** und Zielbranch nennt und mit „Empfehlung: FREIGEBEN" oder „Empfehlung: ÄNDERUNGEN NÖTIG"
   endet. Vorhandene GitHub-Pflicht-Approvals und Branch-Schutzregeln bleiben unverändert zu erfüllen.
-- Eine Freigabe gilt nur für den genannten Head-SHA und Zielbranch. Nach jedem neuen Commit, Rebase
-  oder Umstellen des Zielbranches ist sie verfallen; Review der Änderungen und CI sind erneut nötig.
+- Eine Freigabe gilt nur für den genannten Head-SHA und Zielbranch. Nach jedem neuen **inhaltlichen**
+  Commit, Rebase oder Umstellen des Zielbranches ist sie verfallen; Review der Änderungen und CI sind
+  erneut nötig. **Ausnahme:** Kommt nach der Freigabe nur ein Merge von `main` hinzu, ohne Konflikt in
+  Code- oder Testdateien des PRs, genügt eine **Merge-Diff-Prüfung**: (a) der Diff des PRs gegen `main`
+  enthält außer dem bereits geprüften Inhalt nichts Neues; (b) die neue Basis wird darauf geprüft, ob sie
+  Verträge, Schnittstellen, gemeinsam genutzte Grenzen (z. B. Holdout-Cutoff, Datenformate),
+  Schutzmechanismen oder Pflichtprüfungen ändert, von denen der PR abhängt – betroffene Teile werden
+  erneut inhaltlich geprüft; (c) CI grün am neuen Head. Sie wird als kurzes Review mit neuem Head-SHA und
+  demselben Zielbranch dokumentiert.
 
 ## 1. Einstieg (vor jeder Änderung)
 
@@ -69,8 +99,9 @@ Vor jeder neuen Aufgabe:
   „lokal nicht ausgeführt" melden und die CI am gepushten SHA abwarten.
 - Jede ausführbare Änderung mit aussagekräftigen Tests; jede Fehlerbehebung mit Regressionstest.
   Erwartete Testergebnisse nie anpassen, nur damit fehlerhafter Code besteht.
-- Änderungsnotiz in `changelog.d/T-xxx.md` (nicht direkt in `CHANGELOG.md`; das wird bei der
-  Integration zusammengeführt). Architekturentscheidungen unter `docs/decisions/`.
+- Änderungsnotiz **nur** in `changelog.d/T-xxx.md` (eine neue Datei je Aufgabe, daher konfliktfrei).
+  PRs ändern weder `CHANGELOG.md` noch `docs/STATUS.md`; beides pflegt der tägliche Sammel-PR (§2a).
+  Architekturentscheidungen unter `docs/decisions/`.
 - Handoff `docs/handoffs/T-xxx.md` laufend und spätestens vor jeder Pause pflegen (Vorlage
   `docs/handoffs/TEMPLATE.md`). WIP-Commits auf dem eigenen Branch sind erlaubt, klar als `WIP`
   markiert, nie als fertig gemeldet.
@@ -89,8 +120,8 @@ Vor jeder neuen Aufgabe:
 Benutzerentscheidung vom 2026-11-17: Ein Agent darf als Integrationsagent nach `main` mergen, wenn **alle**
 Bedingungen erfüllt sind:
 1. Der PR stammt von einer anderen Agentenart/Modellfamilie oder vom Benutzer (nie eigene PRs).
-2. Ein unabhängiges Review mit Empfehlung „freigeben" liegt vor (bei Risiko, Orderausführung,
-   Validierung zwingend; sonst durch den mergenden Agenten selbst).
+2. Klasse K: Ein unabhängiges Review mit Empfehlung „freigeben" liegt vor. Klasse U: Die Klassenprüfung
+   (§0) ist dokumentiert; das inhaltliche Review folgt nach dem Merge.
 3. Der PR enthält den aktuellen Stand von `main`; Konflikte sind fachlich gelöst (nie pauschal
    ours/theirs); die CI des PRs ist auf genau dem freigegebenen Head-SHA grün (gilt als `make check`-
    Nachweis, siehe §0).
@@ -99,11 +130,13 @@ Bedingungen erfüllt sind:
 4. Keine offenen Blockaden, keine WIP-Commits, keine ungeklärten Benutzerentscheidungen im PR.
 5. Merge per Merge-Commit (kein Squash/Rebase der fremden Historie), kein Force-Push.
 
-Vor der abschließenden Freigabe nimmt der PR-Autor den Integrationsstand in den PR auf:
-`changelog.d/T-xxx.md` in `CHANGELOG.md` übernommen und gelöscht, `docs/STATUS.md` mit „integriert
-(PR #n)". Der Reviewer prüft genau diesen Stand. **Keine ungeprüften Direktänderungen an `main`.**
+**Täglicher Sammel-PR für den Integrationsstand** (Klasse U): Ein Agent übernimmt einmal täglich (oder
+nach mehreren Merges) alle `changelog.d/T-xxx.md` gemergter PRs in `CHANGELOG.md`, löscht sie und
+aktualisiert `docs/STATUS.md` („integriert (PR #n)"). Einzel-PRs enthalten diese Dateien nicht mehr; das
+beseitigt die meisten Merge-Konflikte. **Keine ungeprüften Direktänderungen an `main`** – auch der
+Sammel-PR geht über die Klassenprüfung.
 Nach dem Merge nur noch außerhalb von Git: Issue auf `done`, abhängige PRs auf `main` umstellen (deren
-Freigaben verfallen damit, siehe §0).
+Freigaben verfallen damit, siehe §0; reine `main`-Merges: Merge-Diff-Prüfung).
 Integration in `main` ist **keine Livefreigabe** (Spec §18).
 
 ## 3. Modellwahl, Denkstufe und Eskalation

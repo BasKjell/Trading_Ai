@@ -10,13 +10,15 @@ Stand: 2026-11-18. Kennzeichnung: **geplant / implementiert / getestet / integri
 | `main` | T-001–T-004: localtrader-Basis, korrigierte Kosten/Risikolimits, 15-Minuten-Import, kausale Intraday-Engine (geprüfte Codebasis `1dfb421`) | **integriert** (PR #17) |
 | `agent/T-009-agent-collaboration` | T-009 (#16): AGENTS.md, Spec, Register, Vorlagen | **integriert** (PR #18) |
 | `agent/T-005-order-state` | T-005 (#1): Persistenter Orderzustandsautomat und Fake-Broker-Abgleich | **integriert (PR #26)** – gilt nach dessen Merge |
-| `agent/T-018-alpaca-etf-data` | T-018 (#13): SPY/QQQ-Daten, Holdout, Dividenden | review, PR #21 |
+| `agent/T-018-alpaca-etf-data` | T-018 (#13): SPY/QQQ 2016–2026 (Rohkurse, Dividenden mit Zahltag, NYSE-Halbtage), Holdout ab 2025-11-01 | **integriert (PR #21)** – gilt nach dessen Merge |
 | `agent/T-011-fx-data` | T-011 Datenteil (#6): EZB EUR/USD, kausale Abfrage, Holdout-Schnitt | **integriert (PR #25)** – gilt nach dessen Merge; Buchhaltung in EUR offen |
 | `agent/T-007-report-view` | T-007 Report-Teil (#3): Experimentregister und Intraday-Reports im Dashboard | **integriert** (PR #24); Betriebsansicht offen (T-006) |
 | `agent/T-008-research-design` | T-008 Forschungsdesign (#4) | **integriert (PR #22)** – gilt nach dessen Merge. Forschungsdesign im Entwurf, Implementierung und Freeze ausstehend |
 | `agent/T-008-journal-registry` | T-008 Bausteine: Protokollprüfung, Versuchsjournal (atomare Reservierung, kanonischer zentraler Slot), Modellregistry | **integriert (PR #23)** – gilt nach dessen Merge; Anbindung an den T-008-Lauf ausstehend |
 | `agent/T-008-folds` | T-008 Falten, Purge/Embargo, Warm-up (#4) | **integriert (PR #30)** – gilt nach Merge; Anbindung und historische Auswertung ausstehend |
 | `agent/T-019-operating-rules` | T-019 (#14): verbindliche Betriebsregeln, Prüfung beim Start | **integriert (PR #27)** – gilt nach dessen Merge; Durchsetzung im Paper-/Livebetrieb teilweise geplant |
+| `agent/T-008-cost-schedule` | Kostentabelle SPY/QQQ mit gemessenen Spreads (Vorbedingung T-008) | **integriert (PR #28)** – gilt nach dessen Merge; Engine noch nicht angebunden |
+| `agent/T-009-review-tiers` | T-009 (#16): Review nach Risikoklasse K/U, Merge-Diff-Prüfung, täglicher Sammel-PR | **integriert (PR #32)** – gilt nach dessen Merge |
 | `agent/T-020-local-coding-runner` | T-020 (#19): Vorschau und Diagnose für lokale Coding-Aufgaben | **integriert (PR #20)** – gilt nach Merge; Worker-Ausführung technisch gesperrt |
 
 ## Funktionen

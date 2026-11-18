@@ -2,6 +2,89 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – Kostentabelle SPY/QQQ mit gemessenen Spreads (Vorbedingung T-008)
+
+**Änderungen**
+- `config/cost_schedule.json` und `localtrader/cost_schedule.py`: Kosten je Instrument, Währung, Seite und
+  Zeitraum, getrennt nach Quelle/Messwert/Annahme, mit Validierung und Digest.
+- CLI `measure-spreads`: Stichprobe der SIP-Quotes an Bar-Eröffnungen, nur Forschungszeitraum.
+- Nach Review 3: Pflichtdeckung je Komponente und Handelsseite (`both` deckt Kauf und Verkauf; SEC/TAF
+  nur Verkauf). Die versionierte Tabelle ist vollständig; Werte unverändert.
+- Nach Review 2: Holdout-Grenze fest im Code (`localtrader/holdout.py`, Konfiguration muss übereinstimmen),
+  Anfragefenster endet strikt vor der Grenze. Messwerte unverändert (kein Stichprobenzeitpunkt betroffen).
+- Nach Review (`1404b5e`): Obergrenze fest `[holdout] start` (inkl. ganzem Anfragefenster), Eröffnungsstatistik
+  in New-York-Zeit, NaN/Inf abgelehnt, Vollständigkeit je Datum im erklärten Geltungsbereich; Neumessung.
+- `docs/costs/COST_SCHEDULE.md`: Belege, Messergebnisse, Vergleich mit der Konfiguration (unterschätzt
+  um ca. 6 % / 19 %). Engine unverändert.
+
+**Tests:** `tests/test_cost_schedule.py`.
+
+## 2026-11-18 – Review nach Risikoklasse, Sammel-PR für den Integrationsstand (T-009, PR #32)
+
+**Anlass/Ziel:** Benutzerentscheidung 2026-11-18: Reviews dort behalten, wo Fehler unumkehrbar sind, und
+die Zahl der Review-Runden senken (die meisten Runden entstanden durch CHANGELOG/STATUS-Konflikte und
+verfallene Freigaben nach reinen main-Merges).
+
+**Änderungen**
+- AGENTS.md §0: Risikoklassen K (Review vor Merge) und U (Klassenprüfung, Review danach gesammelt); nur
+  P1/P2 blockieren, P3 → Folge-Issue; Eskalation nach zwei Runden; Merge-Diff-Prüfung genügt nach einem
+  konfliktfreien main-Merge, wenn auch die neue Basis auf geänderte Verträge, Schutzmechanismen und
+  Pflichtprüfungen geprüft ist. K umfasst auch Offenlegung geschützter Daten/Zugangsdaten, dauerhaften
+  Zustand (Journale, Registry) und Kontrollmechanismen (CI, Branch-Schutz, Regeln). Übergangsregel für
+  #32 und die offenen PRs #20, #21, #28, #29, #31.
+- AGENTS.md §2/§2a: Einzel-PRs ändern CHANGELOG.md/STATUS.md nicht mehr; täglicher Sammel-PR.
+- Spec §21, PR-Vorlage (Klassenangabe), changelog.d/README.md angepasst.
+
+**Tests:** reine Regeländerung; `make check` (inkl. Linkprüfung).
+
+## 2026-11-17 – T-018 Mehrjährige 15-Minuten-Daten (SPY, QQQ) und fester Holdout (PR #21)
+
+**Anlass/Ziel:** Benutzerentscheidung: Instrument muss nicht der DAX sein; geeignetes Instrument mit gut
+verfügbaren Daten wählen und mehr Daten ergänzen (ADR 0005).
+
+**Änderungen**
+- `localtrader/intraday_fetch.py` und CLI `fetch-intraday`: 15-Minuten-Bars über den vorhandenen
+  Alpaca-Downloader (SIP, bereinigt), nur reguläre Handelszeit, CSV + Manifest unter `data/`.
+- `config/default.toml`: Instrumente SPY und QQQ (Kostenannahmen, Bruchstücke, keine Finanzierung) mit
+  eigener Datendatei; `[holdout] start = 2025-11-01`, vor der ersten Auswertung festgelegt.
+- `intraday-backtest`/`intraday-stress`: `--symbol`, Holdout wird automatisch ausgeschlossen,
+  `--use-holdout` nur für die zentrale Auswertung; Holdout-Angaben im Report.
+- `split_holdout()` in `localtrader/intraday_data.py`.
+- Basisreport `docs/reports/2026-11-17_etf_baseline.md`, Experiment EXP-T018-001, ADR 0005,
+  `docs/DATA_FORMAT.md`, `docs/DATA_ACCESS.md`.
+
+- Nach Codex-Review (`9c47014`): handelbare Rohkurse für Engine und Benchmark, bereinigte Kurse getrennt
+  nur für Analyse; Dividenden abgeleitet und gebucht (15 % Quellensteuer), Splits brechen ab;
+  NYSE-Halbtagskalender (`localtrader/calendars.py`); Holdout beim Import nach Verfügbarkeit
+  (`available_until`), keine Holdout-Preise mehr in Manifest/Report; `split_holdout` entfernt;
+  `Portfolio.receive_income()`; Dividendenlücken im Manifest. Ergebnisse als EXP-T018-002 neu
+  berechnet (EXP-T018-001 beruhte auf bereinigten Kursen und enthielt Halbtags-Nachbörse).
+
+- Nach Review 5: Anbieteranfrage endet eine Bar vor der Grenze (Alpaca-`end` ist inklusiv); Antwortzeilen
+  außerhalb des Anfragefensters werden vor dem Schreiben von Roh-/Normalisierungsdateien, Hash und Manifest
+  verworfen. Lokale Rohdaten geprüft: keine Bar ab dem Holdout-Start.
+- Nach Review 4: Holdout-Grenze fest im Code (`localtrader/holdout.py`), Konfiguration muss übereinstimmen,
+  Grenzen nur früher; `--use-holdout` entfernt (kein Forschungspfad zum Holdout).
+- Nach Review 3 (`e41c8f7`): Zahltag-Schätzung nur aus Forschungsaktionen, Dividendenzeilen vor dem Parsen
+  nach Ex-Datum gefiltert (Grenze konsistent zur Session), Fehlermeldungen ohne Zeileninhalt;
+  Neuregistrierung EXP-T018-004 (bitgenau gleich EXP-T018-003).
+- Benutzerentscheidung 2026-11-18: `fetch-intraday` lädt Kurse und Corporate Actions nur bis vor den
+  Holdout-Start; Forschungsdateien enthalten physisch keine Holdout-Daten.
+- Nach Review 2 (`535493e`): Dividenden aus dem Corporate-Actions-Endpunkt mit Zahltag, Gegenprobe
+  gegen die abgeleiteten Beträge; Forderung am Ex-Tag, Cash am Zahltag (`Portfolio.accrue_income`,
+  `settle_income`), offene Forderungen am Ende ausgewiesen; Dividenden validiert und an die Datenversion
+  gebunden; Herkunftshash bei Holdout-Schnitt nur über die Forschungszeilen. Beim Neuladen behoben:
+  Wiederholung bei Verbindungsabbruch, fehlende Zahltage vor 2020 (gekennzeichnete Annahme), doppelt
+  gelistete QQQ-Dividende. Neuberechnung EXP-T018-003 (Ergebnisse praktisch unverändert).
+
+**Tests:** `tests/test_intraday_fetch.py`: Handelszeit inkl. Sommerzeit, Halbtag und Kalenderende;
+Dividendenableitung, Split- und Inkonsistenzabbruch, Lückenmeldung; getrennte Roh-/Analyse-/Dividenden-
+dateien; Holdout ohne Preisabfluss ins Manifest, Grenze innerhalb einer Bar, verzögerte Verfügbarkeit,
+naive Grenze; Holdout und Dividenden im CLI inkl. fehlender Dividendendatei; Dividendenbuchung in Engine
+und Benchmark.
+
+**Einschränkungen:** USD wird bis T-011 1:1 als Kontowährung behandelt; kein Feiertagskalender.
+
 ## 2026-11-18 – T-020 Lokaler Coding-Runner (PR #20)
 
 - GitHub-Planung für freigegebene Medium-Coding-Aufgaben sowie lokale Diagnose und Offline-Tests.

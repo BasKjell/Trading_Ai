@@ -14,8 +14,10 @@ T-xxx (Issue #nn) · Agent/Modell/Denkstufe: …
 ## Datenbank-, Konfigurations- oder Schnittstellenänderungen
 
 ## Review
-- [ ] Betrifft Risikosteuerung, Orderausführung oder statistische Validierung → separates Review durch anderen Agenten/Benutzer erforderlich (Label `needs-independent-review`)
-- [ ] `changelog.d/T-xxx.md` und `docs/handoffs/T-xxx.md` aktualisiert
+Risikoklasse (AGENTS.md §0): **K** / **U** – Begründung: …
+- [ ] Klasse K (Holdout/Daten, Engine, Orders, Risiko, Buchhaltung/Kosten, Validierung, Live-Sperren, Agentenrechte, Offenlegung geschützter Daten/Zugangsdaten, dauerhafter Zustand/Journale, Kontrollmechanismen wie CI/Branch-Schutz/Regeln) → unabhängiges Review vor dem Merge, Label `needs-independent-review`
+- [ ] Klasse U → Merge nach Klassenprüfung, Review danach gesammelt
+- [ ] `changelog.d/T-xxx.md` und `docs/handoffs/T-xxx.md` aktualisiert; **keine** Änderung an `CHANGELOG.md`/`docs/STATUS.md` (Sammel-PR)
 - [ ] Merge nur durch Benutzer oder Integrationsagent einer anderen Agentenart nach Review (AGENTS.md §2a)
 - [ ] Freigabe nennt den aktuellen Head-SHA und Zielbranch; nach neuen Commits/Retargeting erneut prüfen (AGENTS.md §0)
 - [ ] Alle Review-Befunde beantwortet (behoben in `<SHA>` / begründet abgelehnt)
