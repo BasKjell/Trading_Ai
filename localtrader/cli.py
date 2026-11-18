@@ -141,8 +141,10 @@ def run_fetch_fx(args: argparse.Namespace) -> int:
     end = date.fromisoformat(args.end) if args.end else last_allowed
     if end > last_allowed:
         raise SystemExit(f"--end {end} reaches into the holdout ({cutoff.isoformat()}); not allowed")
-    series, report = parse_ecb_csv(fetch_ecb_csv(start, end))
-    series = research_series(series, cutoff)  # physically no rate published at/after the holdout start
+    # rows published at/after the cutoff are dropped before validation, so the manifest's quality report
+    # cannot describe the holdout either; research_series is a second, independent guard
+    series, report = parse_ecb_csv(fetch_ecb_csv(start, end), available_before=cutoff)
+    series = research_series(series, cutoff)
     if not series:
         raise SystemExit("ECB returned no usable rates")
     manifest = write_fx_file(series, args.output, report, ECB_URL)

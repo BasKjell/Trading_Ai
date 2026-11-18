@@ -122,6 +122,25 @@ class FileTests(unittest.TestCase):
         self.assertTrue(all(r.available_at <= datetime(2025, 11, 1, tzinfo=UTC) for r in kept))
         with self.assertRaises(ValueError):
             research_series(series, datetime(2025, 11, 1))
+        # Regression (PR #29 review 3): the research period ends exclusively, also at exact equality
+        boundary = series[-2].available_at
+        self.assertEqual(research_series(series, boundary)[-1].day, date(2025, 10, 30))
+
+    def test_withheld_rows_do_not_reach_the_quality_report(self) -> None:
+        # Regression (PR #29 review 3): the report was built before the cut, so the manifest showed
+        # last=2025-11-03 and the jump into the holdout.
+        holdout = SAMPLE + row("2025-11-04", "1.57") + row("2025-11-05", "bad") + row("2025-11-06", "1.1", "E")
+        cutoff = datetime(2025, 11, 1, tzinfo=UTC)
+        before = HEADER + "".join(line + "\n" for line in SAMPLE.splitlines()[1:-1])
+        self.assertEqual(parse_ecb_csv(holdout, cutoff), parse_ecb_csv(before))
+        series, report = parse_ecb_csv(holdout, cutoff)
+        self.assertEqual(report["last"], "2025-10-31")
+        self.assertEqual(report["jumps"], [])
+        self.assertEqual(report["rows_read"], 5)
+        # equality: a rate published exactly at the limit is withheld
+        self.assertEqual(parse_ecb_csv(SAMPLE, series[-1].available_at)[1]["last"], "2025-10-30")
+        with self.assertRaises(ValueError):
+            parse_ecb_csv(SAMPLE, datetime(2025, 11, 1))
 
     def test_round_trip_manifest_and_holdout_cut(self) -> None:
         series, report = parse_ecb_csv(SAMPLE)
@@ -208,3 +227,25 @@ class FetchCliTests(unittest.TestCase):
                 cli.run_fetch_fx(args("2025-10-29T00:00:00+00:00"))  # an earlier limit is fine
         self.assertEqual(calls[0][1], date(2025, 10, 31))
         self.assertEqual(calls[1][1], date(2025, 10, 28))
+
+    def test_manifest_has_no_holdout_trace_even_if_the_provider_sends_one(self) -> None:
+        # Regression (PR #29 review 3): a provider answer beyond the requested end must not reach the
+        # CSV or the manifest (last date, jump warning).
+        import argparse
+        from unittest import mock
+
+        from localtrader import cli
+
+        answer = SAMPLE + row("2025-11-04", "1.57")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "fx.csv"
+            namespace = argparse.Namespace(
+                config="config/default.toml", start="2025-10-01", end=None, available_until=None, output=str(output)
+            )
+            with mock.patch("localtrader.fx_rates.fetch_ecb_csv", return_value=answer):
+                cli.run_fetch_fx(namespace)
+            manifest = json.loads(Path(str(output) + ".manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["quality"]["last"], "2025-10-31")
+            self.assertEqual(manifest["quality"]["jumps"], [])
+            dates = [line.split(",")[0] for line in output.read_text(encoding="utf-8").splitlines()[1:]]
+            self.assertEqual(dates[-1], "2025-10-31")
