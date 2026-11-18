@@ -136,6 +136,13 @@ def write_fx_file(series: list[FxRate], path: str | Path, report: dict[str, Any]
     return manifest
 
 
+def research_series(series: list[FxRate], cutoff: datetime) -> list[FxRate]:
+    """Only rates already published at the holdout start (research files contain no holdout rates)."""
+    if cutoff.tzinfo is None:
+        raise ValueError("cutoff must be timezone-aware")
+    return [rate for rate in series if rate.available_at <= cutoff]
+
+
 def read_fx_file(path: str | Path, available_until: datetime | None = None) -> FxSeries:
     """Load the stored series; with a cutoff only rates published at or before it are kept."""
     if available_until is not None and available_until.tzinfo is None:

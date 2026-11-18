@@ -113,6 +113,16 @@ class SeriesTests(unittest.TestCase):
 
 
 class FileTests(unittest.TestCase):
+    def test_research_series_stops_at_the_holdout(self) -> None:
+        from localtrader.fx_rates import research_series
+
+        series, _ = parse_ecb_csv(SAMPLE)
+        kept = research_series(series, datetime(2025, 11, 1, tzinfo=UTC))
+        self.assertEqual(kept[-1].day, date(2025, 10, 31))
+        self.assertTrue(all(r.available_at <= datetime(2025, 11, 1, tzinfo=UTC) for r in kept))
+        with self.assertRaises(ValueError):
+            research_series(series, datetime(2025, 11, 1))
+
     def test_round_trip_manifest_and_holdout_cut(self) -> None:
         series, report = parse_ecb_csv(SAMPLE)
         with tempfile.TemporaryDirectory() as tmp:

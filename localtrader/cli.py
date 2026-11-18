@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .alpaca_check import AlpacaCheckError, checker_from_env
@@ -128,11 +128,19 @@ def run_intraday_stress(args: argparse.Namespace) -> int:
 def run_fetch_fx(args: argparse.Namespace) -> int:
     from datetime import date
 
-    from .fx_rates import ECB_URL, fetch_ecb_csv, parse_ecb_csv, write_fx_file
+    from .fx_rates import ECB_URL, fetch_ecb_csv, parse_ecb_csv, research_series, write_fx_file
 
+    holdout = args.available_until or load_config(args.config).raw.get("holdout", {}).get("start")
+    if not holdout:
+        raise SystemExit("no holdout start ([holdout] or --available-until): research data must stop before it")
+    cutoff = datetime.fromisoformat(str(holdout))
     start = date.fromisoformat(args.start)
-    end = date.fromisoformat(args.end) if args.end else datetime.now(UTC).date()
+    last_allowed = cutoff.date() - timedelta(days=1)
+    end = date.fromisoformat(args.end) if args.end else last_allowed
+    if end > last_allowed:
+        raise SystemExit(f"--end {end} reaches into the holdout ({cutoff.isoformat()}); not allowed")
     series, report = parse_ecb_csv(fetch_ecb_csv(start, end))
+    series = research_series(series, cutoff)  # physically no rate published at/after the holdout start
     if not series:
         raise SystemExit("ECB returned no usable rates")
     manifest = write_fx_file(series, args.output, report, ECB_URL)
@@ -375,6 +383,7 @@ def build_parser() -> argparse.ArgumentParser:
     fx.add_argument("--start", default="2015-12-01")
     fx.add_argument("--end", default=None, help="default: today")
     fx.add_argument("--output", default="data/EURUSD_ecb.csv")
+    fx.add_argument("--available-until", default=None, help="holdout start; default [holdout] start in the config")
     fx.set_defaults(func=run_fetch_fx)
     register = sub.add_parser("experiments", help="show the shared experiment register and total variants tested")
     register.add_argument("--directory", default="experiments")
