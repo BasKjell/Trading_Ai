@@ -63,7 +63,9 @@ def fixture(risk="K", status=""):
             "head": {"sha": HEAD, "repo": repo},
             "base": {"ref": "main", "sha": BASE, "repo": repo},
             "user": {"id": 101},
+            "changed_files": 1,
         },
+        "pulls/2/files?per_page=100&page=1": [{"filename": "localtrader/example.py"}],
         "actions/runs/3": {
             "id": 3,
             "workflow_id": 1,
@@ -182,3 +184,44 @@ def test_operator_policy_requires_private_regular_file(tmp_path):
     alias.symlink_to(path)
     with pytest.raises(ValueError, match="private directory"):
         policy_at(alias)
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"filename": "localtrader/conftest.py", "status": "added"},
+        {"filename": "pytest.ini", "status": "added"},
+        {"filename": "tests/helper.py", "status": "added"},
+        {"filename": ".github/actions/new/action.yml", "status": "added"},
+        {"filename": "ordinary.py", "previous_filename": "sitecustomize.py", "status": "renamed"},
+    ],
+)
+def test_new_or_moved_ci_influence_is_rejected(row):
+    policy, request, responses, _, read = fixture()
+    responses["pulls/2/files?per_page=100&page=1"] = [row]
+    with pytest.raises(ValueError, match="protected CI or QA path"):
+        verify_github(policy, request, "K", {CASE}, read)
+
+
+def test_changed_files_are_checked_across_pages_and_must_be_complete():
+    policy, request, responses, _, read = fixture()
+    responses["pulls/2"]["changed_files"] = 101
+    responses["pulls/2/files?per_page=100&page=1"] = [{"filename": f"src/{i}.py"} for i in range(100)]
+    second = "pulls/2/files?per_page=100&page=2"
+    responses[second] = [{"filename": "conftest.py"}]
+    with pytest.raises(ValueError, match="protected CI or QA path"):
+        verify_github(policy, request, "K", {CASE}, read)
+    responses[second] = []
+    with pytest.raises(ValueError, match="Incomplete GitHub"):
+        verify_github(policy, request, "K", {CASE}, read)
+
+
+def test_only_latest_owner_review_controls_integration():
+    policy, request, _, reviews, read = fixture()
+    final = reviews.pop()
+    changes = final | {"id": 201, "state": "CHANGES_REQUESTED"}
+    reviews.extend((changes, final | {"id": 202}))
+    assert verify_github(policy, request, "K", {CASE}, read)["final_review_id"] == 202
+    reviews.append(changes | {"id": 203})
+    with pytest.raises(ValueError, match="requested changes"):
+        verify_github(policy, request, "K", {CASE}, read)

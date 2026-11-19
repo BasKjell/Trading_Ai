@@ -82,7 +82,8 @@ Register. Der Merge und die Betriebsfreigabe werden weiterhin separat durch Mens
 
 **Antrag.** `request.json` enthält `pr` und `ci_run` als numerische IDs sowie `baseline`, `head`,
 `target` und `reason`. Jede Requirement-Version der Baseline braucht mindestens einen
-Abnahmetest. Die Risikoklasse wird aus der Baseline und der privaten Policy ermittelt.
+Abnahmetest. Der Betreiber bestätigt, dass die gewählte Baseline fachlich zum PR gehört.
+Die Risikoklasse wird aus der Baseline und der privaten Policy ermittelt.
 Eine U-Einstufung gilt nur für einen dort ausdrücklich eingetragenen PR-Head.
 
 **Vertrauensanker.** Der Betreiber erstellt die private Policy in einem eigenen Verzeichnis
@@ -90,7 +91,7 @@ mit Modus 0700. Die Datei hat Modus 0600. Sie enthält:
 
 - `target` und die GitHub-Werte `workflow_path` und `workflow_id` für den zugelassenen PR-CI-Lauf.
 - `protected_blobs` als Abbildung von Repo-Pfaden auf die geprüften Git-Blob-SHAs. Workflow,
-  Makefile, Dev-Abhängigkeiten und Pytest-Konfiguration sind Pflicht. Weitere Test- und
+  Makefile, Dev-Abhängigkeiten und `pyproject.toml` sind Pflicht. Weitere Test- und
   Hilfsdateien mit Einfluss auf die Abnahme müssen in die Schutzliste aufgenommen werden.
 - `cases` als Zuordnung von `TC-ID@Revision` zu `file` und einem eindeutigen
   `junit`-Identifier `classname::name`. Die erwarteten Tests stammen aus dem separaten
@@ -111,10 +112,17 @@ am Head, am Ziel, an der geprüften Basis oder am CI-Versuch erfordern neue Nach
 
 **CI.** Der Prüfer verlangt den erfolgreichen PR-CI-Lauf am aktuellen Head und an der
 aktuellen Basis. Die geschützten Dateien werden an beiden Ständen anhand ihrer Blob-SHAs
-geprüft. Der Prüfer lädt das JUnit-Artefakt, vergleicht den GitHub-Artefakt-Digest und
+geprüft. Der Prüfer kontrolliert zusätzlich die vollständige paginierte Liste der PR-Dateien.
+Änderungen an geschützten Pfaden, in den Abnahmetest-Verzeichnissen oder an bekannten
+CI-, Pytest- und Python-Startdateien blockieren auch bei Neuanlage oder Umbenennung.
+Der Prüfer lädt das JUnit-Artefakt, vergleicht den GitHub-Artefakt-Digest und
 verlangt für jeden gebundenen Test einen Pass. Fehlende, übersprungene und fehlerhafte
 Tests blockieren. Geschützte CI-Prozesse und getrennte Reviews bleiben Voraussetzung.
-Die Demo kann die Vertrauensgrenze des laufenden CI-Systems nicht selbst attestieren.
+Die Dateiprüfung erfasst bekannte Konfigurationspfade. Implementierungs- und Testcode teilen
+den CI-Prozess. Eine böswillige Implementierung kann Testfunktionen oder den JUnit-Bericht in
+diesem Prozess manipulieren. Der GitHub-Digest bestätigt die heruntergeladenen Bytes. Eine
+belastbare Abnahme gegen manipulierten Implementierungscode braucht getrennt ausgeführte QA
+und eine geprüfte CI-Vertrauensgrenze. Das unabhängige Review bleibt zwingend.
 
 Die lokale Audit-Hashkette erkennt Inkonsistenzen. Ein Betreiber mit vollständigen
 OS-Rechten kann DB und Audit gemeinsam ersetzen. Für produktive Nachweise sind

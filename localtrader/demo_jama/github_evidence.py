@@ -8,7 +8,7 @@ import re
 import subprocess
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from zipfile import BadZipFile, ZipFile
 
@@ -92,6 +92,48 @@ def _bound_approval(review: dict[str, Any], binding: dict[str, Any], purpose: st
     }
 
 
+def _check_ci_paths(
+    fetch: Callable[[str], Any], pr: dict[str, Any], protected: set[str], qa_dirs: set[PurePosixPath]
+) -> None:
+    count = pr["changed_files"]
+    if type(count) is not int or not 0 <= count <= 3000:
+        raise ValueError("Incomplete GitHub changed-file inventory")
+    pinned = {path.casefold() for path in protected}
+    seen = set()
+    for offset in range(0, count, 100):
+        page = offset // 100 + 1
+        rows = fetch(f"pulls/{pr['number']}/files?per_page=100&page={page}")
+        if not isinstance(rows, list) or len(rows) != min(100, count - offset):
+            raise ValueError("Incomplete GitHub changed-file inventory")
+        for row in rows:
+            current = row["filename"]
+            if current in seen:
+                raise ValueError("Incomplete GitHub changed-file inventory")
+            seen.add(current)
+            for name in (current, row.get("previous_filename", current)):
+                path = PurePosixPath(name.casefold())
+                if (
+                    path.as_posix() in pinned
+                    or path.parts[:1] == (".github",)
+                    or any(parent in qa_dirs for parent in path.parents)
+                    or path.name
+                    in {
+                        "conftest.py",
+                        "pytest.ini",
+                        ".pytest.ini",
+                        "tox.ini",
+                        "setup.cfg",
+                        "pyproject.toml",
+                        "setup.py",
+                        "sitecustomize.py",
+                        "usercustomize.py",
+                    }
+                    or path.suffix == ".pth"
+                    or (path.name.startswith("requirements") and path.suffix in {".txt", ".in"})
+                ):
+                    raise ValueError(f"PR changes a protected CI or QA path: {name}")
+
+
 def verify_github(
     policy: dict[str, Any],
     request: dict[str, Any],
@@ -149,16 +191,18 @@ def verify_github(
 
     pins = policy["protected_blobs"]
     if not {policy["workflow_path"], "Makefile", "requirements-dev.txt", "pyproject.toml"} <= pins.keys():
-        raise ValueError("Policy must pin the workflow, Makefile, pytest configuration and dependency list")
+        raise ValueError("Policy must pin the workflow, Makefile, pyproject.toml and dev dependency list")
     selected = policy["cases"]
     if not case_refs <= selected.keys():
         raise ValueError("Baseline cases must have protected CI test identifiers")
     names = set()
+    qa_dirs = set()
     for ref in case_refs:
         case = selected[ref]
         if case["file"] not in pins or case["junit"] in names:
             raise ValueError("Every case needs a distinct CI test in a protected file")
         names.add(case["junit"])
+        qa_dirs.add(PurePosixPath(case["file"].casefold()).parent)
     for path, sha in pins.items():
         if not re.fullmatch(r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+", path) or {"..", "."} & set(path.split("/")):
             raise ValueError("Invalid protected path")
@@ -168,6 +212,8 @@ def verify_github(
             obj = fetch(f"contents/{path}?ref={ref}")
             if obj["type"] != "file" or obj["sha"] != sha:
                 raise ValueError(f"Protected CI file differs: {path}")
+
+    _check_ci_paths(fetch, pr, set(pins), qa_dirs)
 
     artifact_list = fetch(f"actions/runs/{run_id}/artifacts?per_page=100")
     if artifact_list["total_count"] != len(artifact_list["artifacts"]):
@@ -193,15 +239,11 @@ def verify_github(
         "risk": risk,
     }
     latest = {}
-    final = None
     for page in range(1, 11):
         batch = fetch(f"pulls/{pr_id}/reviews?per_page=100&page={page}")
         for review in batch:
             uid = str(number(review["user"]["id"]))
             if uid not in roles or review["state"] not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
-                continue
-            if uid == str(policy["owner_id"]) and _bound_approval(review, binding, "final_integration"):
-                final = review
                 continue
             latest[uid] = review
         if len(batch) < 100:
@@ -219,7 +261,8 @@ def verify_github(
     ]
     if not independent:
         raise ValueError("Independent GitHub approval is missing")
-    if risk == "K" and final is None:
+    final = latest.get(str(policy["owner_id"]))
+    if risk == "K" and (final is None or not _bound_approval(final, binding, "final_integration")):
         raise ValueError("Separate owner integration approval is missing")
     current = fetch(f"pulls/{pr_id}")
     if (
@@ -228,6 +271,7 @@ def verify_github(
         or current["head"]["sha"] != request["head"]
         or current["base"]["sha"] != base_sha
         or current["base"]["ref"] != request["target"]
+        or current["changed_files"] != pr["changed_files"]
     ):
         raise ValueError("PR changed during verification")
 
