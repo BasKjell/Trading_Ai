@@ -24,8 +24,22 @@ SYNTHETIC_CATALOG: dict[str, dict[str, str]] = {
 }
 
 
+# Download-only ETFs for the 15-minute multi-asset research (T-021). Kept out of SYNTHETIC_CATALOG on purpose:
+# the daily strategy lab and its synthetic fixture stay unchanged.
+INTRADAY_DOWNLOAD_CATALOG: dict[str, dict[str, str]] = {
+    "EFA": {"market": "equity", "asset_class": "developed_ex_us_equity_etf"},
+    "EEM": {"market": "equity", "asset_class": "emerging_markets_equity_etf"},
+    "DBC": {"market": "commodity", "asset_class": "broad_commodity_etf"},
+}
+
+
 def available_data_catalog() -> dict[str, dict[str, str]]:
     return {symbol: dict(metadata) for symbol, metadata in SYNTHETIC_CATALOG.items()}
+
+
+def approved_download_catalog() -> dict[str, dict[str, str]]:
+    """Symbols an Alpaca data request may name: the research catalog plus the intraday download-only ETFs."""
+    return {**available_data_catalog(), **{s: dict(m) for s, m in INTRADAY_DOWNLOAD_CATALOG.items()}}
 
 
 class DataQualityError(ValueError):
