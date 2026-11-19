@@ -50,7 +50,11 @@ class FakeAlpaca:
         self.orders = overrides.get("orders", [])
         self.positions = overrides.get("positions", [])
         self.status = overrides.get("status", {})  # path -> HTTP status
-        self.data = overrides.get("data")  # (kind, feed) -> payload override
+        self.data = overrides.get("data")  # (kind, feed) -> payload override for the "latest" diagnostics
+        # delayed SIP bars (ADR 0006): newest bar starts 17:30, ends 17:45 = 15 minutes before NOW
+        self.sip = overrides.get(
+            "sip", {"bars": {"SPY": [bar("2026-11-18T17:30:00Z")], "QQQ": [bar("2026-11-18T17:30:00Z")]}}
+        )
         self.is_open = overrides.get("is_open", True)
 
     def __call__(self, url: str, headers: dict[str, str], timeout: int) -> tuple[int, dict[str, str], Any]:
@@ -60,6 +64,8 @@ class FakeAlpaca:
         if path in self.status:
             return self.status[path], {}, {"message": "account PA0SECRET42 detail"}
         feed = "sip" if "feed=sip" in url else "iex"
+        if path == "/v2/stocks/bars":
+            return 200, {}, self.sip
         if self.data is not None and path.startswith("/v2/stocks/"):
             kind = "bars" if "bars" in path else "quotes"
             return 200, {}, self.data(kind, feed)
@@ -282,7 +288,7 @@ class ReviewFindingsTests(unittest.TestCase):
                 self.assertNotIn("detail", text)
                 self.assertIn("HTTP 403", text)
 
-    def test_missing_invalid_future_and_stale_data_block_when_no_feed_is_usable(self) -> None:
+    def test_latest_data_states_are_diagnostics_only(self) -> None:
         def payload(stamp: str | None) -> Any:
             def data(kind: str, feed: str) -> dict[str, Any]:
                 if stamp is None:
@@ -301,17 +307,44 @@ class ReviewFindingsTests(unittest.TestCase):
         for state, stamp in cases.items():
             with self.subTest(state):
                 code, report = _cli(FakeAlpaca(data=payload(stamp)))
-                self.assertEqual(code, 2)
-                self.assertIn("no usable current bars for SPY in any feed", report["blockers"])
                 self.assertEqual(report["data_freshness"]["sip"]["bars"]["QQQ"]["state"], state)
                 self.assertIn(f"sip bars SPY: {state}", report["warnings"])
-        # old data while the market is closed is normal; one usable feed suffices
-        closed = preflight(FakeAlpaca(data=payload("2026-11-17T21:00:00Z"), is_open=False)).run()
-        self.assertEqual(closed["blockers"], [])
-        fresh = "2026-11-18T17:44:00Z"
-        sip_only = preflight(FakeAlpaca(data=lambda k, f: payload(fresh)(k, f) if f == "sip" else {k: {}})).run()
-        self.assertEqual(sip_only["blockers"], [])
-        self.assertIn("iex bars SPY: missing", sip_only["warnings"])
+                self.assertEqual((code, report["blockers"]), (0, []))  # delayed SIP is fine: no blocker
+
+    def test_start_needs_delayed_sip_even_with_fresh_iex(self) -> None:
+        """PR #36 review 2: ADR 0006 fixes delayed SIP; fresh IEX alone must not make the service start-ready."""
+        fresh_iex_no_sip = FakeAlpaca(status={"/v2/stocks/bars": 403})  # IEX latest stays fresh
+        code, report = _cli(fresh_iex_no_sip)
+        self.assertEqual(code, 2)
+        self.assertIn("delayed SIP bars not readable (HTTP 403)", report["blockers"])
+        self.assertEqual(report["data_freshness"]["iex"]["bars"]["SPY"]["age_seconds"], 60)
+
+        def sip(start: str | None) -> dict[str, Any]:
+            rows = [] if start is None else [bar(start)]
+            return {"bars": {"SPY": rows, "QQQ": rows}}
+
+        cases = {
+            "missing": sip(None),
+            "invalid": sip("not-a-time"),
+            "stale": sip("2026-11-18T17:00:00Z"),  # ended 17:15, 45 minutes old while open
+        }
+        cases["missing (only a running bar)"] = sip("2026-11-18T17:40:00Z")  # ends 17:55 > NOW - 15 min
+        for name, data in cases.items():
+            with self.subTest(name):
+                code, report = _cli(FakeAlpaca(sip=data))
+                self.assertEqual(code, 2)
+                expected = name.split()[0]
+                self.assertIn(f"no usable delayed SIP bars for SPY ({expected})", report["blockers"])
+        # the still running newest bar is discarded (ADR 0006); the complete one before it counts
+        running = {"bars": {s: [bar("2026-11-18T17:40:00Z"), bar("2026-11-18T17:25:00Z")] for s in ("SPY", "QQQ")}}
+        report = preflight(FakeAlpaca(sip=running)).run()
+        self.assertEqual(report["blockers"], [])
+        self.assertEqual(report["sip_delayed"]["SPY"]["bar_end"], "2026-11-18T17:40:00+00:00")
+        closed = preflight(FakeAlpaca(sip=sip("2026-11-17T20:45:00Z"), is_open=False)).run()
+        self.assertEqual(closed["blockers"], [])  # last session's closing bar is fine while closed
+        request = next(u for u in fresh_iex_no_sip.calls if "/v2/stocks/bars?" in u)
+        self.assertIn("feed=sip", request)
+        self.assertIn("end=2026-11-18T17%3A45%3A00Z", request)  # never asks for data younger than the delay
 
 
 if __name__ == "__main__":

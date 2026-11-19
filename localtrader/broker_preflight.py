@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
@@ -49,6 +49,11 @@ REQUIRED_FALSE_FLAGS = ("trading_blocked", "account_blocked", "trade_suspended_b
 # market is open (same limit as the paper service, T-006). Older is stale.
 MAX_DATA_AGE_SECONDS = 35 * 60
 MAX_OPEN_ORDERS_QUERY = 500
+# ADR 0006: signals use 15-minute SIP bars delayed by at least 15 minutes. The preflight reads them through the
+# historical bars endpoint (the real-time SIP ``latest`` endpoint is not part of the data plan).
+SIP_DELAY = timedelta(minutes=15)
+SIP_LOOKBACK = timedelta(days=5)  # covers weekends and holidays
+BAR = timedelta(minutes=15)
 MAX_CLOCK_SKEW_SECONDS = 2.0  # includes request latency; spec §18.3 asks to monitor time drift
 RATE_HEADERS = ("x-ratelimit-limit", "x-ratelimit-remaining")
 
@@ -213,6 +218,54 @@ class PaperPreflight:
             output[feed] = per_feed
         return output
 
+    def delayed_sip(self, market_open: bool | None = None) -> dict[str, Any]:
+        """Newest complete delayed 15-minute SIP bar per ETF (ADR 0006): the start condition for paper and shadow.
+
+        Alpaca applies ``end`` to the bar start, so the newest returned bar may still be running; as in ADR 0006
+        every bar that ends after ``now - 15 min`` is discarded. Only the bar end time is kept. While the market
+        is open (or the clock is unknown) the newest complete bar must have ended at most
+        ``MAX_DATA_AGE_SECONDS`` ago.
+        """
+        now = self.clock()
+        end = now - SIP_DELAY
+        query = urlencode(
+            {
+                "symbols": ",".join(SYMBOLS),
+                "timeframe": "15Min",
+                "feed": "sip",
+                "start": (end - SIP_LOOKBACK).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "sort": "desc",
+                "limit": 1000,
+            }
+        )
+        status, payload = self._get(f"https://{DATA_HOST}/v2/stocks/bars?{query}")
+        if status != 200:
+            return {"error": self._error(status, payload)}
+        items = payload.get("bars") if isinstance(payload, dict) else None
+        items = items if isinstance(items, dict) else {}
+        output: dict[str, Any] = {}
+        for symbol in SYMBOLS:
+            rows = items.get(symbol)
+            starts = (
+                [_timestamp(row.get("t")) for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+            )
+            if not starts:
+                output[symbol] = {"bar_end": None, "age_seconds": None, "state": "missing"}
+                continue
+            if any(start is None for start in starts):
+                output[symbol] = {"bar_end": None, "age_seconds": None, "state": "invalid"}
+                continue
+            complete = [start + BAR for start in starts if start is not None and start + BAR <= end]
+            if not complete:
+                output[symbol] = {"bar_end": None, "age_seconds": None, "state": "missing"}
+                continue
+            newest = max(complete)
+            age = round((now - newest).total_seconds())
+            state = "stale" if market_open is not False and age > MAX_DATA_AGE_SECONDS else "ok"
+            output[symbol] = {"bar_end": newest.isoformat(), "age_seconds": age, "state": state}
+        return output  # prices and volumes are dropped here, never stored
+
     def run(self) -> dict[str, Any]:
         account = self.account()
         clock = self.market_clock()
@@ -224,6 +277,7 @@ class PaperPreflight:
             "assets": self.assets(),
             "orders_and_positions": self.open_orders_and_positions(),
             "clock": clock,
+            "sip_delayed": self.delayed_sip(clock.get("is_open") if "error" not in clock else None),
             "data_freshness": self.data_freshness(clock.get("is_open") if "error" not in clock else None),
             "rate_limits": dict(sorted(self.rate_limits.items())),
         }
@@ -281,14 +335,15 @@ def blockers(report: dict[str, Any]) -> list[str]:
             found.append("short positions exist")
         if positions.get("positions_unknown_side"):
             found.append("positions with unknown side")
-    freshness = report.get("data_freshness", {})
-    for symbol in SYMBOLS:
-        usable = any(
-            isinstance(kinds.get("bars"), dict) and kinds["bars"].get(symbol, {}).get("state") == "ok"
-            for kinds in freshness.values()
-        )
-        if not usable:
-            found.append(f"no usable current bars for {symbol} in any feed")
+    # ADR 0006: only delayed SIP bars may drive signals; IEX and real-time SIP are diagnostics only
+    sip = report.get("sip_delayed", {})
+    if "error" in sip:
+        found.append(f"delayed SIP bars not readable ({sip['error']})")
+    else:
+        for symbol in SYMBOLS:
+            state = sip.get(symbol, {}).get("state", "missing")
+            if state != "ok":
+                found.append(f"no usable delayed SIP bars for {symbol} ({state})")
     return found
 
 
