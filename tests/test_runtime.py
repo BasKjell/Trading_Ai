@@ -352,6 +352,37 @@ class RuntimeTests(unittest.TestCase):
                 write.assert_not_called()
         write_feed(self.feed, self.rows)
 
+    def test_conflicting_values_under_two_spellings_of_one_slot_halt_in_both_orders(self) -> None:
+        """Review #39 round 4, P2: conflicts are detected on the normalized UTC slot, before the import."""
+        from unittest import mock
+
+        from localtrader import runtime as runtime_module
+
+        header = "timestamp,open,high,low,close,volume,feed"
+        z_row = "2026-11-03T14:30:00Z,100,100.5,99.5,100,1000,sip"
+        offset_row = "2026-11-03T14:30:00+00:00,200,200.5,199.5,200,1000,sip"
+        for name, rows in {"Z first": (z_row, offset_row), "offset first": (offset_row, z_row)}.items():
+            with self.subTest(name):
+                self.feed.write_text("\n".join((header, *rows)) + "\n", encoding="utf-8")
+                runtime = self.runtime(state="state-" + name.replace(" ", "-"))
+                self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+                write = mock.MagicMock(side_effect=AssertionError("file write path reached"))
+                with mock.patch.object(runtime_module.tempfile, "mkstemp", write):
+                    status = runtime.tick()
+                self.assertEqual(status["status"], "halted", status)
+                self.assertIn("conflicting rows for 2026-11-03T14:30:00+00:00", str(status))
+                write.assert_not_called()
+                self.assertEqual(runtime.db.execute("SELECT count(*) FROM bars").fetchone()[0], 0)
+                runtime.close()
+        # the same values under both spellings are one re-delivered bar, not a conflict
+        same = "2026-11-03T14:30:00+00:00,100,100.5,99.5,100,1000,sip"
+        self.feed.write_text("\n".join((header, z_row, same)) + "\n", encoding="utf-8")
+        runtime = self.runtime(state="state-same")
+        self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+        self.assertNotEqual(runtime.tick()["status"], "halted")
+        runtime.close()
+        write_feed(self.feed, self.rows)
+
     def test_gap_resolution_is_limited_to_due_open_slots(self) -> None:
         """Review #39 round 3, P2: a future slot can never be declared missing in advance."""
         write_feed(self.feed, [r for r in self.rows if r[0].date() <= datetime(2026, 11, 3).date()])

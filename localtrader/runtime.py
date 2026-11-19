@@ -251,12 +251,18 @@ def check_feed(content: bytes, name: str) -> None:
             raise RuntimeHalted(
                 f"{name}: row {raw!r} comes from feed {source!r}; only {REQUIRED_FEED!r} may drive signals"
             )
-    seen: dict[str, dict[str, str]] = {}
-    for row in csv.DictReader(io.StringIO(text, newline="")):
-        key = (row.get("timestamp") or "").strip()
-        if key in seen and seen[key] != row:
-            raise RuntimeHalted(f"{name}: conflicting rows for {key}")
-        seen[key] = row
+    # Second pass keyed by the normalized UTC slot (review #39, round 4): "…Z" and "…+00:00" are the same bar
+    # for the import, so differing values under two spellings are a conflict, not two bars.
+    seen: dict[datetime, tuple[float, ...]] = {}
+    for line, row in enumerate(csv.DictReader(io.StringIO(text, newline="")), start=2):
+        slot = _feed_start(row["timestamp"], name, line).astimezone(UTC)
+        try:
+            values = tuple(float(row[column]) for column in FEED_COLUMNS[1:6])
+        except ValueError:
+            raise RuntimeHalted(f"{name}: line {line} has a non-numeric price or volume") from None
+        if slot in seen and seen[slot] != values:
+            raise RuntimeHalted(f"{name}: conflicting rows for {slot.isoformat()}")
+        seen[slot] = values
 
 
 def _is_session_day(session: SessionSpec, day: date) -> bool:
