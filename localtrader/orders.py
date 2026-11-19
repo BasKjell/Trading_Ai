@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
+import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, NoReturn
 
 from .broker import Broker, BrokerEvent, BrokerOrder
 from .domain import Direction, Market, OrderIntent, OrderStatus, RiskDecision
+from .instance_lock import LockError, OrderLock
 
 S = OrderStatus
 TERMINAL = {S.FILLED, S.CANCELLED, S.REJECTED}
@@ -41,8 +46,83 @@ class OrderError(ValueError):
     pass
 
 
+class _GuardedCursor:
+    def __init__(self, cursor: sqlite3.Cursor, on_error: Callable[[BaseException], NoReturn]) -> None:
+        self._cursor = cursor
+        self._on_error = on_error
+
+    def fetchone(self) -> Any:
+        try:
+            return self._cursor.fetchone()
+        except sqlite3.Error as exc:
+            self._on_error(exc)
+
+    def fetchall(self) -> list[Any]:
+        try:
+            return self._cursor.fetchall()
+        except sqlite3.Error as exc:
+            self._on_error(exc)
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self.fetchall())
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cursor, name)
+
+
+class _GuardedConnection:
+    """Every SQLite error, also from reads outside a transaction, latches the session's persistence failure
+    (PR #38 review): a journal that could not be read is as untrustworthy as one that could not be written."""
+
+    def __init__(self, db: sqlite3.Connection, on_error: Callable[[BaseException], NoReturn]) -> None:
+        self._db = db
+        self._on_error = on_error
+
+    def execute(self, sql: str, params: Any = ()) -> _GuardedCursor:
+        try:
+            return _GuardedCursor(self._db.execute(sql, params), self._on_error)
+        except sqlite3.Error as exc:
+            self._on_error(exc)
+
+    def _guard(self, name: str, *args: Any) -> Any:
+        try:
+            return getattr(self._db, name)(*args)
+        except sqlite3.Error as exc:
+            self._on_error(exc)
+
+    def executescript(self, script: str) -> Any:
+        return self._guard("executescript", script)
+
+    def commit(self) -> None:
+        self._guard("commit")
+
+    def rollback(self) -> None:
+        self._guard("rollback")
+
+    def backup(self, target: sqlite3.Connection) -> None:
+        self._guard("backup", target)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._db, name)
+
+
 class OrderManager:
-    def __init__(self, path: Path, broker: Broker, opening_cash: int, opening_positions: dict[str, int] | None = None):
+    """Order journal and dispatch for one account.
+
+    ``lock`` (T-013): only the holder of the account's ``InstanceLock`` may submit; it is checked right before
+    every broker submission. Without a lock, submission is refused. A critical persistence error (SQLite or
+    file system) latches ``persistence_failed`` for the life of this object: no further orders until a restart
+    reopens the journal and a complete reconciliation succeeds.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        broker: Broker,
+        opening_cash: int,
+        opening_positions: dict[str, int] | None = None,
+        lock: OrderLock | None = None,
+    ):
         holdings = dict(opening_positions or {})
         if (
             type(opening_cash) is not int
@@ -51,8 +131,12 @@ class OrderManager:
         ):
             raise OrderError("invalid opening balances")
         self.broker = broker
-        self.db = sqlite3.connect(path, isolation_level=None)
-        self.db.row_factory = sqlite3.Row
+        self.lock = lock
+        self.persistence_failed = False
+        raw = sqlite3.connect(path, isolation_level=None)
+        raw.row_factory = sqlite3.Row
+        self.db: Any = _GuardedConnection(raw, self._persistence_failure)
+        self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
         with self._transaction():
             self.db.execute(
@@ -66,13 +150,25 @@ class OrderManager:
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
-        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+        except sqlite3.Error as exc:
+            self._persistence_failure(exc)
         try:
             yield
             self.db.commit()
+        except sqlite3.Error as exc:
+            with suppress(sqlite3.Error, OrderError):
+                self.db.rollback()
+            self._persistence_failure(exc)
         except BaseException:
-            self.db.rollback()
+            with suppress(sqlite3.Error, OrderError):  # a failed rollback must not hide the original error
+                self.db.rollback()
             raise
+
+    def _persistence_failure(self, exc: BaseException) -> NoReturn:
+        self.persistence_failed = True  # in memory: the journal itself may be unwritable
+        raise OrderError(f"persistence failure, new orders blocked: {type(exc).__name__}") from exc
 
     def _log(self, kind: str, detail: str, client_id: str | None = None) -> None:
         self.db.execute(
@@ -209,6 +305,50 @@ class OrderManager:
             self.db.execute("UPDATE account SET reconciled=1")
             return True
 
+    def _assert_lock(self) -> None:
+        if self.lock is None:
+            raise OrderError("no instance lock: only the lock holder may submit orders")
+        try:
+            self.lock.assert_held()
+        except LockError as exc:
+            raise OrderError(f"order lock not held: {exc}") from exc
+
+    # ------------------------------------------------------------------ backup and restore (T-013)
+    def backup(self, target: Path) -> dict[str, str]:
+        """Consistent online copy of the journal (SQLite backup API) plus a manifest with its SHA-256.
+
+        Written to a private temporary file, hashed, and published only if neither the backup nor its manifest
+        exists yet (hard link: atomic and exclusive). Concurrent backups never overwrite each other.
+        """
+        target.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path = Path(str(target) + ".manifest.json")
+        if target.exists() or manifest_path.exists():
+            raise OrderError(f"backup target exists: {target}")
+        temporary = _private_temporary(target)
+        try:
+            copy = sqlite3.connect(temporary)
+            try:
+                self.db.backup(copy)
+            finally:
+                copy.close()
+            manifest = {
+                "file": target.name,
+                "sha256": hashlib.sha256(temporary.read_bytes()).hexdigest(),
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+            _publish_exclusive(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        try:
+            with manifest_path.open("x", encoding="utf-8") as handle:
+                handle.write(json.dumps(manifest, indent=2))
+                handle.flush()
+                os.fsync(handle.fileno())
+        except FileExistsError:
+            target.unlink()  # our own, just published copy; the other manifest belongs to someone else
+            raise OrderError(f"backup manifest exists: {manifest_path}") from None
+        return manifest
+
     def submit(self, intent: OrderIntent, decision: RiskDecision, max_debit: int) -> OrderStatus:
         """Dispatch a risk-approved whole-share order once. Reusing an ID never retries transport."""
         if not decision.allowed or not all(
@@ -227,11 +367,14 @@ class OrderManager:
                 if self._order(row) != order:
                     raise OrderError("client order ID reused for another order")
                 return S(row["status"])
+            if self.persistence_failed:
+                raise OrderError("persistence failure earlier in this session; restart and reconcile first")
             if (
                 not self.positions_reconciled
                 or not intent.created_at <= decision.decided_at <= datetime.now(UTC) <= intent.valid_until
             ):
                 raise OrderError("unreconciled account or invalid order time")
+            self._assert_lock()
             cash, positions, reserved_cash, reserved_shares = self._balances()
             if order.direction == Direction.FLAT and quantity > positions.get(order.symbol, 0) - reserved_shares.get(
                 order.symbol, 0
@@ -248,6 +391,14 @@ class OrderManager:
             self._log("transition", "new->unknown before broker I/O", order.client_id)
             self.db.execute("UPDATE account SET reconciled=0")
         try:
+            self._assert_lock()  # again right before broker I/O: the lock may be lost while waiting for SQLite
+        except OrderError:
+            # never sent: withdraw the row so the journal keeps matching the broker; the account stays locked
+            with self._transaction():
+                self.db.execute("DELETE FROM orders WHERE client_id=? AND status=?", (order.client_id, S.UNKNOWN))
+                self._log("withdrawn", "order lock lost before broker I/O; nothing sent", order.client_id)
+            raise
+        try:
             self.broker.submit(order)
         except OSError as exc:
             with self._transaction():
@@ -255,3 +406,60 @@ class OrderManager:
             return self.status(order.client_id)
         self.reconcile()
         return self.status(order.client_id)
+
+
+def _private_temporary(target: Path) -> Path:
+    handle, name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+    os.close(handle)
+    return Path(name)
+
+
+def _publish_exclusive(source: Path, target: Path) -> None:
+    """Make ``source`` visible as ``target`` only if ``target`` does not exist (atomic ``link``)."""
+    with source.open("rb") as handle:
+        os.fsync(handle.fileno())
+    try:
+        os.link(source, target)
+    except FileExistsError:
+        raise OrderError(f"target exists: {target}") from None
+
+
+def restore_journal(backup: Path, target: Path) -> None:
+    """Restore a journal backup to ``target`` (which must not exist; move a damaged journal aside first).
+
+    The backup is copied into a private temporary file per call; exactly these bytes are verified against the
+    manifest and SQLite's integrity check before any change. The copy is then marked unreconciled with a
+    ``restored`` journal entry and published atomically only if ``target`` still does not exist, so a journal
+    created meanwhile by another process is never overwritten. Opening it with ``OrderManager`` reconciles
+    against the broker; trading stays locked until positions, orders and executions match completely.
+    Orders the broker knows but the backup does not (sent after the backup) make the reconciliation fail, so
+    nothing old is resubmitted blindly.
+    """
+    manifest = json.loads(Path(str(backup) + ".manifest.json").read_text(encoding="utf-8"))
+    if target.exists():
+        raise OrderError(f"restore target exists: {target}; move it aside first")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _private_temporary(target)
+    try:
+        temporary.write_bytes(backup.read_bytes())
+        if hashlib.sha256(temporary.read_bytes()).hexdigest() != manifest.get("sha256"):
+            raise OrderError("backup does not match its manifest")
+        db = sqlite3.connect(temporary, isolation_level=None)
+        try:
+            if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise OrderError("backup failed the SQLite integrity check")
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("UPDATE account SET reconciled=0")
+            db.execute(
+                "INSERT INTO journal(at,client_id,kind,detail) VALUES(?,?,?,?)",
+                (datetime.now(UTC).isoformat(), None, "restored", f"from {backup.name} ({manifest['sha256'][:12]})"),
+            )
+            db.commit()
+        finally:
+            db.close()
+        try:
+            _publish_exclusive(temporary, target)
+        except OrderError:
+            raise OrderError(f"restore target exists: {target}; move it aside first") from None
+    finally:
+        temporary.unlink(missing_ok=True)
