@@ -191,6 +191,10 @@ def test_operator_policy_requires_private_regular_file(tmp_path):
     [
         {"filename": "localtrader/conftest.py", "status": "added"},
         {"filename": "pytest.ini", "status": "added"},
+        {"filename": "pytest.toml", "status": "added"},
+        {"filename": ".pytest.toml", "status": "added"},
+        {"filename": ".coveragerc", "status": "added"},
+        {"filename": "ordinary.toml", "previous_filename": "pytest.toml", "status": "renamed"},
         {"filename": "tests/helper.py", "status": "added"},
         {"filename": ".github/actions/new/action.yml", "status": "added"},
         {"filename": "ordinary.py", "previous_filename": "sitecustomize.py", "status": "renamed"},

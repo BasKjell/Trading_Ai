@@ -95,8 +95,10 @@ mit Modus 0700. Die Datei hat Modus 0600. Sie enthält:
   Hilfsdateien mit Einfluss auf die Abnahme müssen in die Schutzliste aufgenommen werden.
 - `cases` als Zuordnung von `TC-ID@Revision` zu `file` und einem eindeutigen
   `junit`-Identifier `classname::name`. Die erwarteten Tests stammen aus dem separaten
-  QA-Workflow. Änderungen an geschützten Dateien werden durch den Nachweischeck gesperrt
-  und separat geprüft und als neue Policy aufgenommen.
+  QA-Workflow. Lege gebundene Abnahmetests in einem eigenen Verzeichnis wie
+  `tests/acceptance/` ab, damit gewöhnliche Unit-Tests weiter geändert werden können.
+  Der Nachweischeck sperrt Änderungen an geschützten Dateien und im Verzeichnis eines
+  gebundenen Abnahmetests. Änderungen dort werden separat geprüft und in die Policy aufgenommen.
 - `review_families` als Zuordnung numerischer GitHub-Konto-IDs (JSON-Stringschlüssel) zu
   verifizierten Rollenfamilien, `owner_id` als numerische Konto-ID von Bas und optional
   `uncritical_pr_heads` als Zuordnung von PR-Nummer zu geprüftem Head. Ein Konto darf nur
@@ -106,7 +108,9 @@ mit Modus 0700. Die Datei hat Modus 0600. Sie enthält:
 **GitHub-Review.** Ein formales `APPROVED` enthält als vollständigen Body ein JSON-Objekt
 mit `baseline`, `head`, `target`, `ci_run`, `base_sha`, `run_attempt`, `risk` und
 `purpose: "independent_review"`. Für K gibt Bas zusätzlich ein formales Review mit
-identischer Bindung und `purpose: "final_integration"` ab. Maßgeblich sind die von GitHub
+identischer Bindung und `purpose: "final_integration"` ab. Für einen verifizierten
+K-Nachweis stammt das unabhängige Review von einem anderen Konto als Bas’ finale Freigabe.
+Der Prüfer wertet je Konto das letzte maßgebliche Review aus. Maßgeblich sind die von GitHub
 authentifizierte Konto-ID, der Review-Commit und der aktuelle Review-Status. Änderungen
 am Head, am Ziel, an der geprüften Basis oder am CI-Versuch erfordern neue Nachweise.
 
@@ -114,7 +118,7 @@ am Head, am Ziel, an der geprüften Basis oder am CI-Versuch erfordern neue Nach
 aktuellen Basis. Die geschützten Dateien werden an beiden Ständen anhand ihrer Blob-SHAs
 geprüft. Der Prüfer kontrolliert zusätzlich die vollständige paginierte Liste der PR-Dateien.
 Änderungen an geschützten Pfaden, in den Abnahmetest-Verzeichnissen oder an bekannten
-CI-, Pytest- und Python-Startdateien blockieren auch bei Neuanlage oder Umbenennung.
+CI-, Pytest-, Coverage- und Python-Startdateien blockieren auch bei Neuanlage oder Umbenennung.
 Der Prüfer lädt das JUnit-Artefakt, vergleicht den GitHub-Artefakt-Digest und
 verlangt für jeden gebundenen Test einen Pass. Fehlende, übersprungene und fehlerhafte
 Tests blockieren. Geschützte CI-Prozesse und getrennte Reviews bleiben Voraussetzung.
