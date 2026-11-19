@@ -57,25 +57,79 @@ def subscription_confirmed(provider: str, env: dict[str, str]) -> bool:
     return status.get("loggedIn") is True and status.get("authMethod") == "claude.ai"
 
 
+def opencode_environment(home: Path, workspace: Path, paths: list[str] | None) -> dict[str, str]:
+    # Project config can register plugins or override permissions. Only load our own settings.
+    for folder in (workspace, *workspace.parents):
+        if any((folder / name).exists() for name in ("opencode.json", "opencode.jsonc", ".opencode")):
+            raise ValueError("OpenCode project configuration is disallowed in worker snapshots")
+    config_home = home / ".config"
+    config = config_home / "opencode" / "opencode.json"
+    config.parent.mkdir(parents=True)
+    rules = [
+        {"action": "*", "resource": "*", "effect": "deny"},
+        *({"action": action, "resource": "*", "effect": "allow"} for action in ("read", "glob", "grep")),
+        *({"action": "edit", "resource": name, "effect": "allow"} for name in paths or []),
+    ]
+    config.write_text(
+        json.dumps(
+            {
+                "update": "disable",
+                "snapshots": False,
+                "formatter": False,
+                "policies": [
+                    {"action": "provider.use", "resource": "*", "effect": "deny"},
+                    {"action": "provider.use", "resource": "ollama", "effect": "allow"},
+                ],
+                "providers": {"ollama": {"settings": {"baseURL": os.environ["OLLAMA_HOST"] + "/v1"}}},
+                "agents": {
+                    "local-programmer": {"description": "Implement the authorized task", "mode": "primary"},
+                    "local-reviewer": {"description": "Read-only preliminary review", "mode": "primary"},
+                },
+                "permissions": rules,
+            }
+        )
+    )
+    return {
+        "PATH": os.environ["PATH"],
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(config_home),
+        "XDG_DATA_HOME": str(home / ".local" / "share"),
+        "XDG_STATE_HOME": str(home / ".local" / "state"),
+        "XDG_CACHE_HOME": str(home / ".cache"),
+        "NO_COLOR": "1",
+    }
+
+
 def main() -> int:
     provider, maximum, names = sys.argv[1], int(sys.argv[2]), json.loads(sys.argv[3])
     home = Path("/tmp/agent-home")
     home.mkdir(mode=0o700)
-    try:
-        env = prepare_home(provider, Path("/auth"), home)
-        if not subscription_confirmed(provider, env):
-            return 1
-    except (OSError, ValueError):
-        return 1
     workspace = Path("/work")
     if names is not None:
         workspace = Path("/tmp/dev")
         shutil.copytree("/work", workspace)
+    argv = sys.argv[4:]
+    stdin = None
+    try:
+        if provider == "opencode":
+            env = opencode_environment(home, workspace, names)
+            prompt = sys.stdin.read(50001)
+            if len(prompt.encode()) > 50000:
+                return 1
+            argv.extend(["--", prompt])
+            stdin = subprocess.DEVNULL
+        else:
+            env = prepare_home(provider, Path("/auth"), home)
+            if not subscription_confirmed(provider, env):
+                return 1
+    except (OSError, ValueError):
+        return 1
     logfile = Path("/tmp/agent-events")
     with logfile.open("wb") as output:
         proc = subprocess.Popen(
-            sys.argv[4:],
+            argv,
             cwd=workspace,
+            stdin=stdin,
             env=env,
             stdout=output,
             stderr=output,

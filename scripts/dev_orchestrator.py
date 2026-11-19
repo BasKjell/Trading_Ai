@@ -84,6 +84,19 @@ def config_file(path: Path) -> dict[str, Any]:
         or not re.fullmatch(r"https?://[A-Za-z0-9_.-]+:[0-9]{1,5}", ollama["host"])
     ):
         raise RunnerError("invalid Ollama network, URL or model")
+    if (opencode := config.get("opencode")) is not None:
+        used_networks = {config[provider]["network"] for provider in FAMILIES}
+        if ollama:
+            used_networks.add(ollama["network"])
+        if (
+            not isinstance(opencode, dict)
+            or not SAFE_NAME.fullmatch(opencode["model"])
+            or opencode["model"].lower().endswith(("-cloud", ":cloud"))
+            or not SAFE_NAME.fullmatch(opencode["network"])
+            or opencode["network"] in used_networks | {"none", "host", "bridge", "default"}
+            or not re.fullmatch(r"http://[A-Za-z0-9_-]+:[0-9]{1,5}", opencode["host"])
+        ):
+            raise RunnerError("invalid OpenCode network, local Ollama URL or model")
     for name, scope in config["tasks"].items():
         paths = scope["paths"]
         deps = scope["depends_on"]
@@ -100,6 +113,8 @@ def config_file(path: Path) -> dict[str, Any]:
             or not all(type(number) is int and number > 0 for number in deps)
             or type(scope.get("priority", 100)) is not int
             or (scope.get("ollama") and not ollama)
+            or type(scope.get("opencode", False)) is not bool
+            or (scope.get("opencode") and (not opencode or scope.get("ollama")))
         ):
             raise RunnerError("invalid task scope or dependency")
     return config
@@ -150,8 +165,13 @@ class Store:
         )
         self.db.execute("DELETE FROM events WHERE id <= (SELECT MAX(id) FROM events) - 2000")
 
+    def record_progress(self, issue: int, phase: str) -> None:
+        with self.db:
+            self.event(issue, phase)
+
     def enqueue(self, issue: int, task: str, author: str, scope: dict[str, Any]) -> None:
-        reviewer = next(provider for provider in FAMILIES if provider != author)
+        reviewers = [provider for provider in FAMILIES if provider != author]
+        reviewer = min(reviewers, key=self.cooldown_until)
         with self.db:
             self.db.execute(
                 "INSERT INTO tasks(issue, task, author, reviewer, branch, phase, created, scope) "
@@ -234,7 +254,9 @@ def satisfied(repo: Repository, issue: dict[str, Any], scope: dict[str, Any]) ->
     )
 
 
-def choose(repo: Repository, config: dict[str, Any], known: list[dict[str, Any]]) -> tuple | None:
+def choose(
+    repo: Repository, config: dict[str, Any], known: list[dict[str, Any]], *, local_only: bool = False
+) -> tuple | None:
     existing = {row["issue"] for row in known}
     tasks = {row["task"] for row in known}
     tasks.update(task_id(pr["title"]) for pr in repo.api("pulls?state=open&per_page=100"))
@@ -257,8 +279,15 @@ def choose(repo: Repository, config: dict[str, Any], known: list[dict[str, Any]]
         ):
             continue
         scope = config["tasks"][task]
-        owners = [provider for provider in FAMILIES if f"agent:{provider}" in tags]
-        if len(owners) > 1 or not satisfied(repo, issue, scope):
+        owners = [provider for provider in (*FAMILIES, "opencode") if f"agent:{provider}" in tags]
+        local = scope.get("opencode") is True and owners == ["opencode"]
+        if (
+            len(owners) > 1
+            or (scope.get("opencode") is True) != local
+            or ("opencode" in owners and not local)
+            or (local_only and not local)
+            or not satisfied(repo, issue, scope)
+        ):
             continue
         priority = (scope.get("priority", 100), order.index(task) if task in order else len(order), issue["number"])
         candidates.append((priority, issue["number"], task, owners[0] if owners else config["author"], scope))
@@ -270,20 +299,39 @@ def cycle(repo: Repository, db: Store, config: dict[str, Any]) -> bool:
     if any(row["phase"] == "blocked" for row in tasks):
         # A blocked task can have a live claim or partially published artifacts. Hold the queue.
         return False
-    task = next((row for row in tasks if row["phase"] in ACTIVE), None)
+    now = time.time()
+    active = [row for row in tasks if row["phase"] in ACTIVE]
+    task = next(
+        (
+            row
+            for row in active
+            if row["created"] + config["max_age_seconds"] <= now
+            or (
+                row["next_at"] <= now
+                and (row["phase"] != "review" or db.cooldown_until(row["reviewer"]) <= now)
+                and (row["phase"] != "develop" or db.cooldown_until(row["author"]) <= now)
+            )
+        ),
+        None,
+    )
     if task is None:
-        if len(tasks) < config["max_tasks"] and (chosen := choose(repo, config, tasks)):
+        can_prepare = any(
+            row["phase"] in {"develop", "review"}
+            and db.cooldown_until(row["author"] if row["phase"] == "develop" else row["reviewer"]) > now
+            for row in active
+        )
+        if (
+            len(tasks) < config["max_tasks"]
+            and (not active or can_prepare)
+            and (chosen := choose(repo, config, tasks, local_only=bool(active)))
+        ):
             db.enqueue(*chosen)
             return True
         return False
     phase, issue = task["phase"], task["issue"]
-    now = time.time()
     if task["created"] + config["max_age_seconds"] <= now and phase != "finalize":
         db.transition(issue, "blocked", reason="task time budget exhausted")
         return True
-    provider = {"develop": task["author"], "review": task["reviewer"]}.get(phase)
-    if task["next_at"] > now or (provider and db.cooldown_until(provider) > now):
-        return False
     scope = config["tasks"].get(task["task"])
     if scope is None or json.dumps(scope, sort_keys=True) != task["scope"]:
         db.transition(issue, "blocked", reason="authorized task scope changed")
@@ -303,7 +351,10 @@ def cycle(repo: Repository, db: Store, config: dict[str, Any]) -> bool:
         elif phase == "review":
             approved, findings, review_id = repo.review(task, scope)
             if approved:
-                next_phase = "merge" if config["merge_enabled"] and repo.authorized(task, merge=True) else "manual"
+                auto_merge = (
+                    task["author"] != "opencode" and config["merge_enabled"] and repo.authorized(task, merge=True)
+                )
+                next_phase = "merge" if auto_merge else "manual"
                 db.transition(issue, next_phase, review_id=review_id, findings="")
             elif findings == task["findings"] and task["corrections"]:
                 db.transition(
@@ -404,6 +455,7 @@ def main() -> int:
                 return 0
             validate_root(root, config["repository"])
             repo = Repository(root, directory, config["repository"], Containers(root, config))
+            repo.progress = db.record_progress
             if args.action == "plan":
                 candidate = choose(repo, config, db.tasks())
                 print(json.dumps({"next": list(candidate[:3]) if candidate else None}))

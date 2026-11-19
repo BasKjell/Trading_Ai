@@ -35,6 +35,11 @@ claude:
 #   model: qwen3-coder:30b
 #   network: trading-dev-ollama
 #   host: http://ollama:11434
+# Optional OpenCode worker. Its internal Docker network must reach only a local Ollama endpoint.
+# opencode:
+#   model: qwen3-coder:30b
+#   network: trading-dev-opencode
+#   host: http://ollama:11434
 tasks: {}
 # Example entry (use the actual issue, reviewed scope and dependencies):
 # tasks:
@@ -44,3 +49,4 @@ tasks: {}
 #     depends_on: [5]
 #     paths: [docs/REPORTS.md]
 #     ollama: false
+#     opencode: true  # Requires agent:opencode on the issue. Omit ollama for this task.

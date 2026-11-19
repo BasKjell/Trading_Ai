@@ -14,6 +14,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +93,7 @@ class Containers:
         if orphan.strip():
             raise RunnerError("orphan container from interrupted run; inspect before restart")
         command(["docker", "image", "inspect", self.settings["image"]], self.root)
-        for provider in ("codex", "claude", "ollama"):
+        for provider in ("codex", "claude", "ollama", "opencode"):
             if provider not in self.settings:
                 continue
             account = self.settings[provider]
@@ -101,7 +102,12 @@ class Containers:
             )
             if result.strip() != "true bridge":
                 raise RunnerError("agent requires an internal Docker bridge")
-            if provider != "ollama":
+            if provider == "opencode":
+                with tempfile.TemporaryDirectory() as directory:
+                    code, _ = self.run(["opencode", "--version"], Path(directory))
+                if code:
+                    raise RunnerError("approved worker image does not contain OpenCode")
+            if provider in {"codex", "claude"}:
                 volume = command(
                     [
                         "docker",
@@ -183,7 +189,7 @@ class Containers:
                 "--mount",
                 f"type=volume,source={account['auth_volume']},target=/auth,readonly,volume-nocopy",
             ]
-        if provider == "ollama":
+        if provider in {"ollama", "opencode"}:
             args += ["--env", f"OLLAMA_HOST={account['host']}"]
         args += ["--entrypoint", argv[0], cfg["image"], *argv[1:]]
         try:
@@ -250,6 +256,18 @@ with urllib.request.build_opener(NoRedirect()).open(req, timeout=120) as respons
                 "--json",
                 "-",
             ]
+        elif provider == "opencode":
+            argv = [
+                "opencode",
+                "run",
+                "--standalone",
+                "--format",
+                "json",
+                "--agent",
+                "local-reviewer" if review else "local-programmer",
+                "--model",
+                f"ollama/{model}",
+            ]
         else:
             argv = [
                 "claude",
@@ -285,10 +303,14 @@ with urllib.request.build_opener(NoRedirect()).open(req, timeout=120) as respons
         ]
         code, output = self.run(argv, source, prompt, provider=provider)
         if code:
+            if provider == "opencode":
+                raise RunnerError("OpenCode isolated worker startup failed")
             raise RunnerError(f"{provider}: isolated worker or subscription login failed")
         envelope = json.loads(output)
         code, output, files = envelope["code"], envelope["events"], envelope["files"]
-        result = outcome(output, code)
+        if provider == "opencode":
+            output = opencode_text(output, code)
+        result = outcome(json.dumps({"type": "result", "result": output}) if provider == "opencode" else output, code)
         if result == "rate_limited" or (
             code and re.search(r"hit your limit|usage limit|rate.limit|quota exceeded", output, re.I)
         ):
@@ -310,6 +332,8 @@ with urllib.request.build_opener(NoRedirect()).open(req, timeout=120) as respons
                 target = source / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
+        if provider == "opencode":
+            return output
         if provider == "claude":
             return str(json.loads(output)["result"])
         messages = []
@@ -324,6 +348,24 @@ with urllib.request.build_opener(NoRedirect()).open(req, timeout=120) as respons
                 ):
                     messages.append(item["text"])
         return "\n".join(messages)
+
+
+def opencode_text(output: str, code: int) -> str:
+    if code:
+        raise RunnerError("OpenCode process failed")
+    messages = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "error":
+            raise RunnerError("OpenCode reported an error")
+        if event.get("type") == "text":
+            messages.append(event["part"]["text"])
+    return "\n".join(messages)
 
 
 def file_contents(root: Path, relative: str, limit: int) -> bytes | None:
@@ -367,6 +409,7 @@ class Repository:
     def __init__(self, root: Path, directory: Path, repo: str, containers: Containers) -> None:
         self.root, self.directory, self.repo, self.containers = root, directory, repo, containers
         self.gh = GitHub(root, repo)
+        self.progress: Callable[[int, str], None] = lambda _issue, _phase: None
 
     def api(self, endpoint: str) -> Any:
         return self.gh.api(endpoint)
@@ -446,7 +489,10 @@ class Repository:
             or (pr["head"].get("repo") or {}).get("full_name") != self.repo
             or pr["head"]["ref"] != task["branch"]
             or pr["head"]["sha"] != task["head"]
-            or family(pr.get("body") or "") != task["author"]
+            or (
+                ("opencode" if re.match(r"Agent: opencode / ", pr.get("body") or "") else family(pr.get("body") or ""))
+                != task["author"]
+            )
             or labels(pr) & {"blocked", "manual-only", "needs-independent-review", "effort:high", "research"}
         ):
             raise RunnerError("PR provenance, head, base or approval changed")
@@ -517,7 +563,10 @@ class Repository:
                         "Prüfe jede Änderung gegen die folgenden Originaldateien, verbessere sie bei Bedarf "
                         "und übernimm nur überprüfte Änderungen. Du bleibst Autor des PRs.\n" + context
                     )
-            self.containers.agent(task["author"], source, prompt, False, scope["paths"])
+            if task["author"] == "opencode":
+                self.local_develop(task, tree, source, scope["paths"], prompt)
+            else:
+                self.containers.agent(task["author"], source, prompt, False, scope["paths"])
             handoff = f"docs/handoffs/{task['task']}.md"
             fragment = f"changelog.d/{task['task']}.md"
             changed = self.changes(tree, source, scope["paths"], self.containers.settings["file_bytes"])
@@ -570,9 +619,54 @@ class Repository:
             )
             return int(pr["number"]), new_head
 
+    def local_develop(self, task: dict[str, Any], tree: Path, source: Path, paths: list[str], prompt: str) -> None:
+        budget = self.containers.settings["file_bytes"]
+        original = []
+        for name in paths:
+            contents = file_contents(tree, name, budget)
+            original.append(f"{name}: " + ("fehlt" if contents is None else quote_prompt_input(contents.decode())))
+        baseline = "\n".join(original)
+        if len(baseline.encode()) > self.containers.settings["diff_bytes"]:
+            raise RunnerError("OpenCode review baseline exceeds input budget")
+        for attempt in range(2):
+            self.progress(task["issue"], "opencode:programmer" if not attempt else "opencode:correction")
+            self.containers.agent("opencode", source, prompt, False, paths)
+            if all(file_contents(source, name, budget) == file_contents(tree, name, budget) for name in paths):
+                raise RunnerError("OpenCode did not change an authorized file")
+            self.progress(task["issue"], "opencode:check")
+            self.containers.check(source)
+            self.progress(task["issue"], "opencode:local-review")
+            answer = self.containers.agent(
+                "opencode",
+                source,
+                "Lokaler Vorab-Review. Vergleiche die bearbeiteten Dateien mit den Originalen und dem Auftrag. "
+                "Der Controller hat make check auf dem Snapshot ausgeführt. Prüfe Abnahme und Regressionen. "
+                'Antworte mit LOCAL_REVIEW {"findings":""} oder mit konkreten erforderlichen Korrekturen '
+                'im Feld findings und abschließend mit RUNNER_RESULT {"status":"done"}.\n'
+                f"Auftragskontext:\n{quote_prompt_input(prompt)}\nOriginaldateien:\n{baseline}",
+                True,
+            )
+            lines = [
+                line.removeprefix("LOCAL_REVIEW ") for line in answer.splitlines() if line.startswith("LOCAL_REVIEW ")
+            ]
+            if len(lines) != 1:
+                raise RunnerError("missing or ambiguous OpenCode pre-review")
+            findings = json.loads(lines[0])["findings"]
+            if not isinstance(findings, str) or len(findings) > 6000:
+                raise RunnerError("invalid OpenCode pre-review findings")
+            if not findings.strip():
+                return
+            prompt += "\nBefunde des lokalen Vorab-Reviews:\n" + quote_prompt_input(findings)
+        raise RunnerError("OpenCode pre-review still reports required corrections")
+
     def authorized(self, task: dict[str, Any], *, merge: bool = False) -> bool:
         issue = self.api(f"issues/{task['issue']}")
         needed = {"work:coding", "auto-merge"} if merge else {"work:coding"}
+        tags = labels(issue)
+        if task["author"] == "opencode" and (
+            merge or tags & {"agent:opencode", "agent:codex", "agent:claude"} != {"agent:opencode"}
+        ):
+            return False
         return (
             issue["state"] == "open"
             and task_id(issue["title"]) == task["task"]
@@ -631,6 +725,8 @@ class Repository:
         return verdict == "approve", findings, int(posted["id"])
 
     def merge(self, task: dict[str, Any], scope: dict[str, Any], required_check: str) -> None:
+        if task["author"] == "opencode":
+            raise RunnerError("OpenCode PRs require manual integration")
         number, head = task["pr"], checked_sha(task["head"])
         pr = self.api(f"pulls/{number}")
         self.validate_pr(task, pr)
