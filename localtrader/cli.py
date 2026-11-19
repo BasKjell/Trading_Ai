@@ -24,7 +24,7 @@ from .holdout import HOLDOUT_START, HoldoutError, research_limit
 from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, synthetic_intraday
 from .intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics, instruments_from_config
 from .intraday_fetch import dividends_digest, output_paths, read_dividends
-from .intraday_report import run_scenarios, strategies_from_config, write_intraday_report
+from .intraday_report import default_workers, run_scenarios, strategies_from_config, write_intraday_report
 from .ollama_lab import OllamaClient, OllamaStrategySearch
 from .paper import PaperSession
 from .reporting import write_report
@@ -143,7 +143,21 @@ def run_intraday_backtest(args: argparse.Namespace) -> int:
     )
     result = engine.run(datasets)
     benchmark = buy_and_hold(datasets, instruments, config, args.cost_multiplier)
-    output = write_intraday_report(result, args.output, benchmark, {"config_digest": config.digest, "holdout": holdout})
+    profiles = {
+        symbol: {
+            "fee_bps": instruments[symbol].costs.fee_bps,
+            "spread_bps": instruments[symbol].costs.spread_bps,
+            "slippage_bps": instruments[symbol].costs.slippage_bps,
+            "min_fee": instruments[symbol].costs.min_fee,
+        }
+        for symbol in datasets
+    }
+    output = write_intraday_report(
+        result,
+        args.output,
+        benchmark,
+        {"config_digest": config.digest, "holdout": holdout, "cost_profiles": profiles},  # what-if view (T-007)
+    )
     metrics = compute_metrics(result)
     print(
         json.dumps(
@@ -157,7 +171,10 @@ def run_intraday_backtest(args: argparse.Namespace) -> int:
 
 def run_intraday_stress(args: argparse.Namespace) -> int:
     config, instruments, datasets, holdout = _load_intraday(args.config, args.data, args.synthetic_days, args.symbol)
-    output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets)
+    workers = args.workers if args.workers is not None else default_workers()
+    if workers < 1:
+        raise SystemExit("--workers must be at least 1")
+    output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets, workers)
     output["holdout"] = holdout
     path = Path(args.output)
     path.mkdir(parents=True, exist_ok=True)
@@ -267,6 +284,27 @@ def run_paper(args: argparse.Namespace) -> int:
             indent=2,
         )
     )
+    return 0
+
+
+def compare_feeds(args: argparse.Namespace) -> int:
+    """T-012: data-only comparison of two bar feeds (no strategy, no returns)."""
+    from .feed_compare import compare_files, summary
+
+    results = []
+    for symbol in args.symbols.split(","):
+        symbol = symbol.strip()
+        results.append(
+            (
+                symbol,
+                compare_files(
+                    Path(args.reference_dir) / f"{symbol}_15m.csv", Path(args.candidate_dir) / f"{symbol}_15m.csv"
+                ),
+            )
+        )
+    print(summary(results))
+    if args.json:
+        print(json.dumps(dict(results), indent=2, default=str))
     return 0
 
 
@@ -473,6 +511,13 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--cost-multiplier", type=float, default=1.0)
             command.add_argument("--spread-multiplier", type=float, default=1.0)
             command.add_argument("--delay-bars", type=int, default=0)
+        else:
+            command.add_argument(
+                "--workers",
+                type=int,
+                default=None,
+                help="processes for the independent scenarios; default: available CPUs, 1 = serial",
+            )
         command.set_defaults(func=func)
     spreads = sub.add_parser("measure-spreads", help="sample quoted SIP spreads at bar opens (research period only)")
     spreads.add_argument("--symbol", required=True)
@@ -511,6 +556,12 @@ def build_parser() -> argparse.ArgumentParser:
     paper.add_argument("--state", default="state/paper_state.json")
     paper.add_argument("--audit", default="state/audit.jsonl")
     paper.set_defaults(func=run_paper)
+    feeds = sub.add_parser("compare-feeds", help="compare two 15-minute feeds (e.g. SIP vs IEX), data only")
+    feeds.add_argument("--reference-dir", default="data")
+    feeds.add_argument("--candidate-dir", default="data/iex")
+    feeds.add_argument("--symbols", default="SPY,QQQ")
+    feeds.add_argument("--json", action="store_true")
+    feeds.set_defaults(func=compare_feeds)
     kill = sub.add_parser("kill-switch")
     kill.add_argument("action", choices=["on", "off"])
     kill.add_argument("--state", default="state/paper_state.json")

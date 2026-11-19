@@ -2,6 +2,13 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-18 – fetch-fx: Hilfetext für --end (Issue #33, PR #34)
+
+- `fetch-fx --help` nennt als Standard für `--end` den letzten Tag vor dem wirksamen Cutoff (Holdout-Start
+  oder `--available-until`) statt „today“. Verhalten unverändert.
+
+**Tests:** `tests/test_fx_rates.py` (Hilfetext).
+
 ## 2026-11-18 – Vollständiger NYSE-Handelskalender und Slot-Inventur (Vorbedingung T-008)
 
 **Anlass/Ziel:** Methodenreview #22, P2-Punkt 3: Feiertag und Datenlücke müssen unterscheidbar sein.
