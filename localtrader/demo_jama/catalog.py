@@ -79,11 +79,12 @@ def gaps(data: dict[str, Any]) -> dict[str, Any]:
     latest = {row["id"]: row for row in data["records"]}
     cases = [row for row in latest.values() if row["kind"] == "test_case"]
     verified = {
-        (item["id"], item["revision"])
+        (identifier, int(revision))
         for row in latest.values()
-        if row["kind"] == "test_run"
+        if row["kind"] == "decision" and row.get("provenance") == "github_verified"
         for item in row["cases"]
         if item["result"] == "passed"
+        for identifier, revision in [item["reference"].rsplit("@", 1)]
     }
     sources = [row for row in latest.values() if row["kind"] == "source"]
     baselined = {tuple(ref) for snapshot in data["snapshots"] for ref in snapshot["references"]}

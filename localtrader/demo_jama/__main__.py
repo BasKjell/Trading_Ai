@@ -12,7 +12,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from .catalog import gaps, import_catalog, record_case, record_requirement
-from .store import baseline, connect, decision, digest, encode, export, put, required_text, verify
+from .github_evidence import policy_at, verify_github
+from .store import baseline, connect, decision, digest, encode, export, get, put, required_text, verify
 
 
 def _read(path: Path) -> Any:
@@ -30,7 +31,7 @@ def _operator_command(db: sqlite3.Connection, command: str, payload: Any, actor:
     elif command == "baseline":
         return baseline(db, [(row["id"], row["revision"]) for row in payload], actor)
     elif command == "decide":
-        return decision(db, payload, actor)
+        return decision(db, payload | {"provenance": "local_unverified"}, actor)
     else:
         required_text(payload, "baseline", "head", "target", "result")
         if command == "test-run":
@@ -121,6 +122,9 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("import", "dry-run", "requirement", "test-case", "baseline", "test-run", "review", "decide"):
         commands.add_parser(name).add_argument("input", type=Path)
+    verified = commands.add_parser("github-decide")
+    verified.add_argument("input", type=Path)
+    verified.add_argument("--policy", type=Path, required=True)
     for name in ("export", "gaps", "verify"):
         commands.add_parser(name)
     for name in ("backup", "mcp", "ui"):
@@ -141,6 +145,31 @@ def main() -> None:
         if not args.db:
             parser.error("--db is required for operator commands")
         actor = f"local-operator:uid:{os.getuid()}"
+        if args.command == "github-decide":
+            request = _read(args.input)
+            required_text(request, "baseline", "head", "target", "reason")
+            with connect(args.db, write=True) as db:
+                row = db.execute("SELECT body FROM snapshots WHERE id = ?", (request["baseline"],)).fetchone()
+                if not row:
+                    raise ValueError("Unknown baseline")
+                records = [get(db, *ref) for ref in json.loads(row["body"])["references"]]
+                requirements = {(row["id"], row["revision"]) for row in records if row["kind"] == "requirement"}
+                cases = [row for row in records if row["kind"] == "test_case"]
+                if requirements != {(row["requirement_id"], row["requirement_revision"]) for row in cases}:
+                    raise ValueError("All baseline requirements need acceptance tests")
+                risk = "K" if any(row.get("risk") == "K" for row in records) else "U"
+                proof = verify_github(
+                    policy_at(args.policy), request, risk, {f"{row['id']}@{row['revision']}" for row in cases}
+                )
+                body = proof | {
+                    "stage": "integration",
+                    "provenance": "github_verified",
+                    "reason": request["reason"],
+                }
+                identifier = "DEC-" + digest(body)[:24]
+                put(db, "decision", identifier, body, actor)
+                print(encode(identifier))
+            return
         if args.command == "dry-run":
             with sqlite3.connect(":memory:") as db:
                 from .store import SCHEMA
