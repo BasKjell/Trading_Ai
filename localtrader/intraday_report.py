@@ -235,19 +235,25 @@ def run_scenarios(
 
 
 def _phases(datasets: dict[str, ImportedDataset], parts: int = 3) -> list[tuple[str, dict[str, ImportedDataset]]]:
-    """Split the sample chronologically into equal parts (different market phases)."""
+    """Split the sample chronologically into equal parts (different market phases).
+
+    The boundaries are common to all instruments (T-021 review): they split the sorted union of bar start times
+    into equal counts, and every instrument keeps the bars with ``lo <= start < hi`` of that window. For a
+    single instrument this is exactly the former split by its own bar count.
+    """
+    times = sorted({bar.start for data in datasets.values() for bar in data.bars})
     output: list[tuple[str, dict[str, ImportedDataset]]] = []
+    n = len(times)
     for part in range(parts):
+        lo, hi = n * part // parts, n * (part + 1) // parts
+        if lo >= hi:
+            continue
+        first, last = times[lo], times[hi - 1]
         sliced: dict[str, ImportedDataset] = {}
-        label = ""
         for symbol, data in datasets.items():
-            n = len(data.bars)
-            lo, hi = n * part // parts, n * (part + 1) // parts
-            bars = data.bars[lo:hi]
-            if not bars:
-                continue
-            label = f"{bars[0].start.date()}_{bars[-1].start.date()}"
-            sliced[symbol] = replace(data, bars=bars)
+            bars = [bar for bar in data.bars if first <= bar.start <= last]
+            if bars:
+                sliced[symbol] = replace(data, bars=bars)
         if sliced:
-            output.append((label, sliced))
+            output.append((f"{first.date()}_{last.date()}", sliced))
     return output

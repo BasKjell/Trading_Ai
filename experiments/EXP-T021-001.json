@@ -1,0 +1,729 @@
+{
+  "agent": "Claude Code",
+  "code_version": "0ec34f2 (agent/T-021-multi-asset-trend)",
+  "cost_assumptions": {
+    "DBC": {
+      "dividend_withholding": 0.15,
+      "fee_bps": 0.1,
+      "financing_rate_annual": 0.0,
+      "min_fee": 0.0,
+      "qty_step": 0.001,
+      "slippage_bps": 2.0,
+      "spread_bps": 10.0
+    },
+    "EEM": {
+      "dividend_withholding": 0.15,
+      "fee_bps": 0.1,
+      "financing_rate_annual": 0.0,
+      "min_fee": 0.0,
+      "qty_step": 0.001,
+      "slippage_bps": 1.0,
+      "spread_bps": 4.5
+    },
+    "EFA": {
+      "dividend_withholding": 0.15,
+      "fee_bps": 0.1,
+      "financing_rate_annual": 0.0,
+      "min_fee": 0.0,
+      "qty_step": 0.001,
+      "slippage_bps": 1.0,
+      "spread_bps": 2.5
+    },
+    "GLD": {
+      "dividend_withholding": 0.15,
+      "fee_bps": 0.1,
+      "financing_rate_annual": 0.0,
+      "min_fee": 0.0,
+      "qty_step": 0.001,
+      "slippage_bps": 1.0,
+      "spread_bps": 1.5
+    },
+    "SPY": {
+      "dividend_withholding": 0.15,
+      "fee_bps": 0.1,
+      "financing_rate_annual": 0.0,
+      "min_fee": 0.0,
+      "qty_step": 0.001,
+      "slippage_bps": 1.0,
+      "spread_bps": 0.5
+    },
+    "TLT": {
+      "dividend_withholding": 0.15,
+      "fee_bps": 0.1,
+      "financing_rate_annual": 0.0,
+      "min_fee": 0.0,
+      "qty_step": 0.001,
+      "slippage_bps": 1.0,
+      "spread_bps": 2.0
+    }
+  },
+  "created_at": "2026-11-18T18:27:36+00:00",
+  "data_versions": [
+    "alpaca_sip_raw:SPY:d392d778608d890a",
+    "alpaca_sip_raw:EFA:9affeed09e25157c",
+    "alpaca_sip_raw:EEM:505d8eeb57902245",
+    "alpaca_sip_raw:TLT:72e111dac819345e",
+    "alpaca_sip_raw:GLD:36c0b4ab948d9c67",
+    "alpaca_sip_raw:DBC:136cb02929ddc46d"
+  ],
+  "decision": "no advantage shown: P6 fails pre-registered criteria 1_sharpe_above_spy_alone, 2_positive_under_stress, 3_all_phases_positive, 4_ci_lower_bound_positive, 5_max_drawdown_below_8pct",
+  "experiment_id": "EXP-T021-001",
+  "holdout_used": false,
+  "model": "claude-opus-5-5 (configured; serving model may differ)",
+  "rationale": "Pre-registered in docs/research/EXP-T021-001.md (commit 3a10cb0) before any run; criteria {\"1_sharpe_above_spy_alone\": false, \"2_positive_under_stress\": false, \"3_all_phases_positive\": false, \"4_ci_lower_bound_positive\": false, \"5_max_drawdown_below_8pct\": false}",
+  "references": [
+    "docs/research/EXP-T021-001.md",
+    "https://github.com/BasKjell/Trading_Ai/issues/41"
+  ],
+  "seeds": [
+    20261106
+  ],
+  "splits": {
+    "phases": [
+      "phase_1_2016-01-04_2019-04-12",
+      "phase_2_2019-04-12_2022-07-21",
+      "phase_3_2022-07-21_2025-10-31"
+    ],
+    "research_period": "2016-01-04..2025-10-31",
+    "walk_forward": false
+  },
+  "synthetic_data": false,
+  "task_id": "T-021",
+  "uncertainty": {
+    "daily_return_correlations": {
+      "EEM/DBC": 0.387,
+      "EEM/GLD": 0.172,
+      "EEM/TLT": -0.125,
+      "EFA/DBC": 0.376,
+      "EFA/EEM": 0.832,
+      "EFA/GLD": 0.142,
+      "EFA/TLT": -0.142,
+      "GLD/DBC": 0.253,
+      "SPY/DBC": 0.343,
+      "SPY/EEM": 0.75,
+      "SPY/EFA": 0.843,
+      "SPY/GLD": 0.043,
+      "SPY/TLT": -0.181,
+      "TLT/DBC": -0.155,
+      "TLT/GLD": 0.288
+    },
+    "portfolio_monthly_return_90ci": [
+      -0.0013498339664630432,
+      0.00047654968313870505
+    ]
+  },
+  "variants": [
+    {
+      "name": "P6/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 1.3273767103760483,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": -0.00039566496796505923,
+        "max_drawdown": 0.08077286494339275,
+        "total_costs": 1066.8174229547592,
+        "total_return": -0.04553421319994,
+        "trades": 957
+      }
+    },
+    {
+      "name": "P6/intraday_trend/costs_2x",
+      "parameters": {
+        "scenario": "costs_2x",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 1.32616512183046,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": -0.0005340334766411603,
+        "max_drawdown": 0.08136537241065678,
+        "total_costs": 766.1340965766213,
+        "total_return": -0.06096788375865492,
+        "trades": 367
+      }
+    },
+    {
+      "name": "P6/intraday_trend/spread_3x",
+      "parameters": {
+        "scenario": "spread_3x",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 1.3273767103760483,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": -0.0005320282515448582,
+        "max_drawdown": 0.08003072174498693,
+        "total_costs": 767.0700041447478,
+        "total_return": -0.06074599706519401,
+        "trades": 343
+      }
+    },
+    {
+      "name": "P6/intraday_trend/delay_1_bar",
+      "parameters": {
+        "scenario": "delay_1_bar",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 1.3273767103760483,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": -0.00046067829010254524,
+        "max_drawdown": 0.08018435104583765,
+        "total_costs": 1546.659437194637,
+        "total_return": -0.052816895900163585,
+        "trades": 1415
+      }
+    },
+    {
+      "name": "P6/intraday_trend/params_minus_20pct",
+      "parameters": {
+        "scenario": "params_minus_20pct",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 1.3273767103760483,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": -0.0007028367575736549,
+        "max_drawdown": 0.08228673405598019,
+        "total_costs": 1184.7350639543558,
+        "total_return": -0.07946153759432362,
+        "trades": 1090
+      }
+    },
+    {
+      "name": "P6/intraday_trend/params_plus_20pct",
+      "parameters": {
+        "scenario": "params_plus_20pct",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 1.3273767103760483,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": -0.0003321762624474145,
+        "max_drawdown": 0.08252464605071341,
+        "total_costs": 400.4945706944284,
+        "total_return": -0.0383687403834585,
+        "trades": 387
+      }
+    },
+    {
+      "name": "P6/intraday_trend/phase_1_2016-01-04_2019-04-12",
+      "parameters": {
+        "scenario": "phase_1_2016-01-04_2019-04-12",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 0.2859376424804023,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": -0.0011855670737926927,
+        "max_drawdown": 0.08077286494339275,
+        "total_costs": 1066.8174229547592,
+        "total_return": -0.04553421319994,
+        "trades": 957
+      }
+    },
+    {
+      "name": "P6/intraday_trend/phase_2_2019-04-12_2022-07-21",
+      "parameters": {
+        "scenario": "phase_2_2019-04-12_2022-07-21",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 0.21403600573017778,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": -0.0015457544952796054,
+        "max_drawdown": 0.08137303853865419,
+        "total_costs": 1247.5431018498343,
+        "total_return": -0.05896321773627655,
+        "trades": 1135
+      }
+    },
+    {
+      "name": "P6/intraday_trend/phase_3_2022-07-21_2025-10-31",
+      "parameters": {
+        "scenario": "phase_3_2022-07-21_2025-10-31",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY",
+          "EFA",
+          "EEM",
+          "TLT",
+          "GLD",
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "benchmark": {
+          "buy_and_hold_total_return": 0.49431160816280495,
+          "cash_total_return": 0.0
+        },
+        "geometric_monthly_return": 0.00020737602013509715,
+        "max_drawdown": 0.0726130224835293,
+        "total_costs": 1837.4721202390012,
+        "total_return": 0.008179339965260324,
+        "trades": 1620
+      }
+    },
+    {
+      "name": "SPY/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "SPY"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "annualized_return": 0.006243595614089159,
+        "annualized_volatility": 0.012840117822076523,
+        "average_exposure": 0.060789141335420606,
+        "benchmark": {
+          "buy_and_hold_total_return": 2.631646106971528,
+          "cash_total_return": 0.0
+        },
+        "dividends_entitled": 66.51637997545,
+        "geometric_monthly_return": 0.0005188166324225918,
+        "geometric_monthly_return_90ci": [
+          -4.595808310259297e-05,
+          0.0010761863621611134
+        ],
+        "max_drawdown": 0.016324414629672046,
+        "max_drawdown_duration_days": 492,
+        "profit_factor": 1.1360980172941286,
+        "sharpe": 0.49116931535205083,
+        "time_in_market": 0.3068722783249309,
+        "total_costs": 529.8854199312643,
+        "total_return": 0.06298500324763845,
+        "traded_symbols": [
+          "SPY"
+        ],
+        "trades": 972,
+        "trading_days": 2473,
+        "win_rate": 0.38271604938271603
+      }
+    },
+    {
+      "name": "EFA/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "EFA"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "annualized_return": -0.00012877373347641718,
+        "annualized_volatility": 0.01496241341644616,
+        "average_exposure": 0.054849066270683665,
+        "benchmark": {
+          "buy_and_hold_total_return": 0.9252284431373468,
+          "cash_total_return": 0.0
+        },
+        "dividends_entitled": 54.1992774198,
+        "geometric_monthly_return": -1.0731777874473103e-05,
+        "geometric_monthly_return_90ci": [
+          -0.0006644768941492796,
+          0.000629368141092268
+        ],
+        "max_drawdown": 0.050239898175129305,
+        "max_drawdown_duration_days": 2397,
+        "profit_factor": 0.984613965372826,
+        "sharpe": -0.0011186236909215077,
+        "time_in_market": 0.2750784310665064,
+        "total_costs": 782.7329838603733,
+        "total_return": -0.0012630031247604645,
+        "traded_symbols": [
+          "EFA"
+        ],
+        "trades": 851,
+        "trading_days": 2473,
+        "win_rate": 0.34665099882491185
+      }
+    },
+    {
+      "name": "EEM/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "EEM"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "annualized_return": -0.0005176358129266312,
+        "annualized_volatility": 0.01636473493725167,
+        "average_exposure": 0.05147567716979036,
+        "benchmark": {
+          "buy_and_hold_total_return": 1.0022950211200783,
+          "cash_total_return": 0.0
+        },
+        "dividends_entitled": 70.4060097994,
+        "geometric_monthly_return": -4.314655521020505e-05,
+        "geometric_monthly_return_90ci": [
+          -0.0007341121591148969,
+          0.0006575087150382242
+        ],
+        "max_drawdown": 0.062485803221100644,
+        "max_drawdown_duration_days": 1922,
+        "profit_factor": 0.9762175514565811,
+        "sharpe": -0.023455525093087067,
+        "time_in_market": 0.2644180492906086,
+        "total_costs": 1083.4052272911736,
+        "total_return": -0.0050682430373810705,
+        "traded_symbols": [
+          "EEM"
+        ],
+        "trades": 825,
+        "trading_days": 2473,
+        "win_rate": 0.36
+      }
+    },
+    {
+      "name": "TLT/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "TLT"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "annualized_return": -0.0074732527264148585,
+        "annualized_volatility": 0.012250142929580252,
+        "average_exposure": 0.04366292867229494,
+        "benchmark": {
+          "buy_and_hold_total_return": -0.05421776234967024,
+          "cash_total_return": 0.0
+        },
+        "dividends_entitled": 112.81203941314,
+        "geometric_monthly_return": -0.0006249144420750197,
+        "geometric_monthly_return_90ci": [
+          -0.0010843084293481464,
+          -0.00011389609194123462
+        ],
+        "max_drawdown": 0.07944074610523644,
+        "max_drawdown_duration_days": 2465,
+        "profit_factor": 0.7787640829322876,
+        "sharpe": -0.606213456237708,
+        "time_in_market": 0.22974027595679591,
+        "total_costs": 614.3165658735945,
+        "total_return": -0.07096987994103843,
+        "traded_symbols": [
+          "TLT"
+        ],
+        "trades": 814,
+        "trading_days": 2473,
+        "win_rate": 0.33415233415233414
+      }
+    },
+    {
+      "name": "GLD/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "GLD"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "annualized_return": 0.00839434576968201,
+        "annualized_volatility": 0.014455785185054882,
+        "average_exposure": 0.05110973858829478,
+        "benchmark": {
+          "buy_and_hold_total_return": 2.568154957753837,
+          "cash_total_return": 0.0
+        },
+        "dividends_entitled": 0.0,
+        "geometric_monthly_return": 0.0006968517872585345,
+        "geometric_monthly_return_90ci": [
+          3.896999213859331e-05,
+          0.0013034752566707386
+        ],
+        "max_drawdown": 0.0464925157614986,
+        "max_drawdown_duration_days": 1574,
+        "profit_factor": 1.2156448787008605,
+        "sharpe": 0.585500804101712,
+        "time_in_market": 0.2549946931385403,
+        "total_costs": 627.4957114617683,
+        "total_return": 0.08549273152917292,
+        "traded_symbols": [
+          "GLD"
+        ],
+        "trades": 824,
+        "trading_days": 2473,
+        "win_rate": 0.34951456310679613
+      }
+    },
+    {
+      "name": "DBC/intraday_trend/baseline",
+      "parameters": {
+        "scenario": "baseline",
+        "strategy_parameters": {
+          "intraday_trend": {
+            "atr_bars": 14,
+            "breakout_bars": 16,
+            "exit_bars": 8,
+            "max_hold_bars": 0,
+            "stop_atr": 2.5,
+            "trend_window_hours": 50
+          }
+        },
+        "symbols": [
+          "DBC"
+        ]
+      },
+      "rejected": false,
+      "results": {
+        "annualized_return": -0.008145703312773867,
+        "annualized_volatility": 0.008171169836564865,
+        "average_exposure": 0.017442012444900904,
+        "benchmark": {
+          "buy_and_hold_total_return": 0.8911534956231746,
+          "cash_total_return": 0.0
+        },
+        "dividends_entitled": 0.0,
+        "geometric_monthly_return": -0.0006813561734256846,
+        "geometric_monthly_return_90ci": [
+          -0.0010376218094551026,
+          -0.00033013587928665267
+        ],
+        "max_drawdown": 0.08058063879862254,
+        "max_drawdown_duration_days": 2429,
+        "profit_factor": 0.5810928633450582,
+        "sharpe": -0.996865568575388,
+        "time_in_market": 0.09107652925843258,
+        "total_costs": 752.0748830991521,
+        "total_return": -0.07712838406991307,
+        "traded_symbols": [
+          "DBC"
+        ],
+        "trades": 285,
+        "trading_days": 2473,
+        "win_rate": 0.28421052631578947
+      }
+    }
+  ]
+}
