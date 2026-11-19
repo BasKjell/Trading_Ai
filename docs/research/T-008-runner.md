@@ -15,6 +15,22 @@ Der Simulator kauft bei einem USD-Fehlbetrag die fehlende Währung, behält USD-
 3. Die geprüfte Protokollfassung trägt den Zustand `frozen` und den Pfad zu einem externen Freeze-Beleg unter `freeze.binding_receipt`. Erst nach Integration dieses Protokolls erzeugt der Verwahrer mit `research_protocol.make_receipt` den Beleg über die endgültigen Plan- und Protokollbytes und alle benannten Bindungen. Er verwahrt das Original und dessen Digest außerhalb des Forschungszugriffs. Der Code-SHA ist der tatsächlich integrierte Commit. Diese Reihenfolge vermeidet einen selbstreferenziellen Commit.
 4. Beide Programme aus dem Stamm eines sauberen Checkouts dieses Commits starten. Anbieterzugänge, Freigaben, Journale und wirtschaftliche Berichte bleiben außerhalb von Git.
 
+### Forschungsexporte vorab prüfen
+
+Vom Verwahrer bereitgestellten Forschungsordner als Eingabe verwenden:
+
+```bash
+python -m localtrader.t008_preflight /absoluter/pfad/forschung
+```
+
+Der Vorabcheck liest die fünf unten aufgeführten CSV-Dateien, prüft das Exportformat, die
+chronologische Reihenfolge, den Holdout-Stichtag und die Veröffentlichungszeit der EZB-Kurse.
+Er gibt Zeilenzahl, Zeitspanne und Prüfsummen der geprüften Dateibytes sowie die beiden zugehörigen
+Datenbindungen aus. Er schreibt keine Kopien, startet keinen Versuch und fragt keinen Provider ab.
+Die Ausgabe kann außerhalb von Git als Belegentwurf abgelegt werden. Vor dem Freeze sind zusätzlich
+die vollständige Daten- und Kalenderabdeckung, die Provider-Ausnahmen und die Verwahrerattestierung
+zu prüfen. Der Vorabcheck bestätigt diese Punkte nicht.
+
 ## Forschung
 
 `python -m localtrader.t008 DEPLOYMENT.json`
