@@ -156,6 +156,8 @@ class IntradayEngine:
         cost_multiplier: float = 1.0,
         spread_multiplier: float = 1.0,
         extra_delay_bars: int = 0,
+        trade_from: datetime | None = None,
+        liquidate_at_end: bool = True,
     ) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
@@ -167,6 +169,13 @@ class IntradayEngine:
         self.cost_multiplier = cost_multiplier
         self.spread_multiplier = spread_multiplier
         self.extra_delay_bars = extra_delay_bars
+        # Paper/shadow runtime (T-006): bars received before ``trade_from`` are warm-up history only (no
+        # signals), and a replay that stops at the newest bar keeps open positions instead of booking a
+        # fictitious terminal exit. Backtests keep the defaults.
+        if trade_from is not None and (trade_from.tzinfo is None or trade_from.utcoffset() is None):
+            raise ValueError("trade_from must be timezone-aware")
+        self.trade_from = trade_from
+        self.liquidate_at_end = liquidate_at_end
 
     def run(self, datasets: dict[str, ImportedDataset]) -> EngineResult:
         cfg = self.config
@@ -290,6 +299,8 @@ class IntradayEngine:
                 while hourly_cursor[symbol] < len(series) and series[hourly_cursor[symbol]][0] <= bar.received_at:
                     hourly_seen[symbol].append(series[hourly_cursor[symbol]][1])
                     hourly_cursor[symbol] += 1
+                if self.trade_from is not None and bar.received_at < self.trade_from:
+                    continue  # warm-up history: information only, no decision
                 visible = [b for b in known if b.received_at <= bar.received_at and b.start <= bar.start]
                 position = portfolio.positions.get(symbol)
                 trade = open_trades.get(symbol)
@@ -465,7 +476,7 @@ class IntradayEngine:
             process_arrivals(datetime.max.replace(tzinfo=UTC), inclusive=True)
 
         # terminal liquidation at the last close so every result is net of exit costs
-        if equity_points:
+        if equity_points and self.liquidate_at_end:
             final_time = equity_points[-1].timestamp
             for symbol in list(portfolio.positions):
                 book_exit(symbol, portfolio.positions[symbol].quantity, prices[symbol], final_time, "end of data")
