@@ -76,6 +76,16 @@ class RoleConfigurationTests(unittest.TestCase):
                 with self.assertRaises(RunnerError):
                     roles.validate_roles(config)
 
+    def test_same_resolved_model_is_not_independent_under_another_family_label(self) -> None:
+        for author in ("codex-medium", "local-coder"):
+            with self.subTest(author=author):
+                config = repo_config()
+                alias = {**config["roles"][author], "family": "another-label", "effort": "low"}
+                config["roles"]["same-model"] = alias
+                config.update(author=author, reviewers=["same-model"])
+                with self.assertRaisesRegex(RunnerError, "no independent reviewer"):
+                    roles.validate_roles(config)
+
     def test_gateway_needs_its_own_internal_network(self) -> None:
         for network in ("host", "none", "bridge", "default"):
             config = repo_config()
@@ -344,6 +354,46 @@ class LocalAuthorAndReviewerTests(unittest.TestCase):
                 review_body = mutation.call_args.kwargs["body"]
                 self.assertTrue(review_body.startswith("local-reviewer / local-reviewer / medium: unabhängiges Review"))
         self.assertEqual(calls, [("local-coder", False), ("local-reviewer", True)])
+
+    def test_local_author_can_preserve_existing_content_without_a_draft_role(self) -> None:
+        report = "docs/REPORTS.md"
+        with tempfile.TemporaryDirectory() as stage:
+            root, state, main = git_repository(Path(stage))
+            settings = repo_config()
+            containers = self.fake(settings, "", [])
+            expected = "base\nAdded section\n"
+
+            def complete_from_prompt(role, source, prompt, review, paths):
+                marker = "Originaldateien als Arbeitsdaten (null = Datei fehlt):\n> "
+                payload = json.loads(prompt.split(marker, 1)[1])
+                self.assertEqual(payload, {report: "base\n"})
+                self.assertNotIn("RUNNER_RESULT", prompt)
+                return json.dumps({"changes": {report: payload[report] + "Added section\n"}})
+
+            repo = backend.Repository(root, state, REPO, containers)
+            with (
+                patch.object(containers, "agent", side_effect=complete_from_prompt),
+                patch.object(containers, "check"),
+                patch.object(repo, "main_sha", return_value=main),
+                patch.object(repo, "authorized", return_value=True),
+                patch.object(repo, "mutation", return_value={"number": 99}),
+            ):
+                _, head = repo.develop(local_task("local-reviewer"), ISSUE, SCOPE)
+            self.assertEqual(backend.git(root, "show", f"{head}:{report}"), expected.rstrip("\n"))
+
+    def test_local_author_is_not_called_with_incomplete_original_context(self) -> None:
+        with tempfile.TemporaryDirectory() as stage:
+            root, state, main = git_repository(Path(stage))
+            containers = self.fake(repo_config(), "", [])
+            repo = backend.Repository(root, state, REPO, containers)
+            with (
+                patch.object(backend, "GATEWAY_AUTHOR_CONTEXT_BYTES", 20),
+                patch.object(containers, "agent") as agent,
+                patch.object(repo, "main_sha", return_value=main),
+                self.assertRaisesRegex(RunnerError, "complete gateway author context exceeds input budget"),
+            ):
+                repo.develop(local_task("local-reviewer"), ISSUE, SCOPE)
+            agent.assert_not_called()
 
     def test_local_author_without_a_valid_authorized_draft_fails(self) -> None:
         settings = repo_config()

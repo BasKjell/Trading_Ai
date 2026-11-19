@@ -78,13 +78,21 @@ def spec(config: dict[str, Any], name: str) -> dict[str, Any]:
     return {**role, "name": name, "model": model, "reasoning": bool(role.get("reasoning", False))}
 
 
+def independent(author: dict[str, Any], reviewer: dict[str, Any]) -> bool:
+    """Require distinct declared families and distinct resolved model identities."""
+    return author["family"].casefold() != reviewer["family"].casefold() and (
+        author["provider"],
+        author["model"].casefold(),
+    ) != (reviewer["provider"], reviewer["model"].casefold())
+
+
 def reviewer_for(config: dict[str, Any], author: str) -> str:
-    """First configured reviewer role from a different model family than the author."""
-    family = spec(config, author)["family"].casefold()
+    """First configured reviewer role independent of the resolved author."""
+    author_spec = spec(config, author)
     for name in config["reviewers"]:
-        if name != author and spec(config, name)["family"].casefold() != family:
+        if independent(author_spec, spec(config, name)):
             return name
-    raise RunnerError(f"no independent reviewer (different model family) for author role {author}")
+    raise RunnerError(f"no independent reviewer (different model family and model) for author role {author}")
 
 
 ROLE_LINE = re.compile(r"^(?:Agent:\s*)?([A-Za-z0-9][A-Za-z0-9_.:-]*) / [^\n/]+ / (?:low|medium|high)\b")

@@ -90,12 +90,19 @@ Der Orchestrator arbeitet mit **Rollen** statt festen Anbietern. Eine Rolle legt
 | `reasoning` | nur bei `gateway`, optional: `true` sendet den Aufwand zusätzlich als `reasoning_effort` (nur für Modelle mit Denkmodus, z. B. qwen3; qwen3-coder und gemma3 lehnen den Parameter ab) |
 
 - `author` ist die Standard-Autorenrolle. Ein Issue-Label `agent:<rolle>` wählt eine andere Rolle.
-- `reviewers` ist eine Vorzugsliste. Es prüft die **erste Rolle aus einer anderen Modellfamilie** als der
-  Autor. Gibt es keine, startet der Orchestrator nicht bzw. wählt die Aufgabe nicht aus (AGENTS.md §2a).
+- `reviewers` ist eine Vorzugsliste. Die erste Rolle mit anderer Modellfamilie **und anderer
+  Kombination aus Anbieter und Modell bzw. Gateway-Alias** prüft. Gibt es keine, startet der
+  Orchestrator nicht bzw. wählt die Aufgabe nicht aus (AGENTS.md §2a).
+- Der Controller bindet laufende Aufgaben an den Dateiscope, die aufgelösten Rollen und ihre
+  Verbindungseinstellungen. Geänderte oder fehlende Bindungen (auch Alteinträge) blockieren den
+  weiteren Ablauf. Bindungen an Gateway-Aliase prüfen die Orchestrator-Konfiguration.
+  Der Betreiber hält die Modellzuordnung hinter den Aliasen während eines laufenden Jobs stabil.
 - Aufgaben können optional `draft_role` (lokale Erstfassung für den Autor) und `hint_role` (lokale
   Vorab-Hinweise für den Prüfer) setzen. Beide müssen Gateway-Rollen sein.
-- Eine Gateway-Rolle als **Autor** hat keine Werkzeuge: Sie liefert vollständige Dateiinhalte als JSON, und
-  der Controller übernimmt sie nur, wenn **alle** Pfade erlaubt sind. Sonst bricht der Schritt ab.
+- Eine Gateway-Rolle als **Autor** erhält die vollständigen UTF-8-Originale der erlaubten Dateien als
+  Arbeitsdaten (maximal 16.000 Bytes serialisierter Dateikontext). Kann der Controller die Originale
+  nicht vollständig übertragen, blockiert er den Auftrag vor dem Modellaufruf. Die Rolle liefert
+  vollständige Dateiinhalte als JSON. Der Controller übernimmt sie nur für erlaubte Pfade.
 - Eine Gateway-Rolle als **Prüfer** liefert dieselbe `REVIEW_RESULT`-Zeile wie Codex/Claude. Gemessen am
   2026-11-19: gemma3:12b wies mit dem Review-Prompt des Orchestrators einen synthetischen Diff „50 % Risiko pro
   Trade“ in 3 von 3 Läufen zurück, gab ihn mit einem minimalen Prompt aber frei. Lokale Prüfer sind deshalb nur

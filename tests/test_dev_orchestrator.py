@@ -155,6 +155,24 @@ class StateMachineTests(unittest.TestCase):
         self.advance()
         self.assertEqual(self.db.tasks()[1]["issue"], 71)
 
+    def test_resume_does_not_review_with_a_changed_role(self):
+        self.advance(3)
+        self.assertEqual(self.db.tasks()[0]["phase"], "review")
+        self.db.close()
+        self.db = mod.Store(self.path)
+        self.db.recover()
+        self.config["claude"]["model"] = "different-model"
+        self.advance()
+        self.assertEqual(self.db.tasks()[0]["phase"], "blocked")
+        self.assertIn("role settings changed", self.db.tasks()[0]["reason"])
+        self.assertFalse(any(call[0] == "review" for call in self.repo.calls))
+
+    def test_legacy_task_without_role_binding_blocks(self):
+        self.db.enqueue(70, "T-070", "codex", "claude", json.dumps(SCOPE, sort_keys=True))
+        self.advance()
+        self.assertEqual(self.db.tasks()[0]["phase"], "blocked")
+        self.assertEqual(self.repo.calls, [])
+
     def test_no_fourth_correction(self):
         self.repo.actions = [f"Unterschiedlicher Befund {i}" for i in range(4)]
         self.advance(10)

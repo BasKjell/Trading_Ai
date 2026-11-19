@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from agent_roles import reviewer_for, spec, validate_roles
+from agent_roles import independent, reviewer_for, spec, validate_roles
 from coding_runner import FAMILIES, MANUAL_TASKS, RunnerError, eligible, labels, lock, task_id, validate_root
 from dev_orchestrator_backend import Containers, Pending, Quota, Repository, safe_path
 
@@ -153,7 +153,7 @@ class Store:
         )
         self.db.execute("DELETE FROM events WHERE id <= (SELECT MAX(id) FROM events) - 2000")
 
-    def enqueue(self, issue: int, task: str, author: str, reviewer: str, scope: dict[str, Any]) -> None:
+    def enqueue(self, issue: int, task: str, author: str, reviewer: str, authorization: str) -> None:
         with self.db:
             self.db.execute(
                 "INSERT INTO tasks(issue, task, author, reviewer, branch, phase, created, scope) "
@@ -165,7 +165,7 @@ class Store:
                     reviewer,
                     f"agent/{task}-orchestrator-{issue}",
                     time.time(),
-                    json.dumps(scope, sort_keys=True),
+                    authorization,
                 ),
             )
             self.event(issue, "claim")
@@ -272,6 +272,23 @@ def choose(repo: Repository, config: dict[str, Any], known: list[dict[str, Any]]
     return min(candidates)[1:] if candidates else None
 
 
+def task_authorization(config: dict[str, Any], scope: dict[str, Any], author: str, reviewer: str) -> str:
+    """Bind the stored task to concrete role settings as well as the approved file scope."""
+    roles = {"author": spec(config, author), "reviewer": spec(config, reviewer)}
+    if not independent(roles["author"], roles["reviewer"]):
+        raise RunnerError("author and reviewer are no longer independent")
+    for key in ("draft_role", "hint_role"):
+        if key in scope:
+            roles[key] = spec(config, scope[key])
+    transports = {
+        provider: {
+            key: config[provider][key] for key in ("url", "network", "proxy", "auth_volume") if key in config[provider]
+        }
+        for provider in {role["provider"] for role in roles.values()}
+    }
+    return json.dumps({"scope": scope, "roles": roles, "transports": transports}, sort_keys=True)
+
+
 def cycle(repo: Repository, db: Store, config: dict[str, Any]) -> bool:
     tasks = db.tasks()
     if any(row["phase"] == "blocked" for row in tasks):
@@ -280,7 +297,8 @@ def cycle(repo: Repository, db: Store, config: dict[str, Any]) -> bool:
     task = next((row for row in tasks if row["phase"] in ACTIVE), None)
     if task is None:
         if len(tasks) < config["max_tasks"] and (chosen := choose(repo, config, tasks)):
-            db.enqueue(*chosen)
+            issue, name, author, reviewer, scope = chosen
+            db.enqueue(issue, name, author, reviewer, task_authorization(config, scope, author, reviewer))
             return True
         return False
     phase, issue = task["phase"], task["issue"]
@@ -288,14 +306,20 @@ def cycle(repo: Repository, db: Store, config: dict[str, Any]) -> bool:
     if task["created"] + config["max_age_seconds"] <= now and phase != "finalize":
         db.transition(issue, "blocked", reason="task time budget exhausted")
         return True
+    scope = config["tasks"].get(task["task"])
+    try:
+        authorization = (
+            task_authorization(config, scope, task["author"], task["reviewer"]) if scope is not None else None
+        )
+    except RunnerError:
+        authorization = None
+    if authorization != task["scope"] or scope is None:
+        db.transition(issue, "blocked", reason="task scope or role settings changed or were not recorded")
+        return True
     role = {"develop": task["author"], "review": task["reviewer"]}.get(phase)
     provider = spec(config, role)["provider"] if role else None  # quotas belong to the provider account
     if task["next_at"] > now or (provider and db.cooldown_until(provider) > now):
         return False
-    scope = config["tasks"].get(task["task"])
-    if scope is None or json.dumps(scope, sort_keys=True) != task["scope"]:
-        db.transition(issue, "blocked", reason="authorized task scope changed")
-        return True
     db.transition(issue, f"running:{phase}")
     try:
         if phase != "finalize":
