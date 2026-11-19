@@ -13,6 +13,8 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
+CODEX_AGENT_ROOT = Path("/run/codex-agent")
+
 
 def read_file(root: Path, name: str, limit: int) -> bytes:
     path = root
@@ -59,9 +61,9 @@ def subscription_confirmed(provider: str, env: dict[str, str]) -> bool:
 
 def main() -> int:
     provider, maximum, names = sys.argv[1], int(sys.argv[2]), json.loads(sys.argv[3])
-    home = Path("/tmp/agent-home")
-    home.mkdir(mode=0o700)
+    home = CODEX_AGENT_ROOT / "home" if provider == "codex" else Path("/tmp/agent-home")
     try:
+        home.mkdir(mode=0o700)
         env = prepare_home(provider, Path("/auth"), home)
         if not subscription_confirmed(provider, env):
             return 1
