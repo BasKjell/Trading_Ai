@@ -569,7 +569,7 @@ Vorgehen:
 
 Nutze beispielsweise Commit-Präfixe wie feat, fix, test, docs oder refactor.
 
-Kein automatisches Merge nach main, kein Force-Push und kein Umschreiben bestehender Historie. Branch-Schutzregeln müssen eingehalten werden. *(Präzisiert durch §21: Merge durch einen Integrationsagenten nach unabhängigem Review ist erlaubt.)*
+Kein automatisches Merge nach main, kein Force-Push und kein Umschreiben bestehender Historie. Branch-Schutzregeln müssen eingehalten werden. *(Manuelle Integration gemäß §21.)*
 
 Fremde oder bereits vorhandene uncommittete Änderungen dürfen nicht versehentlich mitcommittet oder verworfen werden.
 
@@ -1053,18 +1053,24 @@ Forschungscode darf den laufenden Produktionsdienst nicht verändern. Experiment
 - Änderungen an Risikosteuerung, Orderausführung und statistischer Validierung benötigen unabhängig vom implementierenden Modell ein separates Review.
 - Beurteile Modelle anhand bestandener Abnahmekriterien, gefundener Fehler und Gesamtaufwand einschließlich Nacharbeit.
 
-## 21. Integration durch Agenten
+## 21. Integration und finale Freigaben
 
-(Benutzerentscheidung vom 2026-11-17)
-
-- Erster Schritt jeder Sitzung ist das Review offener Pull Requests anderer Agenten (Label `needs-independent-review` oder `review`). Eigene PRs werden nicht reviewt.
-- Offene Review-Befunde an eigenen PRs werden vorrangig auf dem bestehenden Branch behoben; das ist kein Selbstreview.
-- Eine Freigabe gilt nur für den geprüften Head-SHA und Zielbranch; Unabhängigkeit richtet sich nach der dokumentierten tatsächlichen Bearbeitung, nicht nach dem GitHub-Account. Kommt danach nur ein konfliktfreier Merge von main hinzu, genügt eine Merge-Diff-Prüfung, die auch prüft, ob die neue Basis abhängige Verträge, Schutzmechanismen oder Pflichtprüfungen ändert.
-- Review nach Risikoklasse (Benutzerentscheidung 2026-11-18): Klasse K (Holdout/Datenverfügbarkeit, Engine-Kausalität, Orders/Broker, Risiko, Buchhaltung/Kosten, statistische Validierung, Live-Sperren, Rechte automatischer Agenten, mögliche Offenlegung geschützter Daten oder Zugangsdaten, dauerhafter Zustand wie Journale und Modellregistry, Kontrollmechanismen wie CI-Pflichtprüfungen, Branch-Schutz und normative Regeln) benötigt ein unabhängiges Review vor dem Merge; Klasse U (Doku ohne normative Regeln, Anzeige ohne geschützte Daten, Werkzeuge ohne Daten-/Order-/Holdoutzugriff, reine Tests, unkritische Konfiguration) wird nach Klassenprüfung gemergt und danach gesammelt reviewt. Nur P1/P2-Befunde blockieren; P3 wird Folge-Issue. CHANGELOG/STATUS pflegt ein täglicher Sammel-PR.
-- Ein Agent darf einen PR als Integrationsagent nach main mergen, wenn: der PR von einer anderen Agentenart/Modellfamilie oder vom Benutzer stammt, ein unabhängiges Review mit Freigabe (Klasse K) bzw. eine dokumentierte Klassenprüfung (Klasse U) vorliegt, der aktuelle Stand von main einbezogen ist, die CI (führt `make check` mit gepinnten Werkzeugen aus) auf dem freigegebenen Head-SHA grün ist und keine offenen Blockaden, WIP-Commits oder Benutzerentscheidungen bestehen. Merge per Merge-Commit, kein Force-Push.
-- Eigene PRs werden nie selbst gemergt.
-- Integration in main ist keine Livefreigabe; §18 bleibt unverändert.
-- Die Einzelheiten stehen in AGENTS.md §0 und §2a.
+- Der Sitzungsbeginn und die Behandlung eigener Review-Befunde folgen AGENTS.md §0.
+- Klasse K braucht ein vollständiges unabhängiges Review sowie die ausdrückliche finale
+  Integrationsfreigabe von Bas am aktuellen PR-Head und Zielbranch. Bei Codex als Autor reviewt
+  Claude Code oder Bas. Bei Claude Code als Autor reviewt Codex oder Bas. Bas führt den Merge aus. Ein neuer Head oder Zielbranch erfordert eine
+  neue Freigabe von Bas.
+- Für kleine unkritische Änderungen der Klasse U genügt das dokumentierte Vorabreview eines
+  separaten KI-Agenten einschließlich Klassenprüfung. Ein vom Autor getrennter Integrationsagent
+  darf danach den Merge manuell auslösen.
+- Aktueller Stand von `main`, grüne verpflichtende CI am geprüften Head, geschützte Branches,
+  geklärte Blockaden, erwarteter Head und Merge-Commit sind verbindlich. Automerge ist unzulässig.
+- Bas erteilt Release- und Betriebsfreigaben separat für den geprüften Stand. Die Live-Voraussetzungen
+  aus §18 gelten weiterhin. Details zu Risikoklassen und Reviews stehen in AGENTS.md §0 und §2a.
+- Demo-Jama führt alle belegbaren Projektanforderungen einschließlich der bisherigen offenen und
+  geschlossenen Issues. Versionierte Requirements, Testfälle, Testläufe, Reviews und Freigaben
+  sind rückverfolgbar. AGENTS.md §2b regelt Nachpflege und Rollen, die
+  [Codex-Implementierungsanweisung](DEMO_JAMA_CODEX.md) den Demo-Umfang und die Abnahme.
 
 ## 22. Lokaler Coding-Runner (T-020, technisch gesperrt)
 

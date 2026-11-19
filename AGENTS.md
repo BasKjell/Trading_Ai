@@ -19,14 +19,13 @@ Vor jeder neuen Aufgabe:
    Branch mit Regressionstests beheben, im PR auf jeden Befund antworten (behoben in `<SHA>` / begründet
    abgelehnt) und erneutes Review anfordern. Das ist Fehlerbehebung, kein Selbstreview. Erst wenn eigene
    PRs keine offenen Befunde haben, gilt §0 für sie als erledigt.
-3. Fremde PRs je nach **Risikoklasse** (unten) behandeln. Klasse K: vollständiges Review vor dem Merge –
-   Code und Tests lesen, `make check` nachweisen (siehe „Nachweis von `make check`"), Look-ahead, Holdout,
-   Kosten, Risikogrenzen, Orderlogik und Validierung gezielt prüfen. Klasse U: Klassenprüfung vor dem
-   Merge, inhaltliches Review danach (gesammelt). Ergebnis als PR-Review mit klarer Empfehlung
-   (freigeben / Änderungen nötig) und gefundenen Fehlern; Fehler in `docs/agents/MODEL_EVALUATION.md`
-   beim verursachenden Eintrag nachtragen.
-4. Bei Freigabe als Integrationsagent mergen (Abschnitt 2a). Sonst Label `review` belassen und Befunde
-   im PR dokumentieren.
+3. Fremde PRs je nach **Risikoklasse** vor dem Merge prüfen. Klasse K: vollständiges unabhängiges
+   Review mit `make check`-Nachweis, Code- und Testprüfung sowie den für die Änderung relevanten
+   Schutzgrenzen. Klasse U: ein separater KI-Agent prüft Einstufung, Änderung, Tests und CI im
+   erforderlichen Umfang. Die Empfehlung und Befunde im PR dokumentieren. Fehler außerdem beim
+   verursachenden Eintrag in `docs/agents/MODEL_EVALUATION.md` nachtragen.
+4. Klasse K zur finalen Integrationsentscheidung an Bas geben. Klasse U darf ein separater
+   Integrationsagent nach §2a manuell integrieren.
 5. Dem Benutzer am Sitzungsende melden, welche PRs reviewt, gemergt, zurückgewiesen oder (eigene)
    nach Befunden korrigiert wurden.
 
@@ -38,13 +37,13 @@ verbrauchter Holdout, echte Orders), und weniger Runden für alles andere.
 
 | Klasse | Umfang | Vorgehen |
 |---|---|---|
-| **K – kritisch** | Holdout und Datenverfügbarkeit, Kausalität/Engine, Orderausführung und Broker, Risikoregeln, Buchhaltung, Kosten- und Dividendenbuchung, statistische Validierung und Auswahl, Live-Sperren und Sicherheitsregeln (§5), Rechte automatischer Agenten. **Außerdem:** mögliche Offenlegung von Zugangsdaten, geschützten Daten oder Ergebnissen (Zugriffskontrollen, Artefakt- und Reportveröffentlichung, auch lesende Dashboards mit Holdout- oder Kontodaten); dauerhafter Zustand (Migration, Restore, Retention oder Löschung von Order-, Audit-, Versuchs- und Holdoutjournalen sowie der Modellregistry); Kontrollmechanismen (CI-Pflichtprüfungen, Branch-Schutz, Deployment- und Mergebefugnisse, normative Projektregeln wie AGENTS.md und Spec) | unabhängiges Review **vor** dem Merge, Label `needs-independent-review` (wie bisher) |
-| **U – unkritisch** | Dokumentation ohne normative Regeln, Anzeige ohne Zugriff auf geschützte Daten, Werkzeuge ohne Daten-, Order- oder Holdoutzugriff, reine Testergänzungen und Sammel-PRs, die weder Schutzwirkung noch normative Regeln ändern, Konfiguration außerhalb von Risiko/Kosten/Holdout | Merge durch einen Integrationsagenten einer anderen Agentenart nach **Klassenprüfung** (Einstufung stimmt, CI grün am Head, keine Konflikte); inhaltliches Review danach, gesammelt; Befunde als Folge-Issues |
+| **K – kritisch** | Holdout und Datenverfügbarkeit, Kausalität/Engine, Orderausführung und Broker, Risikoregeln, Buchhaltung, Kosten- und Dividendenbuchung, statistische Validierung und Auswahl, Live-Sperren und Sicherheitsregeln (§5), Rechte automatischer Agenten. **Außerdem:** mögliche Offenlegung von Zugangsdaten, geschützten Daten oder Ergebnissen (Zugriffskontrollen, Artefakt- und Reportveröffentlichung, auch lesende Dashboards mit Holdout- oder Kontodaten); dauerhafter Zustand (Migration, Restore, Retention oder Löschung von Order-, Audit-, Versuchs- und Holdoutjournalen sowie der Modellregistry); Kontrollmechanismen (CI-Pflichtprüfungen, Branch-Schutz, Deployment- und Mergebefugnisse, normative Projektregeln wie AGENTS.md und Spec) | unabhängiges Review und ausdrückliche finale Freigabe durch Bas **vor** dem Merge, Label `needs-independent-review` |
+| **U – unkritisch** | Dokumentation ohne normative Regeln, Anzeige ohne Zugriff auf geschützte Daten, Werkzeuge ohne Daten-, Order- oder Holdoutzugriff, reine Testergänzungen und Sammel-PRs, die weder Schutzwirkung noch normative Regeln ändern, Konfiguration außerhalb von Risiko/Kosten/Holdout | ein separater KI-Agent prüft Klasse und Inhalt **vor** dem Merge; Integration im Rahmen von §2a ohne zusätzliche Einzelabnahme durch Bas |
 
 - **Nur P1/P2 blockieren einen Merge.** P3-Befunde werden als Issue mit Label `follow-up` erfasst und im
   Review verlinkt; sie lösen keine weitere Review-Runde aus.
 - **Gleicher Befund nach zwei Runden nicht geschlossen:** Benutzer informieren; ggf. stärkeres Modell (§3).
-- **Übergang:** Diese Regeln gelten ab dem Merge-Commit des PRs, der sie einführt (#32), für alle PRs,
+- **Historischer Übergang zu #32:** Die damaligen Regeln gelten ab dem Merge-Commit des PRs, der sie einführt (#32), für alle PRs,
   die danach geöffnet oder neu freigegeben werden. #32 selbst wird nach der vorher geltenden Regel
   integriert (unabhängiges Review vor dem Merge, Integrationsstand im PR). Die beim Erstellen dieser Regel
   offenen PRs #20, #21, #28, #29 und #31 sind Klasse K; ihre offenen Befunde, Abhängigkeiten sowie Head- und
@@ -52,21 +51,27 @@ verbrauchter Holdout, echte Orders), und weniger Runden für alles andere.
   behalten. Die fachliche Freigabe von #31 gilt nur gegen den Branch von #21; nach dem Umstellen auf
   `main` braucht #31 eine neue zielgebundene Freigabe am neuen Head und grüne CI.
 
+Für noch offene PRs gelten diese aktuellen Gates beim nächsten Integrationsversuch. Bereits
+integrierte Änderungen werden über die Nachpflege in §2b erfasst.
+
 **Unabhängigkeit und Form des Reviews**
-- Herkunft und Unabhängigkeit richten sich nach der dokumentierten tatsächlichen Bearbeitung (Feld
-  „Agent", Co-Authored-By, Handoff), nicht nach dem GitHub-Autor: Alle Agenten nutzen denselben
-  GitHub-Account.
+- Herkunft und Unabhängigkeit richten sich nach der dokumentierten tatsächlichen Bearbeitung
+  (Feld „Agent", Co-Authored-By, Handoff). Während der Übergangsphase können die Agenten noch
+  denselben GitHub-Account nutzen. Nach Betriebsfreigabe gemäß §2b wird die Identität zusätzlich
+  anhand der getrennten GitHub-Konten verifiziert.
 - **Nachweis von `make check`** (Benutzerentscheidung 2026-11-18): Ein grüner CI-Lauf auf **genau dem
   geprüften Head-SHA** gilt als Nachweis, weil die CI dieselben Prüfungen mit den gepinnten Versionen aus
   `requirements-dev.txt` ausführt. Das Review nennt Lauf-ID, Head-SHA und Ergebnis. Ein lokaler Lauf ist
   zusätzlich willkommen, aber nicht Pflicht, wenn die eigene Umgebung die Werkzeuge oder das Netzwerk
   nicht bereitstellt. Ein roter, abgebrochener oder zu einem anderen SHA gehörender CI-Lauf ist kein
   Nachweis; ändert sich die CI-Konfiguration im PR selbst, prüft der Reviewer diese Änderung gesondert.
-- Weil derselbe Account keinen eigenen PR formal freigeben kann, wird ein Agentenreview als
-  `COMMENT`-Review abgegeben, das beginnt mit `<Agent>: unabhängiges Review`, den geprüften
-  **Head-SHA** und Zielbranch nennt und mit „Empfehlung: FREIGEBEN" oder „Empfehlung: ÄNDERUNGEN NÖTIG"
-  endet. Vorhandene GitHub-Pflicht-Approvals und Branch-Schutzregeln bleiben unverändert zu erfüllen.
-- Eine Freigabe gilt nur für den genannten Head-SHA und Zielbranch. Nach jedem neuen **inhaltlichen**
+- Solange Autor und Reviewer denselben GitHub-Account verwenden, beginnt das `COMMENT`-Review
+  mit `<Agent>: unabhängiges Review`, nennt **Head-SHA** und Zielbranch und endet mit
+  „Empfehlung: FREIGEBEN" oder „Empfehlung: ÄNDERUNGEN NÖTIG". Verifizierte Freigaben in Demo-Jama
+  erfordern formale `APPROVED`-Reviews über getrennte GitHub-Konten und die dokumentierte Bindung
+  an PR, CI und Baseline. Fachliche Befunde und Empfehlung bleiben im PR nachvollziehbar.
+  Vorhandene GitHub-Pflicht-Approvals und Branch-Schutzregeln bleiben unverändert zu erfüllen.
+- Eine KI-Reviewempfehlung gilt nur für den genannten Head-SHA und Zielbranch. Nach jedem neuen **inhaltlichen**
   Commit, Rebase oder Umstellen des Zielbranches ist sie verfallen; Review der Änderungen und CI sind
   erneut nötig. **Ausnahme:** Kommt nach der Freigabe nur ein Merge von `main` hinzu, ohne Konflikt in
   Code- oder Testdateien des PRs, genügt eine **Merge-Diff-Prüfung**: (a) der Diff des PRs gegen `main`
@@ -117,18 +122,21 @@ verbrauchter Holdout, echte Orders), und weniger Runden für alles andere.
 
 ## 2a. Integration (Merge nach `main`)
 
-Benutzerentscheidung vom 2026-11-17: Ein Agent darf als Integrationsagent nach `main` mergen, wenn **alle**
-Bedingungen erfüllt sind:
-1. Der PR stammt von einer anderen Agentenart/Modellfamilie oder vom Benutzer (nie eigene PRs).
-2. Klasse K: Ein unabhängiges Review mit Empfehlung „freigeben" liegt vor. Klasse U: Die Klassenprüfung
-   (§0) ist dokumentiert; das inhaltliche Review folgt nach dem Merge.
-3. Der PR enthält den aktuellen Stand von `main`; Konflikte sind fachlich gelöst (nie pauschal
-   ours/theirs); die CI des PRs ist auf genau dem freigegebenen Head-SHA grün (gilt als `make check`-
-   Nachweis, siehe §0).
-3a. Die Freigabe nennt genau den aktuellen Head-SHA des PRs und `main` als Ziel. Gemergt wird mit
-   erwartetem Head (`gh pr merge <n> --merge --match-head-commit <SHA>` bzw. REST-Feld `sha`).
-4. Keine offenen Blockaden, keine WIP-Commits, keine ungeklärten Benutzerentscheidungen im PR.
-5. Merge per Merge-Commit (kein Squash/Rebase der fremden Historie), kein Force-Push.
+1. **Klasse K:** Das vollständige unabhängige Review und die ausdrückliche finale
+   Integrationsfreigabe von Bas müssen für exakt denselben PR-Head und Zielbranch vorliegen.
+   Bei Codex als Autor reviewt Claude Code oder Bas. Bei Claude Code als Autor reviewt Codex oder Bas. Review und
+   finale Entscheidung werden getrennt dokumentiert. Den Merge führt Bas aus.
+2. **Klasse U:** Ein separater KI-Agent einer anderen Agentenart/Modellfamilie als der Autor
+   dokumentiert Klassenprüfung, angemessene inhaltliche Prüfung und positive Empfehlung
+   für den aktuellen Head und Zielbranch. Danach darf ein vom Autor getrennter
+   Integrationsagent den Merge manuell auslösen. Für diese Einzeländerung genügt das KI-Review.
+3. In beiden Klassen ist `main` aktuell einbezogen und CI einschließlich `make check` für
+   genau den zu mergenden Head grün. Es bestehen keine offenen Blockaden, WIP-Commits oder
+   ungeklärten Benutzerentscheidungen. Geschützte Branches und Pflichtprüfungen gelten.
+4. Ein neuer Head oder Zielbranch erfordert für Klasse K eine erneute ausdrückliche Freigabe
+   von Bas. Der Merge bindet den erwarteten Head und erfolgt per Merge-Commit. Automerge und
+   Force-Push sind unzulässig. Bas erteilt die finale Release-/Betriebsfreigabe separat
+   für den geprüften Stand. Die Live-Sperren gemäß Spec §18 gelten weiter.
 
 **Täglicher Sammel-PR für den Integrationsstand** (Klasse U): Ein Agent übernimmt einmal täglich (oder
 nach mehreren Merges) alle `changelog.d/T-xxx.md` gemergter PRs in `CHANGELOG.md`, löscht sie und
@@ -138,6 +146,29 @@ Sammel-PR geht über die Klassenprüfung.
 Nach dem Merge nur noch außerhalb von Git: Issue auf `done`, abhängige PRs auf `main` umstellen (deren
 Freigaben verfallen damit, siehe §0; reine `main`-Merges: Merge-Diff-Prüfung).
 Integration in `main` ist **keine Livefreigabe** (Spec §18).
+
+## 2b. Anforderungen, Testnachweise und Nachpflege in Demo-Jama
+
+- Demo-Jama ist das Register für **alle** belegbaren Projektanforderungen einschließlich der
+  bisherigen offenen und geschlossenen GitHub-Issues. Verknüpfe Issue, Spec, ADR und weitere
+  bestätigte Quellen mit stabilen Requirement-IDs und Versionsständen. Jedes Issue bekommt
+  eine Zuordnung, eine begründete Kennzeichnung ohne eigenes Requirement oder einen offenen
+  Klärpunkt. Anforderungen ohne Issue werden ebenfalls erfasst.
+- Ab Bas’ ausdrücklicher Betriebsfreigabe von Demo-Jama/MCP mit nachgewiesener Identitäts- und
+  Rechteisolation arbeiten Requirements-, QA-, Implementierungs- und Review-Agent in getrennten
+  Rollen und Läufen. Requirements und freigegebene Abnahmetests liegen dann außerhalb der
+  Schreibrechte des Implementierers. Bis zu dieser Freigabe gelten die Review- und Integrationsregeln
+  in §0 und §2a. Der PR dokumentiert Quellen, Testnachweise, beteiligte Rollen und verbleibende Lücken.
+  CI liefert die Testergebnisse. Nachweise verknüpfen verfügbare Requirement- und Testfall-Versionen,
+  CI-Lauf und PR-Head. Historische Lücken bleiben offen.
+- Bas bestätigt die erste und sicherheitsrelevant geänderte fachliche Baseline und erteilt die
+  Freigaben gemäß §2a. Agenten erstellen Entwürfe, Tests und Reviewempfehlungen. Bei Klasse U
+  genügt das separate KI-Review zur Integration. Die vollständige Nachpflege ist erst belegt,
+  wenn ein paginierter Abgleich jedes Issue berücksichtigt und der Lückenbericht vorliegt.
+- Der Übergang und die Abnahme für Demo-Jama/MCP stehen in
+  [der Codex-Implementierungsanweisung](docs/DEMO_JAMA_CODEX.md). Solange die Demo noch nicht
+  verfügbar ist, erfasse Quellen und Nachweislücken im PR. Ein Link oder ein geschlossenes Issue
+  gilt allein weder als Abnahme noch als bestandener Test.
 
 ## 3. Modellwahl, Denkstufe und Eskalation
 
