@@ -23,6 +23,13 @@ from localtrader.risk import RiskEngine
 S = OrderStatus
 
 
+class HeldLock:
+    """Stands in for an InstanceLock that is held (the lock itself is tested in test_instance_lock.py)."""
+
+    def assert_held(self) -> None:
+        return None
+
+
 def request(
     client_id: str = "one", side: Direction = Direction.LONG, quantity: int = 4
 ) -> tuple[OrderIntent, RiskDecision]:
@@ -42,7 +49,7 @@ class LifecycleTests(unittest.TestCase):
         self.manager = self.open()
 
     def open(self) -> OrderManager:
-        manager = OrderManager(self.path, self.broker, 10_000, {"ETF": 5})
+        manager = OrderManager(self.path, self.broker, 10_000, {"ETF": 5}, lock=HeldLock())
         self.addCleanup(manager.close)
         return manager
 
@@ -161,7 +168,7 @@ class LifecycleTests(unittest.TestCase):
         barrier = threading.Barrier(2)
 
         def submit() -> OrderStatus:
-            manager = OrderManager(self.path, self.broker, 10_000, {"ETF": 5})
+            manager = OrderManager(self.path, self.broker, 10_000, {"ETF": 5}, lock=HeldLock())
             try:
                 barrier.wait(timeout=5)
                 return manager.submit(*request(), 4200)
@@ -200,6 +207,6 @@ if __name__ == "__main__":
             Path(sys.argv[2]).write_text(json.dumps(asdict(order)))
             os._exit(79)
 
-    OrderManager(Path(sys.argv[1]), CrashOnAcceptance(10_000, {"ETF": 5}), 10_000, {"ETF": 5}).submit(
+    OrderManager(Path(sys.argv[1]), CrashOnAcceptance(10_000, {"ETF": 5}), 10_000, {"ETF": 5}, lock=HeldLock()).submit(
         *request("crash"), 4000
     )
