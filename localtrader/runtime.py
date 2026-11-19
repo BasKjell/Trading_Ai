@@ -207,6 +207,21 @@ def _bar_payload(bar: Bar) -> str:
     return json.dumps([bar.end.isoformat(), bar.open, bar.high, bar.low, bar.close, bar.volume], separators=(",", ":"))
 
 
+FEED_COLUMNS = ("timestamp", "open", "high", "low", "close", "volume", "feed")
+
+
+def _feed_start(raw: str | None, name: str, line: int) -> datetime:
+    """The documented feed timestamp: ISO-8601 with an explicit UTC offset. Anything else stops the feed here,
+    so the check and the import can never read a row differently (review #39, round 3)."""
+    try:
+        start = datetime.fromisoformat((raw or "").strip())
+    except ValueError:
+        raise RuntimeHalted(f"{name}: line {line} has no valid ISO-8601 timestamp") from None
+    if start.utcoffset() is None or start.utcoffset() != timedelta(0):
+        raise RuntimeHalted(f"{name}: line {line} timestamp must carry the UTC offset (+00:00)")
+    return start
+
+
 def check_feed(content: bytes, name: str) -> None:
     """Checks the feed content held in memory, before anything of it is written anywhere. First pass over the
     timestamp and feed columns only: any bar before ``PAPER_DATA_START`` or any row not marked as SIP stops
@@ -217,17 +232,21 @@ def check_feed(content: bytes, name: str) -> None:
     except UnicodeDecodeError as error:
         raise RuntimeHalted(f"{name}: feed is not valid UTF-8") from error
     reader = csv.DictReader(io.StringIO(text, newline=""))
-    if "feed" not in [(field or "").strip().lower() for field in reader.fieldnames or []]:
+    header = tuple(reader.fieldnames or ())
+    if "feed" not in [(field or "").strip().lower() for field in header]:
         raise RuntimeHalted(f"{name}: feed file has no 'feed' column (ADR 0006 requires SIP provenance)")
-    for row in reader:
-        raw = (row.get("timestamp") or "").strip()
-        try:
-            start = datetime.fromisoformat(raw)
-        except ValueError:
-            start = None  # rejected later by the regular import checks
-        if start is not None and (start.tzinfo is None or start < PAPER_DATA_START):
+    if header != FEED_COLUMNS:
+        # exact documented schema: the import normalizes names and accepts date/time columns, the check must not
+        # have to guess which column the import will use
+        raise RuntimeHalted(f"{name}: feed header must be exactly {','.join(FEED_COLUMNS)}")
+    for line, row in enumerate(reader, start=2):
+        if None in row or any(value is None for value in row.values()):
+            raise RuntimeHalted(f"{name}: line {line} does not have exactly {len(FEED_COLUMNS)} fields")
+        start = _feed_start(row["timestamp"], name, line)
+        raw = row["timestamp"].strip()
+        if start < PAPER_DATA_START:
             raise RuntimeHalted(f"{name}: feed contains bars before {PAPER_DATA_START.isoformat()}")
-        source = next(((v or "").strip().lower() for k, v in row.items() if (k or "").strip().lower() == "feed"))
+        source = row["feed"].strip().lower()
         if source != REQUIRED_FEED:
             raise RuntimeHalted(
                 f"{name}: row {raw!r} comes from feed {source!r}; only {REQUIRED_FEED!r} may drive signals"
@@ -528,6 +547,10 @@ class PaperRuntime:
             raise ValueError(f"{start.isoformat()} is not a regular-session slot of {symbol}")
         if self.db.execute("SELECT 1 FROM bars WHERE symbol=? AND start=?", (symbol, start.isoformat())).fetchone():
             raise ValueError(f"{symbol} {start.isoformat()} is not missing")
+        # only a slot that is due now and actually open may be resolved; a future slot can never be declared
+        # missing in advance (review #39, round 3)
+        if start not in (self.missing_slots(symbol, self.clock()) or []):
+            raise ValueError(f"{symbol} {start.isoformat()} is not a currently due, open slot")
         with self._tx():
             self.db.execute(
                 "INSERT INTO gap_resolutions(symbol, start, operator, reason, time) VALUES(?, ?, ?, ?, ?)",

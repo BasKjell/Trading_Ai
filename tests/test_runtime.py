@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
 import tempfile
@@ -316,6 +318,77 @@ class RuntimeTests(unittest.TestCase):
             for value in ("123.4567", "123.8901", "122.2345", "123.6789", "98765", "2026-10-30"):
                 self.assertNotIn(value.encode(), content, f"{path.name} contains {value}")
         self.assertEqual([p.name for p in files if p.suffix == ".csv"], [])
+
+    def test_rejected_feed_never_reaches_the_file_write_path(self) -> None:
+        """Review #39 round 3, P1: schema and timestamps are enforced before any byte is written."""
+        from unittest import mock
+
+        from localtrader import runtime as runtime_module
+
+        start = self.rows[0][0]
+        good = f"{start.isoformat()},600,600.4,599.6,600.1,2000000,sip"
+        holdout_row = "2026-10-30T19:45:00+00:00,123.4567,123.8901,122.2345,123.6789,98765,sip"
+        cases = {
+            "capitalized header": "Timestamp,open,high,low,close,volume,feed\n" + holdout_row,
+            "date/time columns": "date,time,open,high,low,close,volume,feed\n2026.10.30,19:45,1,1,1,1,1,sip",
+            "reordered header": "open,timestamp,high,low,close,volume,feed\n" + good,
+            "extra column": "timestamp,open,high,low,close,volume,feed,note\n" + good + ",x",
+            "missing field": "timestamp,open,high,low,close,volume,feed\n" + good.rsplit(",", 2)[0],
+            "missing timestamp": "timestamp,open,high,low,close,volume,feed\n,1,1,1,1,1,sip",
+            "unparseable timestamp": "timestamp,open,high,low,close,volume,feed\nyesterday,1,1,1,1,1,sip",
+            "naive timestamp": "timestamp,open,high,low,close,volume,feed\n2026-11-02T15:00:00,1,1,1,1,1,sip",
+            "non-UTC offset": "timestamp,open,high,low,close,volume,feed\n2026-11-02T10:00:00-05:00,1,1,1,1,1,sip",
+        }
+        for case, text in cases.items():
+            with self.subTest(case):
+                self.feed.write_text(text + "\n", encoding="utf-8")
+                runtime = self.runtime(state=f"state-{case.replace(' ', '-').replace('/', '-')}")
+                self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+                write = mock.MagicMock(side_effect=AssertionError("file write path reached"))
+                with mock.patch.object(runtime_module.tempfile, "mkstemp", write):
+                    status = runtime.tick()
+                runtime.close()
+                self.assertEqual(status["status"], "halted", status)
+                write.assert_not_called()
+        write_feed(self.feed, self.rows)
+
+    def test_gap_resolution_is_limited_to_due_open_slots(self) -> None:
+        """Review #39 round 3, P2: a future slot can never be declared missing in advance."""
+        write_feed(self.feed, [r for r in self.rows if r[0].date() <= datetime(2026, 11, 3).date()])
+        runtime = self.runtime()
+        self.clock.now = datetime(2026, 11, 3, 16, 1, tzinfo=UTC)
+        runtime.tick()
+        future_close = datetime(2026, 11, 6, 20, 45, tzinfo=UTC)  # Friday's closing bar, three days ahead
+        with self.assertRaisesRegex(ValueError, "not a currently due, open slot"):
+            runtime.resolve_gap("SPY", future_close, "operator", "premature")
+        later_today = datetime(2026, 11, 3, 19, 0, tzinfo=UTC)  # same day, not yet due
+        with self.assertRaisesRegex(ValueError, "not a currently due, open slot"):
+            runtime.resolve_gap("SPY", later_today, "operator", "premature")
+        count = runtime.db.execute("SELECT count(*) FROM gap_resolutions").fetchone()[0]
+        self.assertEqual(count, 0)
+        runtime.close()
+
+    def test_cli_refuses_a_premature_gap_resolution(self) -> None:
+        from localtrader.cli import build_parser
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = Path(tmp) / "SPY.csv"
+            write_feed(feed, bar_rows(1))
+            state = Path(tmp) / "s"
+            base = ["run", "--mode", "paper", "--feed", f"SPY={feed}", "--trade-from", TRADE_FROM.isoformat()]
+            base += ["--state-dir", str(state)]
+            once = build_parser().parse_args([*base, "--once"])
+            with contextlib.redirect_stdout(io.StringIO()):
+                once.func(once)
+            future = "SPY=2026-12-04T15:00:00+00:00"  # a regular slot that is not due yet
+            args = build_parser().parse_args(
+                [*base, "--resolve-gap", future, "--operator", "op", "--reason", "premature"]
+            )
+            with self.assertRaises(SystemExit) as raised:
+                args.func(args)
+            self.assertIn("not a currently due, open slot", str(raised.exception))
+            audit = b"".join(p.read_bytes() for p in state.rglob("*") if p.is_file())
+            self.assertNotIn(b"2026-12-04", audit)
 
     def test_holdout_bar_in_stored_state_halts_replay(self) -> None:
         runtime = self.runtime()
