@@ -1,0 +1,2 @@
+- Lokale Demo-Jama mit versioniertem SQLite-Register, lesender Oberfläche und optionalem stdio-MCP.
+- Nachpflegebestand für 22 historische Issues, Projektquellen und offene Abnahmenachweise.
