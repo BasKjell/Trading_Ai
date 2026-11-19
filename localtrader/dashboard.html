@@ -81,6 +81,18 @@
     td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
     .candidate-name { font-weight:600; }
     .symbols { color:var(--muted); max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .whatif-grid { display:grid; grid-template-columns:minmax(280px,.9fr) minmax(0,2.1fr); gap:20px; }
+    .sliders { display:grid; gap:14px; align-content:start; }
+    .slider label { display:flex; justify-content:space-between; gap:10px; font-size:.8rem; color:var(--muted); margin-bottom:6px; }
+    .slider output { color:var(--text); font-variant-numeric:tabular-nums; font-weight:620; }
+    .slider input[type=range] { width:100%; accent-color:var(--cyan); }
+    .slider .hint { color:var(--muted); font-size:.68rem; margin-top:3px; }
+    .btn { color:var(--text); background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:7px 11px; cursor:pointer; }
+    .btn:hover { border-color:var(--blue); }
+    .delta.up { color:var(--green); } .delta.down { color:var(--red); }
+    .whatif-note { color:var(--muted); font-size:.72rem; margin-top:12px; line-height:1.45; }
+    td .base { color:var(--muted); font-size:.7rem; display:block; }
+    @media (max-width:980px) { .whatif-grid { grid-template-columns:1fr; } }
     footer { color:var(--muted); font-size:.72rem; margin-top:18px; text-align:right; }
     @media (max-width:980px) { .stats { grid-template-columns:repeat(2,1fr); } .two { grid-template-columns:1fr; } .model-row { grid-template-columns:minmax(130px,1fr) 1.5fr repeat(3,60px); } .best-model { grid-template-columns:1fr; } .coverage { grid-template-columns:1fr 1fr; } }
     @media (max-width:650px) { .shell { width:min(100% - 20px,1500px); padding-top:20px; } header { align-items:flex-start; flex-direction:column; } .stats { grid-template-columns:1fr 1fr; } .card { padding:14px; border-radius:13px; } .model-row { grid-template-columns:1fr 1fr; } .model-row .metric:nth-last-child(-n+3) { text-align:left; } .best-model-metrics,.coverage { grid-template-columns:1fr 1fr; } .controls { width:100%; } select { flex:1; min-width:130px; } }
@@ -170,6 +182,25 @@
           <thead><tr><th>Lauf</th><th>Art</th><th>Instrument / Strategie</th><th class="num">Rendite</th><th class="num">Monat (geom.)</th><th class="num">Max. DD</th><th class="num">Trades</th><th>Szenarien / Phasen</th><th>Holdout</th></tr></thead>
           <tbody id="reportRows"><tr><td colspan="9"><div class="empty">Lade Reports …</div></td></tr></tbody>
         </table>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:16px" aria-label="Was-wäre-wenn">
+      <div class="card-head">
+        <div><h2>Was wäre wenn: Kosten, Startkapital, Fixkosten</h2><div class="muted">Rechnet einen vorhandenen Backtest neu ab. Signale und Trades bleiben unverändert, es läuft keine neue Strategie.</div></div>
+        <div class="controls"><select id="whatifReport" aria-label="Testlauf"></select><button class="btn" id="whatifReset" type="button">Report-Werte</button><button class="btn" id="whatifT008" type="button">T-008-Fixkosten</button></div>
+      </div>
+      <div class="whatif-grid">
+        <div class="sliders" id="whatifSliders"></div>
+        <div>
+          <div class="table-wrap">
+            <table style="min-width:900px">
+              <thead><tr><th>Strategie</th><th class="num">Endkapital</th><th class="num">Rendite</th><th class="num">Rendite p.&nbsp;a.</th><th class="num">Max. DD*</th><th class="num">Handelskosten</th><th class="num">Fixkosten</th><th class="num">Kosten / Trade</th><th class="num">Kostenanteil**</th><th class="num">Trades</th></tr></thead>
+              <tbody id="whatifRows"><tr><td colspan="10"><div class="empty">Lade Testläufe …</div></td></tr></tbody>
+            </table>
+          </div>
+          <div class="whatif-note" id="whatifNote"></div>
+        </div>
       </div>
     </section>
     <footer id="updatedAt">Noch nicht aktualisiert</footer>
@@ -309,6 +340,79 @@
     $('modelFilter').addEventListener('change',e=>{state.model=e.target.value;renderCandidates();});
     $('familyFilter').addEventListener('change',e=>{state.family=e.target.value;renderCandidates();});
     $('statusFilter').addEventListener('change',e=>{state.status=e.target.value;renderCandidates();});
+
+    const SLIDERS=[
+      {key:'capital',label:'Startkapital',min:1000,max:200000,step:1000,unit:'€',digits:0,hint:'Größere Konten: feste Gebühren fallen weniger ins Gewicht'},
+      {key:'fee_bps',label:'Gebühr pro Order',min:0,max:20,step:0.1,unit:'bp',digits:1,hint:'1 bp = 0,01 % des Ordervolumens'},
+      {key:'min_fee',label:'Mindestgebühr pro Order',min:0,max:10,step:0.1,unit:'€',digits:2,hint:'fester Betrag je Kauf oder Verkauf'},
+      {key:'spread_bps',label:'Spread (Geld/Brief)',min:0,max:20,step:0.1,unit:'bp',digits:1,hint:'je Seite zahlt der Trade den halben Spread'},
+      {key:'slippage_bps',label:'Slippage je Seite',min:0,max:20,step:0.1,unit:'bp',digits:1,hint:'Ausführung schlechter als der Kurs'},
+      {key:'server_per_year',label:'Server / Betrieb pro Jahr',min:0,max:3000,step:10,unit:'€',digits:0,hint:'Fixkosten, unabhängig vom Handel'},
+      {key:'data_per_year',label:'Marktdaten pro Jahr',min:0,max:3000,step:50,unit:'€',digits:0,hint:'z. B. SIP-Echtzeitabo (derzeit nicht gebucht)'},
+    ];
+    const whatif={report:'',values:{},baseline:null,timer:null,touched:new Set()};
+    const ACCOUNT_KEYS=['capital','server_per_year','data_per_year'];
+    function renderSliders() {
+      $('whatifSliders').innerHTML=SLIDERS.map(s=>`<div class="slider"><label for="wi_${s.key}"><span>${esc(s.label)}</span><output id="wo_${s.key}"></output></label><input type="range" id="wi_${s.key}" min="${s.min}" max="${s.max}" step="${s.step}"><div class="hint">${esc(s.hint)}</div></div>`).join('');
+      for (const s of SLIDERS) $('wi_'+s.key).addEventListener('input',e=>{whatif.values[s.key]=Number(e.target.value); whatif.touched.add(s.key); showSliderValues(); scheduleWhatif();});
+    }
+    function showSliderValues() {
+      for (const s of SLIDERS) {
+        const v=whatif.values[s.key]; if (v==null) continue;
+        $('wi_'+s.key).value=v; $('wo_'+s.key).textContent=`${number(v,s.digits)} ${s.unit}`;
+      }
+    }
+    function scheduleWhatif() { clearTimeout(whatif.timer); whatif.timer=setTimeout(runWhatif,150); }
+    const money=v=>v==null?'–':`${number(v,2)} €`;
+    function cell(base,variant,fmt,higherIsBetter=true) {
+      const changed=base!=null&&variant!=null&&Math.abs(variant-base)>1e-9;
+      const cls=!changed?'':((variant>base)===higherIsBetter?'up':'down');
+      return `<td class="num"><span class="delta ${cls}">${fmt(variant)}</span>${changed?`<span class="base">Basis ${fmt(base)}</span>`:''}</td>`;
+    }
+    function renderWhatif(r) {
+      if (r.error) { $('whatifRows').innerHTML=`<tr><td colspan="10" class="muted">${esc(r.error)}</td></tr>`; return; }
+      $('whatifRows').innerHTML=Object.entries(r.results).map(([name,x])=>{
+        const b=x.baseline, v=x.variant;
+        return `<tr><td><div class="candidate-name">${esc(name)}</div>${name==='Gesamt'?'':'<div class="muted">allein auf dem ganzen Kapital</div>'}</td>`+
+          cell(b.final_equity,v.final_equity,money)+cell(b.total_return,v.total_return,percent)+cell(b.annual_return,v.annual_return,percent)+
+          cell(b.max_drawdown_closed,v.max_drawdown_closed,percent,false)+cell(b.trading_costs,v.trading_costs,money,false)+cell(b.fixed_costs,v.fixed_costs,money,false)+
+          cell(b.cost_per_trade,v.cost_per_trade,money,false)+cell(b.costs_share_of_gross,v.costs_share_of_gross,percent,false)+`<td class="num">${number(v.trades,0)}</td></tr>`;
+      }).join('');
+      const total=r.results['Gesamt']?.variant||{};
+      $('whatifNote').innerHTML=`Zeitraum ${esc(date(r.period[0]))} bis ${esc(date(r.period[1]))}. Report-Ergebnis: ${percent(r.report_total_return)}. `+
+        `Ohne Fixkosten bliebe pro Jahr ${money(total.break_even_fixed_per_year)} übrig (Break-even der Fixkosten).<br>`+
+        `* Drawdown auf Basis abgeschlossener Trades (ohne Schwankung innerhalb eines Trades). ** Handels- und Fixkosten im Verhältnis zum Bruttogewinn. `+
+        `Startkapital skaliert alle Stückzahlen linear; Mindestorder, Stückelung und Volumengrenze werden nicht neu angewendet.`+
+        (r.profiles_differ?' Die Instrumente haben unterschiedliche Kostenannahmen: ein bewegter Kosten-Regler setzt seinen Wert für alle Instrumente, unbewegte behalten die Werte je Instrument.':'')+
+        (r.approximate_cost_profiles?' Älterer Report ohne gespeicherte Kostenannahmen: Basis aus der aktuellen Config übernommen (Näherung).':'');
+    }
+    async function runWhatif() {
+      if (!whatif.report) return;
+      // account values always; a cost field only once its slider was moved (other fields keep each instrument's profile)
+      const sent=Object.entries(whatif.values).filter(([k])=>ACCOUNT_KEYS.includes(k)||whatif.touched.has(k));
+      const q=new URLSearchParams({report:whatif.report,...Object.fromEntries(sent.map(([k,v])=>[k,String(v)]))});
+      try { const r=await (await fetch('/api/whatif?'+q,{cache:'no-store'})).json(); renderWhatif(r); }
+      catch (error) { $('whatifRows').innerHTML=`<tr><td colspan="10" class="muted">${esc(String(error))}</td></tr>`; }
+    }
+    async function selectWhatifReport(name) {
+      whatif.report=name; whatif.values={}; whatif.touched=new Set();
+      const r=await (await fetch('/api/whatif?'+new URLSearchParams({report:name}),{cache:'no-store'})).json();
+      if (r.error) { renderWhatif(r); return; }
+      whatif.baseline=r.baseline_assumptions; whatif.values={...r.baseline_assumptions}; showSliderValues(); renderWhatif(r);
+    }
+    async function loadWhatifReports() {
+      try {
+        const {reports}=await (await fetch('/api/whatif',{cache:'no-store'})).json();
+        if (!reports.length) { $('whatifReport').innerHTML='<option>keine Testläufe</option>'; $('whatifRows').innerHTML='<tr><td colspan="10"><div class="empty">Keine Backtests mit trades.csv unter reports/. Einen Lauf erzeugt <code>intraday-backtest</code>.</div></td></tr>'; return; }
+        $('whatifReport').innerHTML=reports.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+        await selectWhatifReport(reports[0]);
+      } catch (error) { $('whatifRows').innerHTML=`<tr><td colspan="10" class="muted">${esc(String(error))}</td></tr>`; }
+    }
+    renderSliders();
+    $('whatifReport').addEventListener('change',e=>selectWhatifReport(e.target.value));
+    $('whatifReset').addEventListener('click',()=>{ if(!whatif.baseline) return; whatif.values={...whatif.baseline}; whatif.touched=new Set(); showSliderValues(); runWhatif(); });
+    $('whatifT008').addEventListener('click',()=>{ whatif.values.server_per_year=120; whatif.values.data_per_year=1200; showSliderValues(); runWhatif(); });
+    loadWhatifReports();
     load(); setInterval(load,5000);
     loadReports(); setInterval(loadReports,30000);
   </script>
