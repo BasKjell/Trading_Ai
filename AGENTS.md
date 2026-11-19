@@ -55,19 +55,22 @@ Für noch offene PRs gelten diese aktuellen Gates beim nächsten Integrationsver
 integrierte Änderungen werden über die Nachpflege in §2b erfasst.
 
 **Unabhängigkeit und Form des Reviews**
-- Herkunft und Unabhängigkeit richten sich nach der dokumentierten tatsächlichen Bearbeitung (Feld
-  „Agent", Co-Authored-By, Handoff), nicht nach dem GitHub-Autor: Alle Agenten nutzen denselben
-  GitHub-Account.
+- Herkunft und Unabhängigkeit richten sich nach der dokumentierten tatsächlichen Bearbeitung
+  (Feld „Agent", Co-Authored-By, Handoff). Während der Übergangsphase können die Agenten noch
+  denselben GitHub-Account nutzen. Nach Betriebsfreigabe gemäß §2b wird die Identität zusätzlich
+  anhand der getrennten GitHub-Konten verifiziert.
 - **Nachweis von `make check`** (Benutzerentscheidung 2026-11-18): Ein grüner CI-Lauf auf **genau dem
   geprüften Head-SHA** gilt als Nachweis, weil die CI dieselben Prüfungen mit den gepinnten Versionen aus
   `requirements-dev.txt` ausführt. Das Review nennt Lauf-ID, Head-SHA und Ergebnis. Ein lokaler Lauf ist
   zusätzlich willkommen, aber nicht Pflicht, wenn die eigene Umgebung die Werkzeuge oder das Netzwerk
   nicht bereitstellt. Ein roter, abgebrochener oder zu einem anderen SHA gehörender CI-Lauf ist kein
   Nachweis; ändert sich die CI-Konfiguration im PR selbst, prüft der Reviewer diese Änderung gesondert.
-- Weil derselbe Account keinen eigenen PR formal freigeben kann, wird ein Agentenreview als
-  `COMMENT`-Review abgegeben, das beginnt mit `<Agent>: unabhängiges Review`, den geprüften
-  **Head-SHA** und Zielbranch nennt und mit „Empfehlung: FREIGEBEN" oder „Empfehlung: ÄNDERUNGEN NÖTIG"
-  endet. Vorhandene GitHub-Pflicht-Approvals und Branch-Schutzregeln bleiben unverändert zu erfüllen.
+- Solange Autor und Reviewer denselben GitHub-Account verwenden, beginnt das `COMMENT`-Review
+  mit `<Agent>: unabhängiges Review`, nennt **Head-SHA** und Zielbranch und endet mit
+  „Empfehlung: FREIGEBEN" oder „Empfehlung: ÄNDERUNGEN NÖTIG". Verifizierte Freigaben in Demo-Jama
+  erfordern formale `APPROVED`-Reviews über getrennte GitHub-Konten und die dokumentierte Bindung
+  an PR, CI und Baseline. Fachliche Befunde und Empfehlung bleiben im PR nachvollziehbar.
+  Vorhandene GitHub-Pflicht-Approvals und Branch-Schutzregeln bleiben unverändert zu erfüllen.
 - Eine KI-Reviewempfehlung gilt nur für den genannten Head-SHA und Zielbranch. Nach jedem neuen **inhaltlichen**
   Commit, Rebase oder Umstellen des Zielbranches ist sie verfallen; Review der Änderungen und CI sind
   erneut nötig. **Ausnahme:** Kommt nach der Freigabe nur ein Merge von `main` hinzu, ohne Konflikt in
