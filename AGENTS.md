@@ -22,7 +22,8 @@ Vor jeder neuen Aufgabe:
 3. Fremde PRs je nach **Risikoklasse** vor dem Merge prüfen. Klasse K: vollständiges unabhängiges
    Review mit `make check`-Nachweis, Code- und Testprüfung sowie den für die Änderung relevanten
    Schutzgrenzen. Klasse U: ein separater KI-Agent prüft Einstufung, Änderung, Tests und CI im
-   erforderlichen Umfang. Die Empfehlung und Befunde im PR dokumentieren.
+   erforderlichen Umfang. Die Empfehlung und Befunde im PR dokumentieren. Fehler außerdem beim
+   verursachenden Eintrag in `docs/agents/MODEL_EVALUATION.md` nachtragen.
 4. Klasse K zur finalen Integrationsentscheidung an Bas geben. Klasse U darf ein separater
    Integrationsagent nach §2a manuell integrieren.
 5. Dem Benutzer am Sitzungsende melden, welche PRs reviewt, gemergt, zurückgewiesen oder (eigene)
@@ -120,7 +121,7 @@ integrierte Änderungen werden über die Nachpflege in §2b erfasst.
 
 1. **Klasse K:** Das vollständige unabhängige Review und die ausdrückliche finale
    Integrationsfreigabe von Bas müssen für exakt denselben PR-Head und Zielbranch vorliegen.
-   Bei Codex als Autor kommt das unabhängige K-Review von Claude Code oder Bas. Review und
+   Bei Codex als Autor reviewt Claude Code oder Bas. Bei Claude Code als Autor reviewt Codex oder Bas. Review und
    finale Entscheidung werden getrennt dokumentiert. Den Merge führt Bas aus.
 2. **Klasse U:** Ein separater KI-Agent einer anderen Agentenart/Modellfamilie als der Autor
    dokumentiert Klassenprüfung, angemessene inhaltliche Prüfung und positive Empfehlung
@@ -131,7 +132,7 @@ integrierte Änderungen werden über die Nachpflege in §2b erfasst.
    ungeklärten Benutzerentscheidungen. Geschützte Branches und Pflichtprüfungen gelten.
 4. Ein neuer Head oder Zielbranch erfordert für Klasse K eine erneute ausdrückliche Freigabe
    von Bas. Der Merge bindet den erwarteten Head und erfolgt per Merge-Commit. Automerge und
-   Force-Push bleiben gesperrt. Bas erteilt die finale Release-/Betriebsfreigabe separat
+   Force-Push sind unzulässig. Bas erteilt die finale Release-/Betriebsfreigabe separat
    für den geprüften Stand. Die Live-Sperren gemäß Spec §18 gelten weiter.
 
 **Täglicher Sammel-PR für den Integrationsstand** (Klasse U): Ein Agent übernimmt einmal täglich (oder
@@ -150,10 +151,13 @@ Integration in `main` ist **keine Livefreigabe** (Spec §18).
   bestätigte Quellen mit stabilen Requirement-IDs und Versionsständen. Jedes Issue bekommt
   eine Zuordnung, eine begründete Kennzeichnung ohne eigenes Requirement oder einen offenen
   Klärpunkt. Anforderungen ohne Issue werden ebenfalls erfasst.
-- Requirements-Agent, QA-Agent, Implementierungsagent und Review-Agent arbeiten in getrennten
-  Rollen und Läufen. Requirements und freigegebene Abnahmetests liegen außerhalb der Schreibrechte
-  des Implementierers. CI liefert die Testergebnisse. Neue oder geänderte Nachweise verknüpfen
-  Requirement-Version, Testfall-Version, CI-Lauf und PR-Head. Historische Lücken bleiben offen.
+- Ab Bas’ ausdrücklicher Betriebsfreigabe von Demo-Jama/MCP mit nachgewiesener Identitäts- und
+  Rechteisolation arbeiten Requirements-, QA-, Implementierungs- und Review-Agent in getrennten
+  Rollen und Läufen. Requirements und freigegebene Abnahmetests liegen dann außerhalb der
+  Schreibrechte des Implementierers. Bis zu dieser Freigabe gelten die Review- und Integrationsregeln
+  in §0 und §2a. Der PR dokumentiert Quellen, Testnachweise, beteiligte Rollen und verbleibende Lücken.
+  CI liefert die Testergebnisse. Nachweise verknüpfen verfügbare Requirement- und Testfall-Versionen,
+  CI-Lauf und PR-Head. Historische Lücken bleiben offen.
 - Bas bestätigt die erste und sicherheitsrelevant geänderte fachliche Baseline und erteilt die
   Freigaben gemäß §2a. Agenten erstellen Entwürfe, Tests und Reviewempfehlungen. Bei Klasse U
   genügt das separate KI-Review zur Integration. Die vollständige Nachpflege ist erst belegt,

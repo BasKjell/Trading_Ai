@@ -37,7 +37,9 @@ Abschluss der automatischen Schritte. Bereits existierende fremde PRs bleiben im
 manuellen Projekt-Review-Prozess.
 
 Die nachfolgende Integration erfolgt gemäß AGENTS.md §2a. Der im MVP vorhandene bedingte
-Merge-Pfad ist gesperrt. `merge_enabled` bleibt `false`. Klasse U ist vorab von Bas zu
+Merge-Pfad ist per Konfiguration deaktiviert. `merge_enabled` bleibt `false`; den Schalter zu
+aktivieren ist gemäß AGENTS.md §2a unzulässig. Eine technische Sperre braucht einen separaten
+Klasse-K-Change. Klasse U ist vorab von Bas zu
 klassifizieren. Eine Dateiliste allein kann kritische Semantik nicht erkennen.
 
 ## Ausführungsgrenzen

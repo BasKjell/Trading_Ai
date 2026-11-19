@@ -1058,13 +1058,13 @@ Forschungscode darf den laufenden Produktionsdienst nicht verändern. Experiment
 - Der Sitzungsbeginn und die Behandlung eigener Review-Befunde folgen AGENTS.md §0.
 - Klasse K braucht ein vollständiges unabhängiges Review sowie die ausdrückliche finale
   Integrationsfreigabe von Bas am aktuellen PR-Head und Zielbranch. Bei Codex als Autor reviewt
-  Claude Code oder Bas. Bas führt den Merge aus. Ein neuer Head oder Zielbranch erfordert eine
+  Claude Code oder Bas. Bei Claude Code als Autor reviewt Codex oder Bas. Bas führt den Merge aus. Ein neuer Head oder Zielbranch erfordert eine
   neue Freigabe von Bas.
 - Für kleine unkritische Änderungen der Klasse U genügt das dokumentierte Vorabreview eines
   separaten KI-Agenten einschließlich Klassenprüfung. Ein vom Autor getrennter Integrationsagent
   darf danach den Merge manuell auslösen.
 - Aktueller Stand von `main`, grüne verpflichtende CI am geprüften Head, geschützte Branches,
-  geklärte Blockaden, erwarteter Head und Merge-Commit sind verbindlich. Automerge bleibt gesperrt.
+  geklärte Blockaden, erwarteter Head und Merge-Commit sind verbindlich. Automerge ist unzulässig.
 - Bas erteilt Release- und Betriebsfreigaben separat für den geprüften Stand. Die Live-Voraussetzungen
   aus §18 gelten weiterhin. Details zu Risikoklassen und Reviews stehen in AGENTS.md §0 und §2a.
 - Demo-Jama führt alle belegbaren Projektanforderungen einschließlich der bisherigen offenen und
