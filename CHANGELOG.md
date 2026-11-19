@@ -2,6 +2,18 @@
 
 Alle fachlich zusammenhängenden Änderungen. Neueste zuerst.
 
+## 2026-11-19 – T-021 Multi-Asset-Trendfolge als gemeinsames Portfolio (PR #48)
+
+- Intraday-Backtests und Stresstests verarbeiten mehrere ETFs in einem Portfolio mit gemeinsamem Risikobudget. Die Stressphasen verwenden gemeinsame Zeitfenster.
+- Der Forschungsdownload berücksichtigt die Rundungspräzision bei der Dividendenprüfung. Der zentrale T-008-Prüfpfad behält seine strenge Regel.
+- EXP-T021-001 und die neu berechneten Stressphasen in EXP-T021-002 weisen für das getestete Sechs-ETF-Portfolio keinen Vorteil nach.
+
+## 2026-11-18 – T-008 Walk-forward-Runner und zentraler Holdout-Aufruf (PR #37)
+
+T-008 (#4) implementiert den Walk-forward-Runner für SPY/QQQ mit EUR-Buchhaltung, datierten Ausführungskosten, rollenspezifischen Stundenfeatures, journalisierter Auswahl, gepaartem Block-Bootstrap und separatem signiertem Holdout-Aufruf. Der Protokollentwurf sperrt wirtschaftliche Läufe bis zum geprüften Freeze.
+
+Der Runner ist integriert. Prüfung der Daten- und Verwahrbelege, Protokoll-Freeze und wirtschaftlicher Forschungslauf stehen aus. Der zentrale Holdout bleibt geschlossen. Der zentrale Lauf erfordert nach bestandenem Forschungsurteil eine separate Freigabe des Benutzers.
+
 ## 2026-11-18 – fetch-fx: Hilfetext für --end (Issue #33, PR #34)
 
 - `fetch-fx --help` nennt als Standard für `--end` den letzten Tag vor dem wirksamen Cutoff (Holdout-Start
