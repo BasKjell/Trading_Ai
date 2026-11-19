@@ -35,6 +35,7 @@ Stand: 2026-11-18. Kennzeichnung: **geplant / implementiert / getestet / integri
 | Kostenmodell (Spread, Slippage, Gebühren, Mindestgebühr, Finanzierung) | getestet | Versionierte Kostentabelle mit Quellen und gemessenen Spreads (PR #28) ist im T-008-Forschungsrunner (#37) angebunden |
 | Risiko-Engine (0,20 %/Trade, 1 % offenes Risiko, 20 %/Instrument, DD 5/8/10 %) | getestet | ADR 0002 |
 | Intraday-Engine, Trendfolge, Mean Reversion, Benchmarks, Stressszenarien | getestet | `tests/test_intraday_engine.py`; Beispielreport `docs/reports/` |
+| Multi-Asset-Trendfolge mit gemeinsamem Risikobudget | **integriert (PR #48)** | T-021 (#41): EXP-T021-001 und EXP-T021-002 ohne Vorteil für das getestete Sechs-ETF-Portfolio |
 | Experimentregister | getestet | `tests/test_experiment_registry.py`, EXP-0001; IDs je Aufgabe (`EXP-T009-001`) |
 | Offline-Paper-Demo mit Neustart und Kill-Switch | implementiert | nur Demo-Ereignisse, kein 15-Minuten-Betrieb |
 | Persistenter Orderzustandsautomat und Fake-Broker-Abgleich | getestet | T-005 (#1), PR #26; `tests/test_order_manager.py`. Periodischer Abgleich im Paper-Dienst folgt mit T-006. |
