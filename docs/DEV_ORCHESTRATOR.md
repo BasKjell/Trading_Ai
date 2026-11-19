@@ -73,11 +73,51 @@ klassifizieren. Eine Dateiliste allein kann kritische Semantik nicht erkennen.
   Abrechnungs-Fallback noch automatischen Modellwechsel. Unklare Fehler blockieren mit erhaltenem
   Claim. Ein unterbrochener Schreibschritt wird nach Neustart blockiert, weil auf GitHub bereits
   Änderungen angekommen sein könnten. Saubere Checkpoints laufen weiter.
-- Optional erhält ein bestehendes Ollama-Modell in einem separaten internen Netz Aufträge für eine
-  Erstfassung von Code, Doku oder Tests sowie Vorab-Reviews. Der Cloud-Autor prüft und überarbeitet
-  die Erstfassung vor dem Commit. Der andere Cloud-Agent reviewt weiterhin den PR. Ollama erhält keine Agenten- oder GitHub-Anmeldung und kein Freigabe- oder
-  Merge-Recht. Der lokale Dienst braucht bereits das in YAML angegebene Modell. Seine
-  Ressourcenlimits sind auf dem Ollama-Server einzustellen.
+- Lokale und weitere Modelle laufen über **agentgateway** (T-025, siehe unten). Sie erhalten nur Text
+  über die OpenAI-kompatible Schnittstelle, keine Werkzeuge, keine Agenten- oder GitHub-Anmeldung und
+  kein Freigabe- oder Merge-Recht. Ressourcenlimits sind auf dem Ollama-Server einzustellen.
+
+## Rollen, Modellfamilien und Aufwand (T-025)
+
+Der Orchestrator arbeitet mit **Rollen** statt festen Anbietern. Eine Rolle legt fest:
+
+| Feld | Bedeutung |
+|---|---|
+| `provider` | `codex` oder `claude` (Abo-CLI im isolierten Container) oder `gateway` (Modell hinter agentgateway) |
+| `model` | nur bei `gateway`: der Alias aus [agentgateway.yaml](../config/agentgateway.yaml), nie ein konkretes Modell |
+| `family` | Modellfamilie für die Unabhängigkeitsregel (z. B. `openai`, `anthropic`, `qwen`, `gemma`) |
+| `effort` | `low`, `medium` oder `high`: bei Codex/Claude als CLI-Flag, bei Gateway-Rollen als Ausgabebudget (2.048 / 4.096 / 8.192 Tokens) |
+| `reasoning` | nur bei `gateway`, optional: `true` sendet den Aufwand zusätzlich als `reasoning_effort` (nur für Modelle mit Denkmodus, z. B. qwen3; qwen3-coder und gemma3 lehnen den Parameter ab) |
+
+- `author` ist die Standard-Autorenrolle. Ein Issue-Label `agent:<rolle>` wählt eine andere Rolle.
+- `reviewers` ist eine Vorzugsliste. Es prüft die **erste Rolle aus einer anderen Modellfamilie** als der
+  Autor. Gibt es keine, startet der Orchestrator nicht bzw. wählt die Aufgabe nicht aus (AGENTS.md §2a).
+- Aufgaben können optional `draft_role` (lokale Erstfassung für den Autor) und `hint_role` (lokale
+  Vorab-Hinweise für den Prüfer) setzen. Beide müssen Gateway-Rollen sein.
+- Eine Gateway-Rolle als **Autor** hat keine Werkzeuge: Sie liefert vollständige Dateiinhalte als JSON, und
+  der Controller übernimmt sie nur, wenn **alle** Pfade erlaubt sind. Sonst bricht der Schritt ab.
+- Eine Gateway-Rolle als **Prüfer** liefert dieselbe `REVIEW_RESULT`-Zeile wie Codex/Claude.
+- PRs, Commits und Reviews tragen die Rolle als `Agent: <rolle> / <modell> / <aufwand>`. Die
+  Herkunftsprüfung vor Review und Merge liest genau diese Zeile.
+- Kontingentpausen gelten weiterhin je Anbieterkonto (`codex`, `claude`), nicht je Rolle.
+
+### agentgateway
+
+- Version **1.7.0** (Apache-2.0), Binärdatei aus den GitHub-Releases von `agentgateway/agentgateway`, per
+  SHA-256 geprüft, z. B. unter `~/.local/bin/agentgateway`.
+- [agentgateway.yaml](../config/agentgateway.yaml) bildet die Rollen-Aliase auf Ollama-Modelle ab
+  (`local-coder` → qwen3-coder:30b, `local-reviewer` → gemma3:12b, `local-doku` → qwen3:8b). Externe
+  Anbieter sind nur als auskommentierte Vorlage enthalten; Schlüssel kämen ausschließlich aus
+  Umgebungsvariablen. agentgateway ersetzt Umgebungsvariablen **auch in Kommentaren** und bricht bei
+  fehlenden ab.
+- Lokaler Betrieb: `scripts/agent_gateway.sh` (bzw. `--check` zur Prüfung). Alle Listener (4000 für LLM,
+  15000 Admin, 15020/15021) sind auf `127.0.0.1` gebunden; ohne `bindAddress` würde agentgateway auf allen
+  Schnittstellen lauschen. Das Skript startet eine private Kopie der Konfiguration (0600 in 0700), weil
+  agentgateway einen erzeugten Sitzungsschlüssel in seine Konfigurationsdatei zurückschreibt.
+- Im Orchestrator läuft agentgateway als Container `agentgateway` in einem eigenen internen Docker-Netz
+  (`gateway.network`) und erreicht Ollama über ein zweites internes Netz. Für den Container ist eine
+  Variante mit `bindAddress` der Netzwerkschnittstelle nötig; sie wird beim beaufsichtigten ersten
+  Lauf erstellt und geprüft.
 
 ## Einrichtung und Betrieb
 

@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from agent_roles import reviewer_for, spec, validate_roles
 from coding_runner import FAMILIES, MANUAL_TASKS, RunnerError, eligible, labels, lock, task_id, validate_root
 from dev_orchestrator_backend import Containers, Pending, Quota, Repository, safe_path
 
@@ -63,9 +64,10 @@ def config_file(path: Path) -> dict[str, Any]:
         r"[1-9][0-9]*[mg]", config["scratch"]
     ):
         raise RunnerError("memory and scratch must be specified in m or g")
-    if config["author"] not in FAMILIES:
-        raise RunnerError("default author must be Codex or Claude")
+    used = {role.get("provider") for role in (config.get("roles") or {}).values() if isinstance(role, dict)}
     for provider in FAMILIES:
+        if provider not in used and provider not in config:
+            continue
         settings = config[provider]
         if any(not SAFE_NAME.fullmatch(settings[key]) for key in ("auth_volume", "network", "model")):
             raise RunnerError("invalid provider settings")
@@ -73,17 +75,13 @@ def config_file(path: Path) -> dict[str, Any]:
             raise RunnerError("provider requires a restricted forward proxy")
         if settings["network"] in {"none", "host", "bridge", "default"}:
             raise RunnerError("provider requires its own restricted Docker network")
-    for key in ("auth_volume", "network"):
-        if config["codex"][key] == config["claude"][key]:
-            raise RunnerError(f"providers must use separate {key} values")
-    if (ollama := config.get("ollama")) and (
-        not SAFE_NAME.fullmatch(ollama["model"])
-        or not SAFE_NAME.fullmatch(ollama["network"])
-        or ollama["network"]
-        in {"none", "host", "bridge", "default", config["codex"]["network"], config["claude"]["network"]}
-        or not re.fullmatch(r"https?://[A-Za-z0-9_.-]+:[0-9]{1,5}", ollama["host"])
-    ):
-        raise RunnerError("invalid Ollama network, URL or model")
+    if all(provider in config for provider in FAMILIES):
+        for key in ("auth_volume", "network"):
+            if config["codex"][key] == config["claude"][key]:
+                raise RunnerError(f"providers must use separate {key} values")
+    if "ollama" in config:
+        raise RunnerError("the ollama section was replaced by gateway roles (T-025); see docs/DEV_ORCHESTRATOR.md")
+    validate_roles(config)
     for name, scope in config["tasks"].items():
         paths = scope["paths"]
         deps = scope["depends_on"]
@@ -99,7 +97,12 @@ def config_file(path: Path) -> dict[str, Any]:
             or not isinstance(deps, list)
             or not all(type(number) is int and number > 0 for number in deps)
             or type(scope.get("priority", 100)) is not int
-            or (scope.get("ollama") and not ollama)
+            or "ollama" in scope
+            or any(
+                key in scope
+                and (scope[key] not in config["roles"] or config["roles"][scope[key]]["provider"] != "gateway")
+                for key in ("draft_role", "hint_role")
+            )
         ):
             raise RunnerError("invalid task scope or dependency")
     return config
@@ -150,8 +153,7 @@ class Store:
         )
         self.db.execute("DELETE FROM events WHERE id <= (SELECT MAX(id) FROM events) - 2000")
 
-    def enqueue(self, issue: int, task: str, author: str, scope: dict[str, Any]) -> None:
-        reviewer = next(provider for provider in FAMILIES if provider != author)
+    def enqueue(self, issue: int, task: str, author: str, reviewer: str, scope: dict[str, Any]) -> None:
         with self.db:
             self.db.execute(
                 "INSERT INTO tasks(issue, task, author, reviewer, branch, phase, created, scope) "
@@ -257,11 +259,16 @@ def choose(repo: Repository, config: dict[str, Any], known: list[dict[str, Any]]
         ):
             continue
         scope = config["tasks"][task]
-        owners = [provider for provider in FAMILIES if f"agent:{provider}" in tags]
+        owners = [role for role in config["roles"] if f"agent:{role}" in tags]
         if len(owners) > 1 or not satisfied(repo, issue, scope):
             continue
+        author = owners[0] if owners else config["author"]
+        try:
+            reviewer = reviewer_for(config, author)  # different model family, or the task is not chosen
+        except RunnerError:
+            continue
         priority = (scope.get("priority", 100), order.index(task) if task in order else len(order), issue["number"])
-        candidates.append((priority, issue["number"], task, owners[0] if owners else config["author"], scope))
+        candidates.append((priority, issue["number"], task, author, reviewer, scope))
     return min(candidates)[1:] if candidates else None
 
 
@@ -281,7 +288,8 @@ def cycle(repo: Repository, db: Store, config: dict[str, Any]) -> bool:
     if task["created"] + config["max_age_seconds"] <= now and phase != "finalize":
         db.transition(issue, "blocked", reason="task time budget exhausted")
         return True
-    provider = {"develop": task["author"], "review": task["reviewer"]}.get(phase)
+    role = {"develop": task["author"], "review": task["reviewer"]}.get(phase)
+    provider = spec(config, role)["provider"] if role else None  # quotas belong to the provider account
     if task["next_at"] > now or (provider and db.cooldown_until(provider) > now):
         return False
     scope = config["tasks"].get(task["task"])

@@ -34,6 +34,14 @@ def issue(number=70, task="T-070", tags=TAGS, body=""):
     }
 
 
+# T-025: tests name their roles after the provider accounts they use.
+ROLES = {
+    "codex": {"provider": "codex", "family": "openai", "effort": "medium"},
+    "claude": {"provider": "claude", "family": "anthropic", "effort": "medium"},
+}
+ROLE_SETTINGS = {"roles": ROLES, "reviewers": ["claude", "codex"]}
+
+
 class MockRepository:
     repo = REPO
 
@@ -104,6 +112,9 @@ class StateMachineTests(unittest.TestCase):
         self.config = {
             "tasks": {"T-070": SCOPE},
             "author": "codex",
+            **ROLE_SETTINGS,
+            "codex": {"model": "mock"},
+            "claude": {"model": "mock"},
             "max_tasks": 2,
             "max_age_seconds": 86400,
             "max_corrections": 3,
@@ -243,6 +254,7 @@ class ControllerBoundaryTests(unittest.TestCase):
             "output_bytes": 2000,
             "codex": {"auth_volume": "codex-test", "model": "mock"},
             "claude": {"auth_volume": "claude-test", "model": "mock"},
+            **ROLE_SETTINGS,
         }
         container = backend.Containers(Path.cwd(), cfg)
         container.owner = "test"
@@ -314,7 +326,9 @@ class ControllerBoundaryTests(unittest.TestCase):
                 backend.bounded([sys.executable, "-c", "import time; time.sleep(10)"], root, "x" * 100000, 0, 100)
 
     def test_provider_adapter_parses_mock_cli_events(self):
-        container = backend.Containers(Path.cwd(), {"codex": {"model": "mock"}, "output_bytes": 300})
+        container = backend.Containers(
+            Path.cwd(), {"codex": {"model": "mock"}, "claude": {"model": "mock"}, **ROLE_SETTINGS, "output_bytes": 300}
+        )
         done = {
             "type": "item.completed",
             "item": {
@@ -336,7 +350,16 @@ class ControllerBoundaryTests(unittest.TestCase):
             container.agent("codex", Path.cwd(), "test", True)
 
     def test_author_cli_returns_only_listed_artifacts(self):
-        container = backend.Containers(Path.cwd(), {"codex": {"model": "mock"}, "file_bytes": 100, "output_bytes": 300})
+        container = backend.Containers(
+            Path.cwd(),
+            {
+                "codex": {"model": "mock"},
+                "claude": {"model": "mock"},
+                **ROLE_SETTINGS,
+                "file_bytes": 100,
+                "output_bytes": 300,
+            },
+        )
         result = {
             "code": 0,
             "events": json.dumps(
@@ -390,7 +413,7 @@ class ControllerBoundaryTests(unittest.TestCase):
             "base": {"ref": "main"},
             "changed_files": 1,
             "head": {"repo": {"full_name": REPO}, "ref": task["branch"], "sha": HEAD},
-            "body": "Agent: Codex",
+            "body": "Agent: codex / mock / medium",
         }
         protection = {
             "enforce_admins": {"enabled": True},
@@ -402,7 +425,7 @@ class ControllerBoundaryTests(unittest.TestCase):
             "id": 101,
             "commit_id": HEAD,
             "state": "COMMENTED",
-            "body": f"Claude Code: unabhängiges Review\nHead-SHA: {HEAD}\nZielbranch: main\nEmpfehlung: FREIGEBEN",
+            "body": f"claude / mock / medium: unabhängiges Review\nHead-SHA: {HEAD}\nZielbranch: main\nEmpfehlung: FREIGEBEN",
         }
         check = {"name": "check", "app": {"id": 123}, "head_sha": HEAD, "status": "completed", "conclusion": "success"}
         api = {
@@ -449,6 +472,8 @@ class ControllerBoundaryTests(unittest.TestCase):
                 "file_bytes": 2000,
                 "diff_bytes": 5000,
                 "codex": {"model": "mock"},
+                "claude": {"model": "mock"},
+                **ROLE_SETTINGS,
             }
 
             def check(self, source):
@@ -508,7 +533,7 @@ class ControllerBoundaryTests(unittest.TestCase):
                     "state": "open",
                     "draft": False,
                     "base": {"ref": "main"},
-                    "body": "Agent: Codex",
+                    "body": "Agent: codex / mock / medium",
                     "head": {"ref": task["branch"], "sha": head, "repo": {"full_name": REPO}},
                 }
                 with patch.object(repo, "api", return_value=pr):
