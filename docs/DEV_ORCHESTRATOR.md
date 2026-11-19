@@ -96,7 +96,11 @@ Der Orchestrator arbeitet mit **Rollen** statt festen Anbietern. Eine Rolle legt
   Vorab-Hinweise für den Prüfer) setzen. Beide müssen Gateway-Rollen sein.
 - Eine Gateway-Rolle als **Autor** hat keine Werkzeuge: Sie liefert vollständige Dateiinhalte als JSON, und
   der Controller übernimmt sie nur, wenn **alle** Pfade erlaubt sind. Sonst bricht der Schritt ab.
-- Eine Gateway-Rolle als **Prüfer** liefert dieselbe `REVIEW_RESULT`-Zeile wie Codex/Claude.
+- Eine Gateway-Rolle als **Prüfer** liefert dieselbe `REVIEW_RESULT`-Zeile wie Codex/Claude. Gemessen am
+  2026-11-19: gemma3:12b wies mit dem Review-Prompt des Orchestrators einen synthetischen Diff „50 % Risiko pro
+  Trade“ in 3 von 3 Läufen zurück, gab ihn mit einem minimalen Prompt aber frei. Lokale Prüfer sind deshalb nur
+  für die vorab freigegebenen Klasse-U-Pfade gedacht. Für Klasse K bleibt das unabhängige Review durch
+  Claude Code, Codex oder Bas Pflicht (AGENTS.md §2a).
 - PRs, Commits und Reviews tragen die Rolle als `Agent: <rolle> / <modell> / <aufwand>`. Die
   Herkunftsprüfung vor Review und Merge liest genau diese Zeile.
 - Kontingentpausen gelten weiterhin je Anbieterkonto (`codex`, `claude`), nicht je Rolle.
