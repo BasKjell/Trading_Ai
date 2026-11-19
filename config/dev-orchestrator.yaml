@@ -4,7 +4,6 @@ state_directory: ~/.trading-ai/dev-orchestrator
 execution_enabled: false
 merge_enabled: false
 image: ""
-author: codex
 required_check: check
 poll_seconds: 60
 timeout_seconds: 1800
@@ -30,11 +29,46 @@ claude:
   proxy: http://egress-claude:3128
   network: trading-dev-claude
   auth_volume: trading-dev-claude-auth
-# Optional separate restricted network and an existing Ollama model.
-# ollama:
-#   model: qwen3-coder:30b
-#   network: trading-dev-ollama
-#   host: http://ollama:11434
+# Agentgateway (T-025): OpenAI-compatible entry point for local and external models. It runs as container
+# "agentgateway" on its own internal network and reaches Ollama on a second internal network.
+gateway:
+  url: http://agentgateway:4000
+  network: trading-dev-gateway
+# Roles: provider account, model family (independence rule) and effort (low | medium | high).
+# Gateway roles use the aliases from config/agentgateway.yaml, never concrete model names.
+roles:
+  codex-medium:
+    provider: codex
+    family: openai
+    effort: medium
+  claude-medium:
+    provider: claude
+    family: anthropic
+    effort: medium
+  claude-high:
+    provider: claude
+    family: anthropic
+    effort: high
+  local-coder:
+    provider: gateway
+    model: local-coder
+    family: qwen
+    effort: high
+  local-reviewer:
+    provider: gateway
+    model: local-reviewer
+    family: gemma
+    effort: medium
+  local-doku:
+    provider: gateway
+    model: local-doku
+    family: qwen
+    effort: low
+    reasoning: true          # qwen3 has a thinking mode; the effort is sent as reasoning_effort
+# Default author role; label "agent:<role>" on an issue selects another author role.
+author: codex-medium
+# Reviewer preference: the first role from a different model family than the author reviews.
+reviewers: [claude-medium, codex-medium, local-reviewer]
 tasks: {}
 # Example entry (use the actual issue, reviewed scope and dependencies):
 # tasks:
@@ -43,4 +77,5 @@ tasks: {}
 #     priority: 10
 #     depends_on: [5]
 #     paths: [docs/REPORTS.md]
-#     ollama: false
+#     draft_role: local-coder   # optional: local first draft for the author
+#     hint_role: local-doku      # optional: local pre-review hints for the reviewer
