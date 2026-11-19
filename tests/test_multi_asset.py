@@ -130,3 +130,43 @@ class T021ConfigurationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CommonPhaseTests(unittest.TestCase):
+    """PR #48 review 1: stress phases share one calendar window across instruments."""
+
+    def test_offset_histories_share_phase_windows(self) -> None:
+        from localtrader.intraday_report import _phases
+
+        _, _, datasets, _ = _load_intraday(str(CONFIG), None, 90, "SPY,TLT")
+        tlt = datasets["TLT"]
+        cut = tlt.bars[0].start + timedelta(days=60)
+        datasets["TLT"] = replace(tlt, bars=[b for b in tlt.bars if b.start >= cut])  # TLT starts 60 days later
+        phases = _phases(datasets)
+        self.assertEqual(len(phases), 3)
+        previous_end = None
+        for label, part in phases:
+            starts = [b.start for data in part.values() for b in data.bars]
+            first, last = min(starts), max(starts)
+            self.assertEqual(label, f"{first.date()}_{last.date()}")
+            for data in part.values():  # no instrument reaches outside the common window
+                self.assertTrue(all(first <= b.start <= last for b in data.bars))
+            if previous_end is not None:
+                self.assertGreater(first, previous_end)
+            previous_end = last
+        # SPY alone covers the first 60 of 90 days: TLT cannot appear in the first window (the former
+        # per-instrument split put TLT's own first third there), but is part of the last one
+        self.assertEqual(phases[0][1]["SPY"].bars[0].start, datasets["SPY"].bars[0].start)
+        self.assertNotIn("TLT", phases[0][1])
+        self.assertIn("TLT", phases[-1][1])
+
+    def test_single_instrument_split_is_unchanged(self) -> None:
+        from localtrader.intraday_report import _phases
+
+        _, _, datasets, _ = _load_intraday(str(CONFIG), None, 30, "SPY")
+        bars = datasets["SPY"].bars
+        n = len(bars)
+        for part, (label, sliced) in enumerate(_phases(datasets)):
+            expected = bars[n * part // 3 : n * (part + 1) // 3]
+            self.assertEqual(sliced["SPY"].bars, expected)
+            self.assertEqual(label, f"{expected[0].start.date()}_{expected[-1].start.date()}")

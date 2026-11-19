@@ -145,7 +145,12 @@ class DividendTests(unittest.TestCase):
         starts = [OPEN + timedelta(minutes=15 * i) for i in range(4)]
         raw = [bar("EFA", s, p) for s, p in zip(starts, (57.72, 57.55, 57.35, 57.68), strict=True)]
         adjusted = [replace(b, close=c) for b, c in zip(raw, (42.12, 42.0, 41.85, 42.1), strict=True)]
-        self.assertEqual(derive_dividends(raw, adjusted), {})
+        from localtrader.intraday_fetch import derive_dividends_with_precision
+
+        self.assertEqual(derive_dividends_with_precision(raw, adjusted)[0], {})
+        # PR #48 review 2: the central T-008 rule stays strict and still rejects this noise
+        with self.assertRaises(CorporateActionError):
+            derive_dividends(raw, adjusted)
 
     def test_daily_median_damps_rounding_noise_in_the_derived_amount(self) -> None:
         # T-021 (TLT 2020-11-02): a noisy first bar must not move the derived amount by several percent
@@ -156,7 +161,9 @@ class DividendTests(unittest.TestCase):
         noisy = [factor * 120.0 / 160.0 * (1 + (6e-5 if i == 0 else 0.0)) for i in range(5)]
         ratios = noisy + [120.0 / 160.0] * 5
         adjusted = [replace(b, close=b.close * r) for b, r in zip(raw, ratios, strict=True)]
-        derived = derive_dividends(raw, adjusted)
+        from localtrader.intraday_fetch import derive_dividends_with_precision
+
+        derived = derive_dividends_with_precision(raw, adjusted)[0]
         self.assertEqual(list(derived), [US_REGULAR_SESSION.local_date(starts[1])])
         self.assertAlmostEqual(derived[US_REGULAR_SESSION.local_date(starts[1])], 0.17, delta=0.002)
 
@@ -179,6 +186,23 @@ class DividendTests(unittest.TestCase):
         self.assertAlmostEqual(
             precision[ex_day], 48.0 * (0.005 / (48.0 * 0.95) + 0.005 / 48.0), places=9
         )  # larger band: day before
+
+    def test_central_validator_keeps_the_strict_rule(self) -> None:
+        # PR #48 review 2: the T-021 rounding rule must not change the central T-008 path (checked without a run)
+        import inspect
+
+        from localtrader import t008_central
+        from localtrader.intraday_fetch import crosscheck_dividends
+
+        source = inspect.getsource(t008_central)
+        self.assertIn("derive_dividends(series[", source)
+        self.assertNotIn("derive_dividends_with_precision", source)
+        self.assertNotIn("precision", source)
+        # same synthetic case as the review: 0.046 official, 0.040 derived, band ~0.01125
+        ex = date(2024, 3, 18)
+        official = {ex: (date(2024, 3, 22), 0.046)}
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.040})[0])  # central: rejected
+        self.assertEqual(crosscheck_dividends(official, {ex: 0.040}, None, {ex: 0.01125}), [])  # research download
 
     def test_adjustment_changing_within_a_day_is_rejected(self) -> None:
         raw = [bar("SPY", OPEN, 100.0), bar("SPY", OPEN + timedelta(minutes=15), 100.0)]

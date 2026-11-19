@@ -100,8 +100,38 @@ def write_csv(bars: list[Bar], path: str | Path) -> str:
 def derive_dividends(
     raw: list[Bar], adjusted: list[Bar], session: SessionSpec = US_REGULAR_SESSION
 ) -> dict[date, float]:
-    """Cash dividend per share by ex-date (see ``derive_dividends_with_precision``)."""
-    return derive_dividends_with_precision(raw, adjusted, session)[0]
+    """Cash dividend per share by ex-date from raw and dividend-adjusted closes.
+
+    The adjusted price is ``raw * f``, where ``f`` multiplies ``(1 - D / prev_close)`` for every later
+    ex-date. Between the last day before and the ex-date the ratio therefore moves from ``r_prev`` to
+    ``r_ex`` with ``D = prev_close * (1 - r_prev / r_ex)``. Within a day the ratio must be constant.
+
+    Strict rule of the central T-008 validator (``t008_central``), kept unchanged on purpose (PR #48 review).
+    Research downloads use ``derive_dividends_with_precision`` instead.
+    """
+    adjusted_by_start = {bar.start: bar for bar in adjusted}
+    daily: dict[date, tuple[float, float]] = {}  # day -> (ratio, raw close of the day)
+    for bar in sorted(raw, key=lambda b: b.start):
+        twin = adjusted_by_start.get(bar.start)
+        if twin is None:
+            raise CorporateActionError(f"adjusted series misses bar {bar.start.isoformat()}")
+        ratio = twin.close / bar.close
+        day = session.local_date(bar.start)
+        if day in daily and abs(ratio / daily[day][0] - 1) > DIVIDEND_MIN_STEP:
+            raise CorporateActionError(f"adjustment changes within {day}")
+        daily[day] = (daily[day][0] if day in daily else ratio, bar.close)
+    dividends: dict[date, float] = {}
+    days = sorted(daily)
+    for previous, current in zip(days, days[1:], strict=False):
+        r_prev, prev_close = daily[previous]
+        r_ex = daily[current][0]
+        step = r_prev / r_ex
+        if abs(step - 1) <= DIVIDEND_MIN_STEP:
+            continue
+        if step > 1 or step < 1 - MAX_DIVIDEND_YIELD:
+            raise CorporateActionError(f"unsupported corporate action on {current} (factor step {step:.6f})")
+        dividends[current] = round(prev_close * (1 - step), 4)
+    return dividends
 
 
 def derive_dividends_with_precision(
