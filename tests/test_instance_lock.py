@@ -360,6 +360,22 @@ class FailingRead:
 class ReviewFindingsTests(_OrderBase):
     """PR #38 review (Codex): read failures latch, backup/restore never overwrite."""
 
+    def test_failed_heartbeat_is_a_permanent_loss_for_the_order_path(self) -> None:
+        """PR #38 review 2: a heartbeat that could not be written must stop orders until a new acquisition."""
+        from unittest import mock
+
+        manager = self.manager()
+        failing = mock.patch.object(self.lock, "_write_owner", side_effect=OSError("disk full"))
+        with failing, self.assertRaisesRegex(LockError, "heartbeat failed"):
+            self.lock.renew()
+        self.assertFalse(self.lock.held)  # the disk works again; the loss stays
+        with self.assertRaisesRegex(OrderError, "order lock not held"):
+            manager.submit(*request("z"), 2400)
+        self.assertEqual(self.broker.submissions, 0)
+        self.lock.release()
+        self.lock.acquire()  # only a new acquisition restores ownership
+        self.assertEqual(manager.submit(*request("z"), 2400), S.SUBMITTED)
+
     def test_read_failure_outside_a_transaction_blocks_until_restart(self) -> None:
         manager = self.manager()
         manager.submit(*request("x"), 2400)

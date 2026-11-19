@@ -133,10 +133,18 @@ class InstanceLock:
 
     # ------------------------------------------------------------------ lease and checks
     def renew(self) -> None:
-        """Heartbeat; fails (and the lock counts as lost) if the lease already expired or the record changed."""
+        """Heartbeat; fails (and the lock counts as lost) if the lease already expired or the record changed.
+
+        Any failure while renewing, also writing the heartbeat, is a permanent loss for this object (review
+        PR #38): the order path must not keep using the lock until the lease would have expired.
+        """
         self.assert_held()
-        owner = self._read_owner()
-        self._write_owner(LockOwner(**{**owner, "heartbeat_at": self.clock().isoformat()}))
+        try:
+            owner = self._read_owner()
+            self._write_owner(LockOwner(**{**owner, "heartbeat_at": self.clock().isoformat()}))
+        except BaseException as exc:
+            self._lost = f"heartbeat failed ({type(exc).__name__})"
+            raise LockError(f"order lock lost: {self._lost}") from exc
         self._renewed = self.monotonic()
 
     def assert_held(self) -> None:
