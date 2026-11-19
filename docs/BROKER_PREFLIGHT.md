@@ -30,7 +30,14 @@ Ordertypen liefert die API nicht je Konto; sie werden mit der ersten Paper-Order
 Nur die Hosts `paper-api.alpaca.markets` und `data.alpaca.markets` sind zulässig; ein Live-Host oder die
 Broker-Sandbox wird abgelehnt.
 
-## Ergebnis am 2026-11-18 (Markt offen)
+## Ergebnis am 2026-11-19 nach den verschärften Regeln (Review PR #36, Markt offen)
+
+- **Keine Blockade, Exit 0.** Konto bestätigt (`PAPER_BROKER_ACCOUNT_ID` stimmt), Pflichtflags und
+  `suspend_trade` ausdrücklich `false`, Orders und Positionen vollständig lesbar, aktuelle IEX-Bars für SPY und QQQ.
+- **Warnungen:** Margin-Konto (Multiplikator 4), Leerverkauf beim Broker erlaubt, SIP-`latest` (Bars und
+  Quotes) mit HTTP 403, weil der Datenplan SIP nur verzögert liefert (ADR 0006).
+
+## Ergebnis am 2026-11-18 (Markt offen, Regeln vor dem Review)
 
 - **Keine Blockade.** Konto `ACTIVE`, keine Sperren, kein PDT-Flag, USD, Eigenkapital vorhanden, stimmt mit
   `PAPER_BROKER_ACCOUNT_ID` überein. Keine offenen Orders, keine Positionen.

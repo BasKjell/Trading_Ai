@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .alpaca_check import AlpacaCheckError, load_local_env, verify_paper_url
 
@@ -43,23 +43,38 @@ CONFIG_FIELDS = (
     "dtbp_check",
     "suspend_trade",
 )
+# Account flags that must be reported and explicitly False before a start (missing = unconfirmed = blocker).
+REQUIRED_FALSE_FLAGS = ("trading_blocked", "account_blocked", "trade_suspended_by_user")
+# Paper/shadow use 15-minute delayed SIP bars (ADR 0006): a bar up to 35 minutes old is normal while the
+# market is open (same limit as the paper service, T-006). Older is stale.
+MAX_DATA_AGE_SECONDS = 35 * 60
+MAX_OPEN_ORDERS_QUERY = 500
 MAX_CLOCK_SKEW_SECONDS = 2.0  # includes request latency; spec §18.3 asks to monitor time drift
 RATE_HEADERS = ("x-ratelimit-limit", "x-ratelimit-remaining")
 
 Response = tuple[int, dict[str, str], Any]
 
 
+class _RefuseRedirects(HTTPRedirectHandler):
+    """Authenticated preflight requests never follow a redirect: the host check applies to the URL actually
+    requested, and the APCA credential headers must not be re-sent to another location (PR #36 review)."""
+
+    def redirect_request(self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        raise AlpacaCheckError(f"redirect refused (HTTP {code})")
+
+
+_OPENER = build_opener(_RefuseRedirects)
+
+
 def _http_get(url: str, headers: dict[str, str], timeout: int) -> Response:
     request = Request(url, headers=headers, method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _OPENER.open(request, timeout=timeout) as response:
             return response.status, {k.lower(): v for k, v in response.headers.items()}, json.loads(response.read())
     except HTTPError as error:
-        try:
-            payload = json.loads(error.read())
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            payload = {}
-        return error.code, {}, payload
+        if 300 <= error.code < 400:
+            raise AlpacaCheckError(f"redirect refused (HTTP {error.code})") from None
+        return error.code, {}, {}  # the error body is not read: it may contain account details
     except (URLError, TimeoutError) as error:
         raise AlpacaCheckError(f"network request failed: {type(error).__name__}") from None
 
@@ -99,15 +114,20 @@ class PaperPreflight:
 
     @staticmethod
     def _error(status: int, payload: Any) -> str:
-        message = payload.get("message") if isinstance(payload, dict) else None
-        return f"HTTP {status}" + (f": {str(message)[:200]}" if message else "")
+        """Only the HTTP status: provider messages may contain account details (PR #36 review)."""
+        del payload
+        return f"HTTP {status}"
 
     # ------------------------------------------------------------------ broker side
     def account(self) -> dict[str, Any]:
         status, payload = self._get(f"{self.base}/v2/account")
         if status != 200:
             return {"ok": False, "error": self._error(status, payload)}
-        result: dict[str, Any] = {flag: bool(payload.get(flag)) for flag in ACCOUNT_FLAGS}
+        flags = payload if isinstance(payload, dict) else {}
+        result: dict[str, Any] = {
+            flag: flags.get(flag) if isinstance(flags.get(flag), bool) else None for flag in ACCOUNT_FLAGS
+        }
+        payload = flags
         result["status"] = payload.get("status")
         result["currency"] = payload.get("currency")
         result["multiplier"] = str(payload.get("multiplier"))
@@ -125,6 +145,8 @@ class PaperPreflight:
         status, payload = self._get(f"{self.base}/v2/account/configurations")
         if status != 200:
             return {"error": self._error(status, payload)}
+        if not isinstance(payload, dict):
+            return {"error": "invalid response"}
         return {field: payload.get(field) for field in CONFIG_FIELDS}
 
     def assets(self) -> dict[str, Any]:
@@ -142,17 +164,20 @@ class PaperPreflight:
         o_status, orders = self._get(f"{self.base}/v2/orders?{urlencode({'status': 'open', 'limit': 500})}")
         p_status, positions = self._get(f"{self.base}/v2/positions")
         result: dict[str, Any] = {}
-        if o_status == 200 and isinstance(orders, list):
+        if o_status == 200 and isinstance(orders, list) and all(isinstance(o, dict) for o in orders):
             result["open_orders"] = len(orders)
             result["open_order_symbols"] = sorted({str(order.get("symbol")) for order in orders})
+            # a full page may hide further open orders: the inventory is not known completely
+            result["open_orders_complete"] = len(orders) < MAX_OPEN_ORDERS_QUERY
         else:
-            result["open_orders_error"] = self._error(o_status, orders)
-        if p_status == 200 and isinstance(positions, list):
+            result["open_orders_error"] = self._error(o_status, orders) if o_status != 200 else "invalid response"
+        if p_status == 200 and isinstance(positions, list) and all(isinstance(p, dict) for p in positions):
             result["positions"] = len(positions)
             result["position_symbols"] = sorted({str(position.get("symbol")) for position in positions})
             result["short_positions"] = sum(1 for p in positions if str(p.get("side")) == "short")
+            result["positions_unknown_side"] = sum(1 for p in positions if str(p.get("side")) not in {"long", "short"})
         else:
-            result["positions_error"] = self._error(p_status, positions)
+            result["positions_error"] = self._error(p_status, positions) if p_status != 200 else "invalid response"
         return result
 
     def market_clock(self) -> dict[str, Any]:
@@ -165,7 +190,11 @@ class PaperPreflight:
         return result
 
     # ------------------------------------------------------------------ data side (timestamps only)
-    def data_freshness(self) -> dict[str, Any]:
+    def data_freshness(self, market_open: bool | None = None) -> dict[str, Any]:
+        """Per feed, data type and ETF: timestamp, age and a state (ok, missing, invalid, future, stale).
+
+        Age is only judged while the market is open; ``None`` (clock unknown) is judged like open (fail closed).
+        """
         now = self.clock()
         output: dict[str, Any] = {}
         for feed in FEEDS:
@@ -176,19 +205,17 @@ class PaperPreflight:
                 if status != 200:
                     per_feed[kind] = {"error": self._error(status, payload)}
                     continue
-                stamps = {}
-                for symbol, item in (payload.get(key) or {}).items():
-                    moment = _timestamp(item.get("t") if isinstance(item, dict) else None)
-                    stamps[symbol] = {
-                        "timestamp": moment.isoformat() if moment else None,
-                        "age_seconds": round((now - moment).total_seconds()) if moment else None,
-                    }
-                per_feed[kind] = stamps  # prices and sizes are dropped here, never stored
+                items = payload.get(key) if isinstance(payload, dict) else None
+                items = items if isinstance(items, dict) else {}
+                per_feed[kind] = {  # prices and sizes are dropped here, never stored
+                    symbol: _freshness(items.get(symbol), now, market_open is not False) for symbol in SYMBOLS
+                }
             output[feed] = per_feed
         return output
 
     def run(self) -> dict[str, Any]:
         account = self.account()
+        clock = self.market_clock()
         report = {
             "checked_at": self.clock().isoformat(),
             "safety": {"requests": "GET only", "orders_sent": False, "values_reported": "flags, counts, timestamps"},
@@ -196,8 +223,8 @@ class PaperPreflight:
             "configuration": self.configuration(),
             "assets": self.assets(),
             "orders_and_positions": self.open_orders_and_positions(),
-            "clock": self.market_clock(),
-            "data_freshness": self.data_freshness(),
+            "clock": clock,
+            "data_freshness": self.data_freshness(clock.get("is_open") if "error" not in clock else None),
             "rate_limits": dict(sorted(self.rate_limits.items())),
         }
         report["blockers"] = blockers(report)
@@ -206,28 +233,62 @@ class PaperPreflight:
 
 
 def blockers(report: dict[str, Any]) -> list[str]:
-    """Conditions that must stop a paper service from starting (spec §18.3: fail closed)."""
+    """Conditions that must stop a paper service from starting (spec §18.3: fail closed).
+
+    Everything a start depends on must be confirmed positively; an unknown or unreadable value blocks.
+    """
     found: list[str] = []
     account = report["account"]
     if "error" in account:
         return [f"account not readable ({account['error']})"]
     if account.get("status") != "ACTIVE":
         found.append(f"account status {account.get('status')}")
-    for flag in ("trading_blocked", "account_blocked", "trade_suspended_by_user"):
-        if account.get(flag):
+    for flag in REQUIRED_FALSE_FLAGS:
+        if account.get(flag) is None:
+            found.append(f"account flag {flag} not reported")
+        elif account.get(flag):
             found.append(flag)
-    if account.get("matches_configured_account") is False:
+    if account.get("matches_configured_account") is None:
+        found.append("account identity not confirmed: set PAPER_BROKER_ACCOUNT_ID")
+    elif account.get("matches_configured_account") is False:
         found.append("account differs from PAPER_BROKER_ACCOUNT_ID")
     if not account.get("equity_positive"):
         found.append("no positive equity")
+    configuration = report.get("configuration", {})
+    if "error" in configuration:
+        found.append(f"account configuration not readable ({configuration['error']})")
+    elif configuration.get("suspend_trade") is not False:
+        found.append(
+            "trading suspended in the account configuration"
+            if configuration.get("suspend_trade")
+            else "suspend_trade not reported in the account configuration"
+        )
     for symbol, asset in report["assets"].items():
-        if asset.get("error") or not asset.get("tradable") or asset.get("status") != "active":
+        if asset.get("error") or asset.get("tradable") is not True or asset.get("status") != "active":
             found.append(f"{symbol} not tradable")
     positions = report["orders_and_positions"]
-    if positions.get("open_orders"):
-        found.append("open orders exist that this system did not create")
-    if positions.get("short_positions"):
-        found.append("short positions exist")
+    if "open_orders_error" in positions or "open_orders" not in positions:
+        found.append(f"open orders not readable ({positions.get('open_orders_error', 'missing')})")
+    else:
+        if positions["open_orders"]:
+            found.append("open orders exist that this system did not create")
+        if not positions.get("open_orders_complete"):
+            found.append("open order list may be incomplete")
+    if "positions_error" in positions or "positions" not in positions:
+        found.append(f"positions not readable ({positions.get('positions_error', 'missing')})")
+    else:
+        if positions.get("short_positions"):
+            found.append("short positions exist")
+        if positions.get("positions_unknown_side"):
+            found.append("positions with unknown side")
+    freshness = report.get("data_freshness", {})
+    for symbol in SYMBOLS:
+        usable = any(
+            isinstance(kinds.get("bars"), dict) and kinds["bars"].get(symbol, {}).get("state") == "ok"
+            for kinds in freshness.values()
+        )
+        if not usable:
+            found.append(f"no usable current bars for {symbol} in any feed")
     return found
 
 
@@ -250,7 +311,11 @@ def warnings(report: dict[str, Any]) -> list[str]:
     for feed, kinds in report.get("data_freshness", {}).items():
         for kind, value in kinds.items():
             if isinstance(value, dict) and "error" in value:
-                found.append(f"{feed} {kind} not available in real time ({value['error']})")
+                found.append(f"{feed} {kind} not available ({value['error']})")
+                continue
+            for symbol, entry in value.items():
+                if entry.get("state") != "ok":
+                    found.append(f"{feed} {kind} {symbol}: {entry.get('state')}")
     return found
 
 
@@ -264,6 +329,22 @@ def _number(value: Any) -> float:
 def _positive(value: Any) -> bool:
     number = _number(value)
     return number == number and number > 0
+
+
+def _freshness(item: Any, now: datetime, judge_age: bool) -> dict[str, Any]:
+    if not isinstance(item, dict) or "t" not in item:
+        return {"timestamp": None, "age_seconds": None, "state": "missing"}
+    moment = _timestamp(item.get("t"))
+    if moment is None:
+        return {"timestamp": None, "age_seconds": None, "state": "invalid"}
+    age = round((now - moment).total_seconds())
+    if age < -MAX_CLOCK_SKEW_SECONDS:
+        state = "future"
+    elif judge_age and age > MAX_DATA_AGE_SECONDS:
+        state = "stale"
+    else:
+        state = "ok"
+    return {"timestamp": moment.isoformat(), "age_seconds": age, "state": state}
 
 
 def _timestamp(value: Any) -> datetime | None:

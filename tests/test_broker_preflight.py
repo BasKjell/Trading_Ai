@@ -37,21 +37,36 @@ def bar(t: str) -> dict[str, Any]:
     return {"t": t, "o": 678.01, "h": 679.02, "l": 677.03, "c": 678.04, "v": 424242}
 
 
+CONFIGURATION = {"fractional_trading": True, "no_shorting": False, "max_margin_multiplier": "4", "suspend_trade": False}
+
+
 class FakeAlpaca:
     def __init__(self, **overrides: Any) -> None:
         self.calls: list[str] = []
         self.account = {**ACCOUNT, **overrides.get("account", {})}
+        for key in overrides.get("drop_account", ()):
+            self.account.pop(key)
+        self.configuration = {**CONFIGURATION, **overrides.get("configuration", {})}
         self.orders = overrides.get("orders", [])
         self.positions = overrides.get("positions", [])
+        self.status = overrides.get("status", {})  # path -> HTTP status
+        self.data = overrides.get("data")  # (kind, feed) -> payload override
+        self.is_open = overrides.get("is_open", True)
 
     def __call__(self, url: str, headers: dict[str, str], timeout: int) -> tuple[int, dict[str, str], Any]:
         self.calls.append(url)
         path = urlparse(url).path
         rate = {"x-ratelimit-limit": "200", "x-ratelimit-remaining": "199"}
+        if path in self.status:
+            return self.status[path], {}, {"message": "account PA0SECRET42 detail"}
+        feed = "sip" if "feed=sip" in url else "iex"
+        if self.data is not None and path.startswith("/v2/stocks/"):
+            kind = "bars" if "bars" in path else "quotes"
+            return 200, {}, self.data(kind, feed)
         if path == "/v2/account":
             return 200, rate, self.account
         if path == "/v2/account/configurations":
-            return 200, {}, {"fractional_trading": True, "no_shorting": False, "max_margin_multiplier": "4"}
+            return 200, {}, self.configuration
         if path.startswith("/v2/assets/"):
             return 200, {}, ASSET
         if path == "/v2/orders":
@@ -59,9 +74,8 @@ class FakeAlpaca:
         if path == "/v2/positions":
             return 200, {}, self.positions
         if path == "/v2/clock":
-            return 200, {}, {"timestamp": NOW.isoformat(), "is_open": True}
+            return 200, {}, {"timestamp": NOW.isoformat(), "is_open": self.is_open}
         if path == "/v2/stocks/bars/latest":
-            feed = "sip" if "feed=sip" in url else "iex"
             stamp = "2026-11-18T17:44:00Z" if feed == "sip" else "2026-11-18T17:59:00.123456789Z"
             return 200, rate, {"bars": {"SPY": bar(stamp), "QQQ": bar(stamp)}}
         if path == "/v2/stocks/quotes/latest":
@@ -126,7 +140,7 @@ class PreflightTests(unittest.TestCase):
             seen.append(request.get_method())
             return Response()
 
-        with mock.patch.object(broker_preflight, "urlopen", fake_urlopen):
+        with mock.patch.object(broker_preflight._OPENER, "open", fake_urlopen):
             broker_preflight._http_get("https://paper-api.alpaca.markets/v2/clock", {}, 5)
         self.assertEqual(seen, ["GET"])
 
@@ -147,7 +161,10 @@ class PreflightTests(unittest.TestCase):
         )
         report = preflight(FakeAlpaca(), account_id="other").run()
         self.assertIn("account differs from PAPER_BROKER_ACCOUNT_ID", report["blockers"])
-        self.assertIsNone(preflight(FakeAlpaca(), account_id="").run()["account"]["matches_configured_account"])
+        unconfirmed = preflight(FakeAlpaca(), account_id="").run()
+        self.assertIsNone(unconfirmed["account"]["matches_configured_account"])
+        # PR #36 review 3: an unconfirmed account identity blocks the start
+        self.assertIn("account identity not confirmed: set PAPER_BROKER_ACCOUNT_ID", unconfirmed["blockers"])
 
     def test_margin_shorting_and_missing_feed_are_warnings(self) -> None:
         report = preflight(FakeAlpaca()).run()
@@ -160,6 +177,141 @@ class PreflightTests(unittest.TestCase):
     def test_unreadable_account_is_a_blocker(self) -> None:
         report = {"account": {"error": "HTTP 401"}, "assets": {}, "orders_and_positions": {}}
         self.assertEqual(blockers(report), ["account not readable (HTTP 401)"])
+
+
+def _cli(fake: FakeAlpaca) -> tuple[int, dict[str, Any]]:
+    import argparse
+    import contextlib
+    import io
+    from unittest import mock
+
+    from localtrader import broker_preflight, cli
+
+    out = io.StringIO()
+    patch = mock.patch.object(broker_preflight, "preflight_from_env", lambda path: preflight(fake))
+    with patch, contextlib.redirect_stdout(out):
+        code = cli.alpaca_preflight(argparse.Namespace(env_file="unused"))
+    return code, json.loads(out.getvalue())
+
+
+class ReviewFindingsTests(unittest.TestCase):
+    """PR #36 review (Codex): unknown broker state must never be start-ready."""
+
+    def test_clean_account_exits_zero(self) -> None:
+        code, report = _cli(FakeAlpaca())
+        self.assertEqual((code, report["blockers"]), (0, []))
+
+    def test_unreadable_orders_or_positions_block_on_cli_level(self) -> None:
+        cases = {
+            "orders": {"/v2/orders": 503},
+            "positions": {"/v2/positions": 503},
+            "both": {"/v2/orders": 503, "/v2/positions": 503},
+        }
+        for name, status in cases.items():
+            with self.subTest(name):
+                code, report = _cli(FakeAlpaca(status=status))
+                self.assertEqual(code, 2)
+                if "/v2/orders" in status:
+                    self.assertIn("open orders not readable (HTTP 503)", report["blockers"])
+                if "/v2/positions" in status:
+                    self.assertIn("positions not readable (HTTP 503)", report["blockers"])
+        code, report = _cli(FakeAlpaca(positions=[{"symbol": "SPY"}]))
+        self.assertIn("positions with unknown side", report["blockers"])
+        self.assertEqual(code, 2)
+
+    def test_full_order_page_is_incomplete(self) -> None:
+        from localtrader.broker_preflight import MAX_OPEN_ORDERS_QUERY
+
+        report = preflight(FakeAlpaca(orders=[{"symbol": "SPY"}] * MAX_OPEN_ORDERS_QUERY)).run()
+        self.assertIn("open order list may be incomplete", report["blockers"])
+
+    def test_redirect_is_refused_before_credentials_are_resent(self) -> None:
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        from localtrader import broker_preflight
+
+        seen: list[str] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                seen.append(self.path + " " + str(self.headers.get("APCA-API-KEY-ID")))
+                if self.path == "/start":
+                    self.send_response(302)
+                    self.send_header("Location", "/elsewhere")
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+
+            def log_message(self, *args: object) -> None:
+                return None
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_address[1]}/start"
+            with self.assertRaises(AlpacaCheckError):
+                broker_preflight._http_get(url, {"APCA-API-KEY-ID": "k"}, 5)
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(seen, ["/start k"])  # the redirect target never received the credentials
+
+    def test_account_configuration_and_flags_must_be_confirmed(self) -> None:
+        cases = [
+            ({"configuration": {"suspend_trade": True}}, "trading suspended in the account configuration"),
+            ({"configuration": {"suspend_trade": None}}, "suspend_trade not reported in the account configuration"),
+            ({"status": {"/v2/account/configurations": 500}}, "account configuration not readable (HTTP 500)"),
+            ({"drop_account": ("trading_blocked",)}, "account flag trading_blocked not reported"),
+            ({"drop_account": ("trade_suspended_by_user",)}, "account flag trade_suspended_by_user not reported"),
+        ]
+        for overrides, expected in cases:
+            with self.subTest(expected):
+                code, report = _cli(FakeAlpaca(**overrides))
+                self.assertIn(expected, report["blockers"])
+                self.assertEqual(code, 2)
+
+    def test_error_messages_never_reach_the_report(self) -> None:
+        for path in ("/v2/account", "/v2/stocks/bars/latest", "/v2/orders"):
+            with self.subTest(path):
+                text = json.dumps(preflight(FakeAlpaca(status={path: 403})).run())
+                self.assertNotIn("PA0SECRET42", text)
+                self.assertNotIn("detail", text)
+                self.assertIn("HTTP 403", text)
+
+    def test_missing_invalid_future_and_stale_data_block_when_no_feed_is_usable(self) -> None:
+        def payload(stamp: str | None) -> Any:
+            def data(kind: str, feed: str) -> dict[str, Any]:
+                if stamp is None:
+                    return {kind: {}}
+                item = bar(stamp) if kind == "bars" else quote(stamp)
+                return {kind: {"SPY": item, "QQQ": item}}
+
+            return data
+
+        cases = {
+            "missing": None,
+            "invalid": "not-a-time",
+            "future": "2026-11-18T18:05:00Z",
+            "stale": "2026-11-18T17:20:00Z",  # 40 minutes old while the market is open
+        }
+        for state, stamp in cases.items():
+            with self.subTest(state):
+                code, report = _cli(FakeAlpaca(data=payload(stamp)))
+                self.assertEqual(code, 2)
+                self.assertIn("no usable current bars for SPY in any feed", report["blockers"])
+                self.assertEqual(report["data_freshness"]["sip"]["bars"]["QQQ"]["state"], state)
+                self.assertIn(f"sip bars SPY: {state}", report["warnings"])
+        # old data while the market is closed is normal; one usable feed suffices
+        closed = preflight(FakeAlpaca(data=payload("2026-11-17T21:00:00Z"), is_open=False)).run()
+        self.assertEqual(closed["blockers"], [])
+        fresh = "2026-11-18T17:44:00Z"
+        sip_only = preflight(FakeAlpaca(data=lambda k, f: payload(fresh)(k, f) if f == "sip" else {k: {}})).run()
+        self.assertEqual(sip_only["blockers"], [])
+        self.assertIn("iex bars SPY: missing", sip_only["warnings"])
 
 
 if __name__ == "__main__":
