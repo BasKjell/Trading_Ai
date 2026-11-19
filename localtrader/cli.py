@@ -24,7 +24,7 @@ from .holdout import HOLDOUT_START, HoldoutError, research_limit
 from .intraday_data import CsvImportSpec, ImportedDataset, import_csv, synthetic_intraday
 from .intraday_engine import InstrumentSpec, IntradayEngine, buy_and_hold, compute_metrics, instruments_from_config
 from .intraday_fetch import dividends_digest, output_paths, read_dividends
-from .intraday_report import run_scenarios, strategies_from_config, write_intraday_report
+from .intraday_report import default_workers, run_scenarios, strategies_from_config, write_intraday_report
 from .ollama_lab import OllamaClient, OllamaStrategySearch
 from .paper import PaperSession
 from .reporting import write_report
@@ -72,19 +72,44 @@ def _load_intraday(
     synthetic_days: int | None,
     symbol: str | None = None,
 ) -> tuple[AppConfig, dict[str, InstrumentSpec], dict[str, ImportedDataset], dict[str, object]]:
+    """Load one or more instruments (``symbol`` may be ``"SPY,EFA,TLT"``) for one shared portfolio run."""
     config = load_config(config_path)
     instruments = instruments_from_config(config)
     settings = config.raw["intraday"]
-    symbol = symbol or str(settings["data_symbol"])
-    if symbol not in instruments:
-        raise SystemExit(f"no [instruments.{symbol}] in the config")
-    spec = instruments[symbol]
-    raw = config.raw["instruments"][symbol]
+    symbols = [item.strip() for item in (symbol or str(settings["data_symbol"])).split(",") if item.strip()]
+    if not symbols:
+        raise SystemExit("at least one symbol is required")
+    if len(set(symbols)) != len(symbols):
+        raise SystemExit("each symbol may appear only once")
+    unknown = [s for s in symbols if s not in instruments]
+    if unknown:
+        raise SystemExit(f"no [instruments.{unknown[0]}] in the config")
+    if data_file and len(symbols) > 1:
+        raise SystemExit("--data needs exactly one symbol; multiple symbols use their configured data_file")
     # The research path never reads the holdout; the boundary is fixed in code (localtrader/holdout.py).
     holdout: dict[str, object] = {"start": HOLDOUT_START.isoformat(), "excluded_bars": 0, "used": False}
+    datasets: dict[str, ImportedDataset] = {}
+    withheld = 0
+    for name in symbols:
+        data = _load_symbol(config, instruments[name], name, data_file, synthetic_days)
+        count = data.manifest.quality.get("holdout_rows_withheld", 0)
+        withheld += count if isinstance(count, int) else 0
+        datasets[name] = data
+    holdout["excluded_bars"] = withheld
+    return config, instruments, datasets, holdout
+
+
+def _load_symbol(
+    config: AppConfig,
+    spec: InstrumentSpec,
+    symbol: str,
+    data_file: str | None,
+    synthetic_days: int | None,
+) -> ImportedDataset:
+    settings = config.raw["intraday"]
+    raw = config.raw["instruments"][symbol]
     if synthetic_days:
-        data = synthetic_intraday(symbol, synthetic_days, config.seed, 15000.0, spec.session)
-        return config, instruments, {symbol: data}, holdout
+        return synthetic_intraday(symbol, synthetic_days, config.seed, 15000.0, spec.session)
     cutoff = research_limit()
     data = import_csv(
         CsvImportSpec(
@@ -99,7 +124,6 @@ def _load_intraday(
         ),
         spec.session,
     )
-    holdout["excluded_bars"] = data.manifest.quality.get("holdout_rows_withheld", 0)
     if raw.get("corporate_actions") == "dividends_file":
         # written by fetch-intraday next to the raw price file; missing file = fail closed
         dividends_path = output_paths(data_file or str(raw["data_file"]))["dividends"]
@@ -119,8 +143,8 @@ def _load_intraday(
         )
         data = replace(data, dividends=dividends, manifest=manifest)
     if not data.bars:
-        raise SystemExit("no bars left for the research period")
-    return config, instruments, {symbol: data}, holdout
+        raise SystemExit(f"no bars left for the research period ({symbol})")
+    return data
 
 
 def _strategy_names(value: str) -> list[str]:
@@ -143,7 +167,21 @@ def run_intraday_backtest(args: argparse.Namespace) -> int:
     )
     result = engine.run(datasets)
     benchmark = buy_and_hold(datasets, instruments, config, args.cost_multiplier)
-    output = write_intraday_report(result, args.output, benchmark, {"config_digest": config.digest, "holdout": holdout})
+    profiles = {
+        symbol: {
+            "fee_bps": instruments[symbol].costs.fee_bps,
+            "spread_bps": instruments[symbol].costs.spread_bps,
+            "slippage_bps": instruments[symbol].costs.slippage_bps,
+            "min_fee": instruments[symbol].costs.min_fee,
+        }
+        for symbol in datasets
+    }
+    output = write_intraday_report(
+        result,
+        args.output,
+        benchmark,
+        {"config_digest": config.digest, "holdout": holdout, "cost_profiles": profiles},  # what-if view (T-007)
+    )
     metrics = compute_metrics(result)
     print(
         json.dumps(
@@ -157,7 +195,10 @@ def run_intraday_backtest(args: argparse.Namespace) -> int:
 
 def run_intraday_stress(args: argparse.Namespace) -> int:
     config, instruments, datasets, holdout = _load_intraday(args.config, args.data, args.synthetic_days, args.symbol)
-    output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets)
+    workers = args.workers if args.workers is not None else default_workers()
+    if workers < 1:
+        raise SystemExit("--workers must be at least 1")
+    output = run_scenarios(config, instruments, _strategy_names(args.strategies), datasets, workers)
     output["holdout"] = holdout
     path = Path(args.output)
     path.mkdir(parents=True, exist_ok=True)
@@ -267,6 +308,27 @@ def run_paper(args: argparse.Namespace) -> int:
             indent=2,
         )
     )
+    return 0
+
+
+def compare_feeds(args: argparse.Namespace) -> int:
+    """T-012: data-only comparison of two bar feeds (no strategy, no returns)."""
+    from .feed_compare import compare_files, summary
+
+    results = []
+    for symbol in args.symbols.split(","):
+        symbol = symbol.strip()
+        results.append(
+            (
+                symbol,
+                compare_files(
+                    Path(args.reference_dir) / f"{symbol}_15m.csv", Path(args.candidate_dir) / f"{symbol}_15m.csv"
+                ),
+            )
+        )
+    print(summary(results))
+    if args.json:
+        print(json.dumps(dict(results), indent=2, default=str))
     return 0
 
 
@@ -468,11 +530,22 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--data", default=None, help="CSV file; default from [intraday] in the config")
         command.add_argument("--synthetic-days", type=int, default=None, help="use labelled synthetic data")
         command.add_argument("--output", default=default_out)
-        command.add_argument("--symbol", default=None, help="instrument from [instruments.*]; default [intraday]")
+        command.add_argument(
+            "--symbol",
+            default=None,
+            help="instrument(s) from [instruments.*], comma-separated for one shared portfolio; default [intraday]",
+        )
         if name == "intraday-backtest":
             command.add_argument("--cost-multiplier", type=float, default=1.0)
             command.add_argument("--spread-multiplier", type=float, default=1.0)
             command.add_argument("--delay-bars", type=int, default=0)
+        else:
+            command.add_argument(
+                "--workers",
+                type=int,
+                default=None,
+                help="processes for the independent scenarios; default: available CPUs, 1 = serial",
+            )
         command.set_defaults(func=func)
     spreads = sub.add_parser("measure-spreads", help="sample quoted SIP spreads at bar opens (research period only)")
     spreads.add_argument("--symbol", required=True)
@@ -511,6 +584,12 @@ def build_parser() -> argparse.ArgumentParser:
     paper.add_argument("--state", default="state/paper_state.json")
     paper.add_argument("--audit", default="state/audit.jsonl")
     paper.set_defaults(func=run_paper)
+    feeds = sub.add_parser("compare-feeds", help="compare two 15-minute feeds (e.g. SIP vs IEX), data only")
+    feeds.add_argument("--reference-dir", default="data")
+    feeds.add_argument("--candidate-dir", default="data/iex")
+    feeds.add_argument("--symbols", default="SPY,QQQ")
+    feeds.add_argument("--json", action="store_true")
+    feeds.set_defaults(func=compare_feeds)
     kill = sub.add_parser("kill-switch")
     kill.add_argument("action", choices=["on", "off"])
     kill.add_argument("--state", default="state/paper_state.json")

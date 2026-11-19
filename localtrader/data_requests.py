@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .alpaca_check import load_local_env
-from .data import available_data_catalog, bars_hash, validate_bars
+from .data import approved_download_catalog, available_data_catalog, bars_hash, validate_bars
 from .domain import Bar, Market, to_dict
 from .research_db import ResearchDB
 from .strategy_dsl import StrategySpec
@@ -103,7 +103,7 @@ class DataRequestPolicy:
             raise DataRequestError("end must be historical and at least 15 minutes old")
         if request.start < datetime(2016, 1, 1, tzinfo=UTC):
             raise DataRequestError("Alpaca Basic historical policy starts at 2016-01-01")
-        catalog = available_data_catalog()
+        catalog = approved_download_catalog()
         missing = set(request.symbols) - set(catalog)
         if missing:
             raise DataRequestError(f"symbols are not in the approved data catalog: {sorted(missing)}")
@@ -378,7 +378,7 @@ class AlpacaDatasetDownloader:
         }[timeframe]
 
     def _normalize(self, request: DataRequestSpec, pages: list[dict[str, Any]]) -> list[Bar]:
-        catalog = available_data_catalog()
+        catalog = approved_download_catalog()
         received = datetime.now(UTC)
         output: list[Bar] = []
         for payload in pages:

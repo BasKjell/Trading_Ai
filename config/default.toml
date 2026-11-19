@@ -32,6 +32,12 @@ NVDA = "us_large_cap_tech"
 BTC-USD = "crypto"
 ETH-USD = "crypto"
 DAX = "de_equity_index"
+# T-021 multi-asset ETFs: one group per asset class; EFA and EEM share the non-US equity group
+EFA = "non_us_equity"
+EEM = "non_us_equity"
+TLT = "us_treasury"
+GLD = "gold"
+DBC = "broad_commodities"
 
 [costs]
 equity_fee_bps = 0.10
@@ -148,6 +154,110 @@ data_timezone = "UTC"
 corporate_actions = "dividends_file"  # data/<SYMBOL>_dividends.csv from fetch-intraday
 dividend_withholding = 0.15     # US withholding with W-8BEN treaty rate (assumption)
 session_calendar = "nyse"       # early closes; days after the covered range are not traded
+
+# T-021: further liquid US-listed ETFs for the multi-asset trend portfolio (same session, data path and
+# corporate-action handling as SPY). Spreads are assumptions (about twice one tick at typical prices), not
+# measured; slippage for DBC doubled because its volume is much lower than that of the other ETFs.
+
+[instruments.EFA]
+market = "etf"
+venue = "NYSE Arca via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 2.5                # MSCI EAFE (developed ex-US); 1 cent at ~80 USD is 1.25 bp; doubled
+slippage_bps = 1.0
+min_fee = 0.0
+qty_step = 0.001
+financing_rate_annual = 0.0
+data_file = "data/EFA_15m.csv"
+data_source = "alpaca_sip_raw"
+data_timezone = "UTC"
+corporate_actions = "dividends_file"
+dividend_withholding = 0.15     # same assumption as SPY
+session_calendar = "nyse"
+
+[instruments.EEM]
+market = "etf"
+venue = "NYSE Arca via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 4.5                # MSCI Emerging Markets; 1 cent at ~45 USD is 2.2 bp; doubled
+slippage_bps = 1.0
+min_fee = 0.0
+qty_step = 0.001
+financing_rate_annual = 0.0
+data_file = "data/EEM_15m.csv"
+data_source = "alpaca_sip_raw"
+data_timezone = "UTC"
+corporate_actions = "dividends_file"
+dividend_withholding = 0.15     # same assumption as SPY
+session_calendar = "nyse"
+
+[instruments.TLT]
+market = "etf"
+venue = "Nasdaq via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 2.0                # 20+ year US Treasuries; 1 cent at ~100 USD is 1 bp; doubled
+slippage_bps = 1.0
+min_fee = 0.0
+qty_step = 0.001
+financing_rate_annual = 0.0
+data_file = "data/TLT_15m.csv"
+data_source = "alpaca_sip_raw"
+data_timezone = "UTC"
+corporate_actions = "dividends_file"
+dividend_withholding = 0.15     # same assumption as SPY
+session_calendar = "nyse"
+
+[instruments.GLD]
+market = "etf"
+venue = "NYSE Arca via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 1.5                # physical gold; quoted spread often 1-2 cents at 120-380 USD; margin
+slippage_bps = 1.0
+min_fee = 0.0
+qty_step = 0.001
+financing_rate_annual = 0.0
+data_file = "data/GLD_15m.csv"
+data_source = "alpaca_sip_raw"
+data_timezone = "UTC"
+corporate_actions = "dividends_file"
+dividend_withholding = 0.15     # same assumption as SPY
+session_calendar = "nyse"
+
+[instruments.DBC]
+market = "etf"
+venue = "NYSE Arca via Alpaca"
+currency = "USD"
+session_timezone = "America/New_York"
+session_start = "09:30"
+session_end = "16:00"
+fee_bps = 0.1
+spread_bps = 10.0               # broad commodity futures; 1 cent at ~20 USD is 5 bp; doubled; lower volume
+slippage_bps = 2.0
+min_fee = 0.0
+qty_step = 0.001
+financing_rate_annual = 0.0
+data_file = "data/DBC_15m.csv"
+data_source = "alpaca_sip_raw"
+data_timezone = "UTC"
+corporate_actions = "dividends_file"
+dividend_withholding = 0.15     # same assumption as SPY
+session_calendar = "nyse"
 
 # Final independent test period, fixed before the first evaluation of the ETF data (T-018, ADR 0005).
 # The boundary is fixed in localtrader/holdout.py; this entry documents it and must be identical (checked

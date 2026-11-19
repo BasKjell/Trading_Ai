@@ -64,3 +64,10 @@ jedem Report (`summary.json`) und jedem Registereintrag.
 `scripts/coding_runner.py` verwendet die GitHub CLI für Diagnose und Jobvorschau. Die
 Worker-Ausführung ist technisch gesperrt. Vor einer Freischaltung ist ein getrennt geprüfter
 Ausführungsbereich erforderlich. Siehe [CODING_RUNNER.md](CODING_RUNNER.md).
+
+## Entwicklungsorchestrator (T-024)
+
+**Implementiert und offline getestet.** Separater Python-Steuerprozess mit SQLite für den
+Entwicklungsablauf. Isolierte Container bearbeiten Git-Snapshots. Nur der Controller führt
+Schreibaktionen auf GitHub aus. Ausführung und automatischer Merge sind in der mitgelieferten
+Konfiguration deaktiviert. Siehe [DEV_ORCHESTRATOR.md](DEV_ORCHESTRATOR.md).

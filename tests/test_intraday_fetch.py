@@ -140,6 +140,70 @@ class DividendTests(unittest.TestCase):
         with self.assertRaises(CorporateActionError):
             derive_dividends(raw, adjusted)
 
+    def test_cent_rounding_of_low_priced_adjusted_series_is_tolerated(self) -> None:
+        # T-021 regression (EFA 2016-01-05): adjusted ~42 USD rounded to cents moves adjusted/raw by ~2.4e-4
+        starts = [OPEN + timedelta(minutes=15 * i) for i in range(4)]
+        raw = [bar("EFA", s, p) for s, p in zip(starts, (57.72, 57.55, 57.35, 57.68), strict=True)]
+        adjusted = [replace(b, close=c) for b, c in zip(raw, (42.12, 42.0, 41.85, 42.1), strict=True)]
+        from localtrader.intraday_fetch import derive_dividends_with_precision
+
+        self.assertEqual(derive_dividends_with_precision(raw, adjusted)[0], {})
+        # PR #48 review 2: the central T-008 rule stays strict and still rejects this noise
+        with self.assertRaises(CorporateActionError):
+            derive_dividends(raw, adjusted)
+
+    def test_daily_median_damps_rounding_noise_in_the_derived_amount(self) -> None:
+        # T-021 (TLT 2020-11-02): a noisy first bar must not move the derived amount by several percent
+        starts = _days(2)
+        day = [s + timedelta(minutes=15 * i) for s in starts for i in range(5)]
+        raw = [bar("TLT", s, 160.0) for s in day]
+        factor = 1 - 0.17 / 160.0
+        noisy = [factor * 120.0 / 160.0 * (1 + (6e-5 if i == 0 else 0.0)) for i in range(5)]
+        ratios = noisy + [120.0 / 160.0] * 5
+        adjusted = [replace(b, close=b.close * r) for b, r in zip(raw, ratios, strict=True)]
+        from localtrader.intraday_fetch import derive_dividends_with_precision
+
+        derived = derive_dividends_with_precision(raw, adjusted)[0]
+        self.assertEqual(list(derived), [US_REGULAR_SESSION.local_date(starts[1])])
+        self.assertAlmostEqual(derived[US_REGULAR_SESSION.local_date(starts[1])], 0.17, delta=0.002)
+
+    def test_small_dividend_is_checked_against_the_rounding_precision(self) -> None:
+        # T-021 regression (EEM 2021-12-30): 0.026007 official vs 0.0241 derived at ~48 USD is within cent precision
+        from localtrader.intraday_fetch import crosscheck_dividends, derive_dividends_with_precision
+
+        ex = date(2021, 12, 30)
+        official = {ex: (date(2022, 1, 5), 0.026007)}
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.0241})[0])
+        self.assertEqual(crosscheck_dividends(official, {ex: 0.0241}, None, {ex: 0.011}), [])
+        # outside the precision it still aborts
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.05}, None, {ex: 0.011})[0])
+        starts = _days(3)
+        raw = [bar("EEM", s, 48.0) for s in starts]
+        ex_day = US_REGULAR_SESSION.local_date(starts[2])
+        adjusted = FakeDownloader(raw, lambda day: 0.95 if day < ex_day else 1.0).download(replace_request("all"))[0]
+        amounts, precision = derive_dividends_with_precision(raw, adjusted)
+        self.assertEqual(list(amounts), [ex_day])
+        self.assertAlmostEqual(
+            precision[ex_day], 48.0 * (0.005 / (48.0 * 0.95) + 0.005 / 48.0), places=9
+        )  # larger band: day before
+
+    def test_central_validator_keeps_the_strict_rule(self) -> None:
+        # PR #48 review 2: the T-021 rounding rule must not change the central T-008 path (checked without a run)
+        import inspect
+
+        from localtrader import t008_central
+        from localtrader.intraday_fetch import crosscheck_dividends
+
+        source = inspect.getsource(t008_central)
+        self.assertIn("derive_dividends(series[", source)
+        self.assertNotIn("derive_dividends_with_precision", source)
+        self.assertNotIn("precision", source)
+        # same synthetic case as the review: 0.046 official, 0.040 derived, band ~0.01125
+        ex = date(2024, 3, 18)
+        official = {ex: (date(2024, 3, 22), 0.046)}
+        self.assertIn(" vs derived ", crosscheck_dividends(official, {ex: 0.040})[0])  # central: rejected
+        self.assertEqual(crosscheck_dividends(official, {ex: 0.040}, None, {ex: 0.01125}), [])  # research download
+
     def test_adjustment_changing_within_a_day_is_rejected(self) -> None:
         raw = [bar("SPY", OPEN, 100.0), bar("SPY", OPEN + timedelta(minutes=15), 100.0)]
         adjusted = [raw[0], replace(raw[1], close=99.0)]
