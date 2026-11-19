@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+#
+# agentgateway (v1.7.0) as the single OpenAI-compatible entry point for agent roles (T-025).
+# Agents ask for a role alias (model name), never for a concrete model; swapping a model is a change here.
+#
+#   local-coder     qwen3-coder:30b   family qwen    author / drafts (high)
+#   local-reviewer  gemma3:12b        family gemma   independent review of local authors (medium)
+#   local-doku      qwen3:8b          family qwen    documentation and pre-review hints (low)
+#
+# Local use:  scripts/agent_gateway.sh   ->  http://127.0.0.1:4000/v1/chat/completions
+# (runs a private copy: agentgateway writes a generated session key back into its config file)
+# The orchestrator reaches the gateway only through its internal Docker network (docs/DEV_ORCHESTRATOR.md).
+# Secrets never live in this file: external providers read keys from environment variables only.
+
+config:
+  adminAddr: 127.0.0.1:15000
+  statsAddr: 127.0.0.1:15020
+  readinessAddr: 127.0.0.1:15021
+
+# Loopback only. Without bindAddress agentgateway listens on all interfaces.
+gateways:
+  default:
+    bindAddress: 127.0.0.1
+    port: 4000
+
+llm:
+  models:
+  - name: local-coder
+    provider: ollama
+    params:
+      model: qwen3-coder:30b
+  - name: local-reviewer
+    provider: ollama
+    params:
+      model: gemma3:12b
+  - name: local-doku
+    provider: ollama
+    params:
+      model: qwen3:8b
+  # External roles stay disabled until the operator approves the data flow (AGENTS.md §5).
+  # Enable by adding an entry like the following (agentgateway expands environment variables
+  # anywhere in this file, also in comments, so the variable is written without its dollar sign here):
+  #   - name: claude-reviewer, provider: anthropic, params: {model: claude-opus-5-5,
+  #     apiKey: <dollar>ANTHROPIC_API_KEY}
