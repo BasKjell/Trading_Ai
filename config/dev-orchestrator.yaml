@@ -24,6 +24,7 @@ codex:
   proxy: http://egress-codex:3128
   network: trading-dev-codex
   auth_volume: trading-dev-codex-auth
+  # Optional: seccomp_profile (absolute controller-local path) and seccomp_sha256.
 claude:
   model: claude-opus-5-5
   proxy: http://egress-claude:3128

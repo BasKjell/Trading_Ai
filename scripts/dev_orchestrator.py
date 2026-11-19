@@ -75,6 +75,17 @@ def config_file(path: Path) -> dict[str, Any]:
             raise RunnerError("provider requires a restricted forward proxy")
         if settings["network"] in {"none", "host", "bridge", "default"}:
             raise RunnerError("provider requires its own restricted Docker network")
+        if {"seccomp_profile", "seccomp_sha256"} & settings.keys():
+            path = settings.get("seccomp_profile")
+            digest = settings.get("seccomp_sha256")
+            if (
+                provider != "codex"
+                or not isinstance(path, str)
+                or not Path(path).is_absolute()
+                or not isinstance(digest, str)
+                or not re.fullmatch(r"[a-f0-9]{64}", digest)
+            ):
+                raise RunnerError("Codex seccomp requires an absolute profile path and a SHA-256 digest")
     if all(provider in config for provider in FAMILIES):
         for key in ("auth_volume", "network"):
             if config["codex"][key] == config["claude"][key]:
@@ -282,7 +293,9 @@ def task_authorization(config: dict[str, Any], scope: dict[str, Any], author: st
             roles[key] = spec(config, scope[key])
     transports = {
         provider: {
-            key: config[provider][key] for key in ("url", "network", "proxy", "auth_volume") if key in config[provider]
+            key: config[provider][key]
+            for key in ("url", "network", "proxy", "auth_volume", "seccomp_sha256")
+            if key in config[provider]
         }
         for provider in {role["provider"] for role in roles.values()}
     }

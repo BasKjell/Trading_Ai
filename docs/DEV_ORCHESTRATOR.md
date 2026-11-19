@@ -144,6 +144,14 @@ Der Orchestrator arbeitet mit **Rollen** statt festen Anbietern. Eine Rolle legt
    durchsetzt: `workspace-write` darf nur im vorgesehenen Arbeitsbereich schreiben und
    `read-only` muss Schreibversuche abweisen. Einen Fehler oder eine schwächere Isolation als
    Blockade behandeln. Auch die Testimage-Abhängigkeiten prüfen.
+   Codex erhält sein privates Home in einem separaten tmpfs unter `/run/codex-agent`.
+   Falls Dockers Standardprofil Bubblewrap blockiert, können im `codex`-Abschnitt
+   `seccomp_profile` (absoluter Pfad außerhalb des Repositorys) und `seccomp_sha256`
+   (SHA-256 des geprüften, lokal gespeicherten Profils) gesetzt werden. Der Controller
+   prüft den Hash vor dem Start und vor jedem Codex-Aufruf. Docker erhält eine private
+   Kopie der geprüften Bytes. Für Claude, Gateway und Offline-Tests gilt die Standardpolicy.
+   Das Profil muss standardmäßig verweigern. Prüfe beide Sandbox-Modi mit dem konkret
+   verwendeten Docker-Worker-Image und Profil vor der Pilotfreigabe.
 3. [YAML-Beispiel](../config/dev-orchestrator.yaml) außerhalb des Clones kopieren, private
    Zustandsablage, Image-Digest, Modelle, Netze und mindestens einen freigegebenen Scope setzen.
    `TRADING_DEV_STATE` und `TRADING_DEV_IMAGE` überschreiben die jeweiligen YAML-Werte.

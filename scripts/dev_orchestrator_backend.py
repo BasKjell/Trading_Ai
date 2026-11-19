@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from typing import Any
 
 from agent_roles import MAX_TOKENS, label, role_of, spec
 from coding_runner import CLAIM, GitHub, Job, RunnerError, command, eligible, labels, outcome, task_id
+from dev_orchestrator_worker import CODEX_AGENT_ROOT
 
 
 class Quota(RunnerError):
@@ -83,6 +85,30 @@ def bounded(args: list[str], cwd: Path, prompt: str, timeout: int, maximum: int)
             proc.wait()
 
 
+def codex_seccomp_profile(account: dict[str, Any]) -> bytes | None:
+    """Read the exact, approved contents of an optional controller-local profile."""
+    if "seccomp_profile" not in account:
+        return None
+    try:
+        fd = os.open(account["seccomp_profile"], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 256_000:
+                raise RunnerError("Codex seccomp profile must be a bounded regular file")
+            raw = handle.read(256_001)
+    except OSError as exc:
+        raise RunnerError("Codex seccomp profile cannot be read safely") from exc
+    if len(raw) > 256_000 or hashlib.sha256(raw).hexdigest() != account.get("seccomp_sha256"):
+        raise RunnerError("Codex seccomp profile SHA-256 does not match")
+    try:
+        policy = json.loads(raw)
+    except (UnicodeError, ValueError) as exc:
+        raise RunnerError("Codex seccomp profile is not valid JSON") from exc
+    if not isinstance(policy, dict) or policy.get("defaultAction") != "SCMP_ACT_ERRNO":
+        raise RunnerError("Codex seccomp profile must deny by default")
+    return raw
+
+
 class Containers:
     def __init__(self, root: Path, settings: dict[str, Any]) -> None:
         self.root = root
@@ -99,6 +125,8 @@ class Containers:
             if provider not in used:
                 continue
             account = self.settings[provider]
+            if provider == "codex":
+                codex_seccomp_profile(account)
             result = command(
                 ["docker", "network", "inspect", "--format", "{{.Internal}} {{.Driver}}", account["network"]], self.root
             )
@@ -186,11 +214,21 @@ class Containers:
                 "--mount",
                 f"type=volume,source={account['auth_volume']},target=/auth,readonly,volume-nocopy",
             ]
+        if provider == "codex":
+            args += ["--tmpfs", f"{CODEX_AGENT_ROOT}:rw,nosuid,nodev,size=64m,uid={uid},gid={gid},mode=0700"]
         if provider == "gateway":
             args += ["--env", f"GATEWAY_URL={account['url']}"]
-        args += ["--entrypoint", argv[0], cfg["image"], *argv[1:]]
+        profile = codex_seccomp_profile(account) if provider == "codex" else None
         try:
-            return bounded(args, self.root, prompt, cfg["timeout_seconds"], cfg["output_bytes"])
+            with contextlib.ExitStack() as cleanup_files:
+                if profile is not None:
+                    # Docker reads the verified copy, even if the configured source changes in the meantime.
+                    directory = cleanup_files.enter_context(tempfile.TemporaryDirectory(prefix="trading-seccomp-"))
+                    path = Path(directory) / "profile.json"
+                    path.write_bytes(profile)
+                    args += ["--security-opt", f"seccomp={path}"]
+                args += ["--entrypoint", argv[0], cfg["image"], *argv[1:]]
+                return bounded(args, self.root, prompt, cfg["timeout_seconds"], cfg["output_bytes"])
         finally:
             # Docker is a separate daemon. Killing its CLI does not guarantee the container stopped.
             cleanup = subprocess.run(
