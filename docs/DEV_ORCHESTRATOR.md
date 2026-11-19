@@ -1,12 +1,10 @@
 # Entwicklungsorchestrator für Trading_Ai
 
-**Status: MVP implementiert und offline getestet.** Der bestehende T-020-Runner behält seine technische
-Sperre. Dieser separate Einstiegspunkt ist standardmäßig deaktiviert. Die Benutzeranforderung vom
-18.11.2026 sieht automatisches Mergen für unkritische Änderungen vor. In diesem MVP braucht es dafür
-eine Änderung der Merge-Regeln in AGENTS.md §2a und Spec §21, eine separate Aktivierung im Controller
-und die Issue-Freigabe `auto-merge`. Die Betriebsfreigabe nach
-AGENTS.md §7, ein unabhängiges Review der Isolation und ein beaufsichtigter erster Lauf stehen aus.
-Änderungen am Orchestrator selbst sind Klasse K.
+**Status: MVP implementiert und offline getestet.** Ausführung und Automerge sind deaktiviert.
+Für diesen Stand gelten die Freigaben in AGENTS.md §2a, §2b und der Spec §21. Die Betriebsfreigabe,
+das unabhängige Review der Isolation und der separat durch Bas freigegebene beaufsichtigte
+erste Lauf sind Voraussetzungen für die Aktivierung der Ausführung. Änderungen am Orchestrator
+sind Klasse K.
 
 ## Ablauf
 
@@ -28,8 +26,7 @@ flowchart TD
     R -->|P1 oder P2| F["Befund an ursprünglichen Autor"]
     F --> D
     R -->|Freigabe| Q["Head, CI und Branch-Schutz prüfen"]
-    Q -->|Automerge freigegeben| M["Merge-Commit und Issue auf done"]
-    Q -->|Manueller Merge| H["PR zur Integration offen lassen"]
+    Q --> H["PR zur manuellen Integration offen lassen"]
 ```
 
 Der Steuerprozess veröffentlicht Commit, PR und Kommentar-Review. Jeder Review-Head wird davor erneut
@@ -39,14 +36,9 @@ Review gilt für genau den gespeicherten Head-SHA und `main`. Der nächste aktiv
 Abschluss der automatischen Schritte. Bereits existierende fremde PRs bleiben im normalen
 manuellen Projekt-Review-Prozess.
 
-Nur der Controller kann mergen. Er prüft Klasse-U-Scope, die aktuellen Freigaben, den enthaltenen
-Stand von `main`, das unabhängige Review, Kommentar-/Review-Blockaden, WIP-Commits und den grünen
-Pflichtcheck vom auf GitHub hinterlegten App-Absender für genau diesen Head. GitHub muss
-Pull-Request-Schutz, strikte aktuelle Basis, gebundene Pflichtchecks, Gesprächsauflösung und
-Adminsperre erzwingen. GitHubs zusätzliche Pflicht-Approvals bleiben wirksam. Merges erfolgen mit
-Merge-Commit und erwartetem Head. Klasse K, kritische Pfade, veränderte Freigaben und unklarer Scope
-bleiben außerhalb der automatischen Integration. Klasse U ist vorab vom Benutzer zu klassifizieren.
-Eine Dateiliste allein kann kritische Semantik nicht erkennen.
+Die nachfolgende Integration erfolgt gemäß AGENTS.md §2a. Der im MVP vorhandene bedingte
+Merge-Pfad ist gesperrt. `merge_enabled` bleibt `false`. Klasse U ist vorab von Bas zu
+klassifizieren. Eine Dateiliste allein kann kritische Semantik nicht erkennen.
 
 ## Ausführungsgrenzen
 
@@ -104,9 +96,7 @@ Eine Dateiliste allein kann kritische Semantik nicht erkennen.
    `TRADING_DEV_STATE` und `TRADING_DEV_IMAGE` überschreiben die jeweiligen YAML-Werte.
 4. `plan` prüft die Auswahl lesend. Nach Freigabe zunächst lediglich `execution_enabled: true`
    setzen, einen harmlosen Pilot-Task markieren und den Dienst mit `start --execute` beaufsichtigen.
-   `merge_enabled` bleibt bis zur ausdrücklichen Änderung von AGENTS.md §2a und Spec §21 auf
-   `false`. Diese Änderung selbst benötigt ein unabhängiges Klasse-K-Review. Ein erfolgreicher Pilot
-   und eine explizite Issue-Freigabe sind zusätzliche Voraussetzungen.
+   `merge_enabled` bleibt `false`.
 
 ```bash
 python3.12 scripts/dev_orchestrator.py plan --config /absolute/pilot.yaml
