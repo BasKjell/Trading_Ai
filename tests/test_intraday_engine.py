@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from collections.abc import Iterator
+from copy import copy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -213,6 +215,73 @@ class AvailabilityTests(unittest.TestCase):
             ],
         )
         self.assertTrue(any(d["event"] == "late_bar" for d in result.decisions))
+
+    def test_late_backfill_cannot_change_earlier_contexts_or_signals(self) -> None:
+        data = bars([FLAT] * 8)
+        first, second, third, fourth, fifth, _, after_gap, last = data.bars
+        late = replace(first, close=99.75, received_at=fifth.start + timedelta(minutes=10))
+        data = replace(
+            data,
+            bars=[late, second, third, fourth, fifth, after_gap, last],
+            after_gap=frozenset({after_gap.start}),
+        )
+        retained: list[StrategyContext] = []
+
+        class BackfillStrategy(Scripted):
+            def evaluate(self, ctx: StrategyContext) -> Signal | None:
+                retained.append(ctx)
+                if ctx.bars[0].close == late.close:
+                    return super().evaluate(ctx)
+                return None
+
+        result = IntradayEngine(self.config, instrument(), [BackfillStrategy({4: 95.0})]).run({"X": data})
+        before_backfill, after_backfill = retained[2:4]
+        self.assertEqual(tuple(before_backfill.bars), (second, third, fourth))
+        self.assertEqual(tuple(before_backfill.bars[::-2]), (fourth, second))
+        self.assertEqual(tuple(before_backfill.hourly), ())
+        self.assertEqual(tuple(after_backfill.bars), (late, second, third, fourth, fifth))
+        self.assertEqual([hour.received_at for hour in after_backfill.hourly], [late.received_at])
+        self.assertEqual([d["time"] for d in result.decisions if d["event"] == "signal"], [fifth.end.isoformat()])
+        self.assertEqual(
+            [d["time"] for d in result.decisions if d["event"] == "late_bar"], [late.received_at.isoformat()]
+        )
+        self.assertIn("execution bar follows a data gap", [d.get("reason") for d in result.decisions])
+
+    def test_iterator_keeps_history_visible_at_its_creation(self) -> None:
+        data = bars([FLAT] * 4)
+        first, second, third, fourth = data.bars
+        late = replace(first, received_at=fourth.end)
+        data = replace(data, bars=[late, second, third, fourth])
+        retained: list[Iterator[Bar]] = []
+
+        class IteratorStrategy(Scripted):
+            def evaluate(self, ctx: StrategyContext) -> Signal | None:
+                if ctx.now == second.end:
+                    retained.append(iter(copy(ctx.bars)))
+                return None
+
+        IntradayEngine(self.config, instrument(), [IteratorStrategy({})]).run({"X": data})
+
+        self.assertEqual(tuple(retained[0]), (second,))
+
+    def test_overlap_can_process_a_later_receipt_before_an_earlier_one(self) -> None:
+        data = bars([FLAT] * 2)
+        first, second = data.bars
+        first = replace(first, received_at=first.start + timedelta(minutes=35))
+        second_start = first.start + timedelta(minutes=20)
+        second_end = first.start + timedelta(minutes=25)
+        second = replace(second, start=second_start, end=second_end, received_at=second_end)
+        data = replace(data, bars=[first, second])
+        other = bars([FLAT], first.end)
+        overlap_end = first.start + timedelta(minutes=45)
+        other = replace(other, bars=[replace(other.bars[0], symbol="Y", end=overlap_end, received_at=overlap_end)])
+        specs = instrument()
+        specs["Y"] = replace(specs["X"], symbol="Y")
+        seen: list[tuple[datetime, list[datetime]]] = []
+
+        IntradayEngine(self.config, specs, [Recorder(seen)]).run({"X": data, "Y": other})
+
+        self.assertEqual(seen[:2], [(first.received_at, [first.start]), (second.received_at, [second.start])])
 
     def test_later_low_does_not_change_earlier_decision(self) -> None:
         # Regression (PR #17 review 2): bar 1 arrives late (09:35), inside bar 2 (09:30-09:45). Whether
@@ -439,6 +508,20 @@ class StrategyTests(unittest.TestCase):
         signal = strategy.evaluate(self._ctx([100, 100, 100, 100, 100, 102], [90, 95, 100]))
         assert signal is not None and signal.stop_price is not None
         self.assertLess(signal.stop_price, 102)
+
+    def test_time_stops_count_visible_bars_not_elapsed_slots(self) -> None:
+        ctx = self._ctx([100.0] * 24 + [99.8], [90, 95, 100], in_position=True)
+        entry = ctx.bars[-6].start + timedelta(minutes=1)
+        ctx = replace(ctx, bars=(*ctx.bars[:-4], *ctx.bars[-3:]), entry_time=entry)
+        trend = IntradayTrendStrategy(max_hold_bars=3)
+        mean = MeanReversionStrategy(trend_filter_bars=10, max_hold_bars=3)
+
+        trend_exit = trend.evaluate(ctx)
+        mean_exit = mean.evaluate(ctx)
+
+        assert trend_exit is not None and mean_exit is not None
+        self.assertEqual(trend_exit.reason, "time stop after 4 bars")
+        self.assertEqual(mean_exit.reason, "max holding time 4 bars")
 
     def test_mean_reversion_enters_on_deviation_in_range_and_exits_at_reference(self) -> None:
         strategy = MeanReversionStrategy(

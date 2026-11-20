@@ -17,6 +17,8 @@ B. ``MeanReversionStrategy`` – hypothesis: short-horizon deviations from a mov
 
 from __future__ import annotations
 
+from bisect import bisect_left
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from statistics import fmean, pstdev
@@ -32,8 +34,8 @@ class StrategyContext:
     """Everything a strategy may look at for the decision at ``now`` (a completed bar's end)."""
 
     now: datetime
-    bars: list[Bar]  # completed 15m bars, last one ends at ``now``
-    hourly: list[Bar]  # 1h bars completely available at ``now``
+    bars: Sequence[Bar]  # visible completed 15m bars, ordered by start
+    hourly: Sequence[Bar]  # 1h bars completely available at ``now``
     in_position: bool
     entry_time: datetime | None
     entry_price: float | None
@@ -54,7 +56,7 @@ def sma(values: list[float], window: int) -> float | None:
     return fmean(values[-window:])
 
 
-def atr(bars: list[Bar], window: int) -> float | None:
+def atr(bars: Sequence[Bar], window: int) -> float | None:
     if len(bars) < window + 1:
         return None
     ranges = [
@@ -114,12 +116,14 @@ class IntradayTrendStrategy:
         needed = max(self.breakout_bars, self.exit_bars, self.atr_bars) + 1
         if len(bars) < needed:
             return None
-        hourly_closes = [bar.close for bar in ctx.hourly]
+        hourly_closes = (
+            [bar.close for bar in ctx.hourly[-self.trend_window_hours :]] if self.trend_window_hours > 0 else []
+        )
         trend = sma(hourly_closes, self.trend_window_hours)
         close = bars[-1].close
         if ctx.in_position:
             if self.max_hold_bars and ctx.entry_time is not None:
-                held = sum(1 for bar in bars if bar.start >= ctx.entry_time)
+                held = len(bars) - bisect_left(bars, ctx.entry_time, key=lambda bar: bar.start)
                 if held >= self.max_hold_bars:
                     return _signal(self.name, ctx, Direction.FLAT, f"time stop after {held} bars", None)
             exit_low = min(bar.low for bar in bars[-self.exit_bars - 1 : -1])
@@ -165,9 +169,11 @@ class MeanReversionStrategy:
 
     def evaluate(self, ctx: StrategyContext) -> Signal | None:
         bars = ctx.bars
-        if len(bars) < max(self.reference_bars, self.trend_filter_bars, self.atr_bars) + 1:
+        needed = max(self.reference_bars, self.trend_filter_bars, self.atr_bars) + 1
+        if len(bars) < needed:
             return None
-        closes = [bar.close for bar in bars]
+        # Retain the existing calculation for a negative filter window (Python slice semantics).
+        closes = [bar.close for bar in (bars[-needed:] if self.trend_filter_bars >= 0 else bars)]
         reference = sma(closes, self.reference_bars)
         assert reference is not None
         close = closes[-1]
@@ -175,7 +181,7 @@ class MeanReversionStrategy:
             if close >= reference:
                 return _signal(self.name, ctx, Direction.FLAT, f"returned to reference {reference:.2f}", None)
             if ctx.entry_time is not None:
-                held = sum(1 for bar in bars if bar.start >= ctx.entry_time)
+                held = len(bars) - bisect_left(bars, ctx.entry_time, key=lambda bar: bar.start)
                 if held >= self.max_hold_bars:
                     return _signal(self.name, ctx, Direction.FLAT, f"max holding time {held} bars", None)
             return None
