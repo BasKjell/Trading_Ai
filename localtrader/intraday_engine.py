@@ -33,9 +33,13 @@ import hashlib
 import math
 import random
 from bisect import insort
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
+from itertools import islice
 from statistics import fmean, pstdev
+from typing import overload
+from weakref import WeakSet
 from zoneinfo import ZoneInfo
 
 from .calendars import NYSE_COVERED_UNTIL, NYSE_EARLY_CLOSE, NYSE_EARLY_CLOSES
@@ -141,6 +145,47 @@ def _client_id(*parts: object) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:24]
 
 
+class _BarView(Sequence[Bar]):
+    """Read-only prefix of a history that may only be appended to while the view exists."""
+
+    __slots__ = ("_bars", "_length", "__weakref__")
+
+    def __init__(self, bars: list[Bar]) -> None:
+        self._bars = bars
+        self._length = len(bars)
+
+    def __copy__(self) -> _BarView:
+        # A second view over the same list would bypass retained-view tracking.
+        return self
+
+    def __deepcopy__(self, memo: dict[int, object]) -> _BarView:
+        return self
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __iter__(self) -> Iterator[Bar]:
+        # Keep the view alive until this iterator is exhausted or discarded.
+        yield from islice(self._bars, self._length)
+
+    @overload
+    def __getitem__(self, key: int) -> Bar: ...
+
+    @overload
+    def __getitem__(self, key: slice) -> tuple[Bar, ...]: ...
+
+    def __getitem__(self, key: int | slice) -> Bar | tuple[Bar, ...]:
+        if isinstance(key, slice):
+            start, stop, step = key.indices(self._length)
+            if step > 0:
+                return tuple(self._bars[start:stop:step])
+            return tuple(self._bars[i] for i in range(start, stop, step))
+        index = key + self._length if key < 0 else key
+        if not 0 <= index < self._length:
+            raise IndexError(key)
+        return self._bars[index]
+
+
 @dataclass(slots=True)
 class _Pending:
     signal: Signal
@@ -203,6 +248,8 @@ class IntradayEngine:
                 (max(h.received_at, h.start + timedelta(hours=1)), h) for h in resample(data.bars, 60, session.timezone)
             ]
         history: dict[str, list[Bar]] = {symbol: [] for symbol in datasets}
+        retained_views: dict[str, WeakSet[_BarView]] = {symbol: WeakSet() for symbol in datasets}
+        latest_receipt: dict[str, datetime] = {}
         # Bars not yet available to strategies, kept sorted by availability.
         inbox: list[Bar] = []
         timestamps = sorted(by_time)
@@ -276,9 +323,18 @@ class IntradayEngine:
                 symbol = bar.symbol
                 known = history[symbol]
                 newest = not known or bar.start > known[-1].start
-                insort(known, bar, key=lambda b: b.start)
+                receipt_bound = latest_receipt.get(symbol, bar.received_at)
+                latest_receipt[symbol] = max(receipt_bound, bar.received_at)
                 if newest:
+                    known.append(bar)
                     last_volume[symbol] = bar.volume
+                else:
+                    # A late insertion changes existing indices. Fork only if a strategy
+                    # still holds a view into this list.
+                    if retained_views[symbol]:
+                        known = history[symbol] = known.copy()
+                        retained_views[symbol].clear()
+                    insort(known, bar, key=lambda b: b.start)
                 if risk.deleveraging_required:
                     continue
                 if not newest:
@@ -301,7 +357,15 @@ class IntradayEngine:
                     hourly_cursor[symbol] += 1
                 if self.trade_from is not None and bar.received_at < self.trade_from:
                     continue  # warm-up history: information only, no decision
-                visible = [b for b in known if b.received_at <= bar.received_at and b.start <= bar.start]
+                # Only newest starts reach here. All processed receipts are visible unless the
+                # receipt clock moved backwards (e.g. input with mixed bar lengths).
+                visible: Sequence[Bar]
+                if receipt_bound > bar.received_at:
+                    visible = tuple(b for b in known if b.received_at <= bar.received_at)
+                else:
+                    visible = _BarView(known)
+                    retained_views[symbol].add(visible)
+                hours = hourly_seen[symbol]
                 position = portfolio.positions.get(symbol)
                 trade = open_trades.get(symbol)
                 candidates = [strategy_by_name[position.strategy]] if position else self.strategies
@@ -320,12 +384,13 @@ class IntradayEngine:
                     ctx = StrategyContext(
                         now=bar.received_at,
                         bars=visible,
-                        hourly=hourly_seen[symbol],
+                        hourly=_BarView(hours),
                         in_position=position is not None,
                         entry_time=trade.entry_time if trade else None,
                         entry_price=trade.entry_price if trade else None,
                     )
                     signal = strategy.evaluate(ctx)
+                    del ctx
                     if signal is None:
                         continue
                     pending[symbol] = _Pending(signal)
@@ -341,6 +406,8 @@ class IntradayEngine:
                         }
                     )
                     break
+                # Release the loop's own reference so only retained views trigger a copy.
+                del visible
 
         for timestamp in timestamps:
             current = by_time[timestamp]
